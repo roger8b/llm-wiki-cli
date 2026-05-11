@@ -32,6 +32,11 @@ llm-wiki page new <type> <title>
 llm-wiki page validate <path>
 llm-wiki links check
 llm-wiki log add --type <type> --message <message>
+
+# install wiki integration into an external project
+llm-wiki project init [path] [--wiki <wiki-root>] [--force]
+#   drops .claude/skills/, AGENTS.md, CLAUDE.md, GEMINI.md,
+#   .cursor/rules/llm-wiki.mdc, and .llm-wiki.json into the target project.
 ```
 
 ## Wiki root resolution

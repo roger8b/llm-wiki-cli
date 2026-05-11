@@ -1,0 +1,70 @@
+name: llm-global-wiki
+version: 0.1.0
+
+paths:
+  raw: raw
+  wiki: wiki
+  schemas: schemas
+  skills: skills
+  cache: .wiki/cache
+  reports: .wiki/reports
+  manifests: .wiki/manifests
+  temp: .wiki/temp
+
+required_files:
+  - AGENTS.md
+  - WIKI_PROTOCOL.md
+  - wiki/index.md
+  - wiki/log.md
+
+page_types:
+  - source
+  - concept
+  - entity
+  - project
+  - agent
+  - workflow
+  - decision
+  - playbook
+  - comparison
+  - synthesis
+  - open-question
+  - glossary
+  - lint-report
+
+statuses:
+  - draft
+  - reviewed
+  - canonical
+  - deprecated
+  - conflicting
+  - needs-source
+  - needs-review
+
+source_policy:
+  raw_is_immutable: true
+  require_source_for_canonical: true
+  require_source_for_reviewed: true
+  require_log_entry_for_updates: true
+
+index:
+  group_by: type
+  include_status: true
+  include_updated_at: true
+  include_summary: true
+
+lint:
+  stale_after_days: 90
+  require_frontmatter: true
+  require_sources_for_reviewed: true
+  require_sources_for_canonical: true
+  check_broken_links: true
+  check_orphans: true
+  check_duplicate_slugs: true
+
+search:
+  default_engine: ripgrep
+  future_engines:
+    - bm25
+    - vector
+    - hybrid

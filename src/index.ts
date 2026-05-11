@@ -12,6 +12,7 @@ import { ingestPrepare, ingestCommit } from "./commands/ingest.js";
 import { queryPrepare, querySave } from "./commands/query.js";
 import { logAdd } from "./commands/log.js";
 import { linksCheck } from "./commands/links.js";
+import { projectInit } from "./commands/project.js";
 
 const program = new Command();
 program
@@ -27,6 +28,21 @@ program
   .action((p, o) => initCmd(p, o));
 
 program.command("doctor").description("validate wiki structure").action(doctorCmd);
+
+const project = program
+  .command("project")
+  .description("set up an external project to use the wiki");
+project
+  .command("init [path]")
+  .description("install skills, agent rule files, and config into a project")
+  .option("--wiki <path>", "path to the wiki root (auto-detected if omitted)")
+  .option("--skills", "only install .claude/skills/")
+  .option("--agents", "only write AGENTS.md")
+  .option("--claude", "only write CLAUDE.md")
+  .option("--gemini", "only write GEMINI.md")
+  .option("--cursor", "only write .cursor/rules/llm-wiki.mdc")
+  .option("--force", "overwrite existing files")
+  .action((p, o) => projectInit(p, o));
 
 const source = program.command("source").description("manage raw sources");
 source
