@@ -153,13 +153,15 @@ async function validateRefs(
   const fgMod = await import("fast-glob");
   const files = await fgMod.default("**/*.md", { cwd: ctx.wikiDir, absolute: true });
   const slugToType = new Map<string, string>();
-  for (const f of files) {
-    if (path.basename(f) === "index.md" || path.basename(f) === "log.md") continue;
-    try {
-      const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
-      if (data.slug) slugToType.set(data.slug, data.type ?? "unknown");
-    } catch { /* ignore */ }
-  }
+  await Promise.all(
+    files.map(async (f) => {
+      if (path.basename(f) === "index.md" || path.basename(f) === "log.md") return;
+      try {
+        const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
+        if (data.slug) slugToType.set(data.slug, data.type ?? "unknown");
+      } catch { /* ignore */ }
+    })
+  );
   for (const field of ["related", "sources"] as const) {
     const refs = fm[field];
     if (!Array.isArray(refs)) continue;
@@ -263,14 +265,18 @@ export async function pageUpdate(slugInput: string, opts: { file?: string; statu
     m.default("**/*.md", { cwd: ctx.wikiDir, absolute: true }),
   );
   let target: string | undefined;
-  for (const f of files) {
-    if (path.basename(f) === "index.md" || path.basename(f) === "log.md") continue;
-    const parsed = matter(await fs.readFile(f, "utf8"));
-    if (parsed.data.slug === slug) {
-      target = f;
-      break;
-    }
-  }
+  await Promise.all(
+    files.map(async (f) => {
+      // note: we cannot reliably short-circuit Promise.all
+      if (path.basename(f) === "index.md" || path.basename(f) === "log.md") return;
+      try {
+        const parsed = matter(await fs.readFile(f, "utf8"));
+        if (parsed.data.slug === slug) {
+          target = f;
+        }
+      } catch { /* ignore */ }
+    })
+  );
   if (!target) {
     console.error(pc.red(`page not found: ${slug}`));
     console.error(pc.dim("run `wiki page list` to see available slugs"));
