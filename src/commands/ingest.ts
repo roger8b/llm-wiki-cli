@@ -180,20 +180,11 @@ export async function ingestCommit(sourcePath: string) {
     }
   }
 
-  // 7. validate every page created during this ingest (concepts, etc) that has source_hash matching
-  const ingestedPages = pages.filter((p) => p.type !== "source").filter((p) => {
-    try {
-      const raw = fs.readFileSync(p.file, "utf8");
-      const fm = matter(raw).data as Record<string, any>;
-      const sources = Array.isArray(fm.sources) ? fm.sources : [];
-      return sources.some((s: any) => typeof s === "string" && (s === sourcePage?.slug || s === rel));
-    } catch {
-      return false;
-    }
-  });
+  // 7. validate every page in the brain for ref correctness
   const allSlugs = new Set(pages.map((p) => p.slug));
-  for (const ip of ingestedPages) {
-    const raw = fs.readFileSync(ip.file, "utf8");
+  const slugToType = new Map(pages.map((p) => [p.slug, p.type]));
+  for (const p of pages) {
+    const raw = fs.readFileSync(p.file, "utf8");
     const fm = matter(raw).data as Record<string, any>;
     for (const field of ["related", "sources"] as const) {
       const refs = fm[field];
@@ -202,16 +193,37 @@ export async function ingestCommit(sourcePath: string) {
         if (typeof ref !== "string") continue;
         if (ref.includes("/") || ref.endsWith(".md")) {
           issues.push(
-            `page "${ip.slug}" ${field}[] must be slugs (not paths): "${ref}"`,
+            `page "${p.slug}" ${field}[] must be slugs (not paths): "${ref}"`,
           );
           continue;
         }
         if (!allSlugs.has(ref)) {
-          issues.push(`page "${ip.slug}" ${field}[] references unknown slug: "${ref}"`);
+          issues.push(`page "${p.slug}" ${field}[] references unknown slug: "${ref}"`);
+          continue;
+        }
+        if (field === "sources" && p.type !== "source") {
+          const refType = slugToType.get(ref);
+          if (refType !== "source") {
+            issues.push(
+              `page "${p.slug}" sources[] must reference a source page, "${ref}" is type=${refType}`,
+            );
+          }
         }
       }
     }
   }
+
+  // count pages created/updated for this ingest (those whose sources[] include the source page slug)
+  const ingestedPages = pages.filter((p) => p.type !== "source").filter((p) => {
+    try {
+      const raw = fs.readFileSync(p.file, "utf8");
+      const fm = matter(raw).data as Record<string, any>;
+      const sources = Array.isArray(fm.sources) ? fm.sources : [];
+      return sources.some((s: any) => typeof s === "string" && s === sourcePage?.slug);
+    } catch {
+      return false;
+    }
+  });
 
   // 8. log must reference the source
   const logPath = path.join(ctx.wikiDir, "log.md");
@@ -234,4 +246,34 @@ export async function ingestCommit(sourcePath: string) {
 
   await setSourceStatus(rel, "ingested");
   console.log(pc.green(`✓ ingest committed: ${rel} → status=ingested`));
+
+  // 9. git commit if the brain is a git repo
+  await maybeGitCommit(ctx.root, sourcePage, ingestedPages.length);
+}
+
+async function maybeGitCommit(
+  brainRoot: string,
+  sourcePage: { slug: string; fm: Record<string, any> } | null,
+  pagesCount: number,
+) {
+  const { execa } = await import("execa");
+  if (!fs.existsSync(path.join(brainRoot, ".git"))) {
+    return;
+  }
+  try {
+    // stage everything inside the brain
+    await execa("git", ["add", "-A"], { cwd: brainRoot });
+
+    // skip if nothing to commit
+    const { stdout } = await execa("git", ["status", "--porcelain"], { cwd: brainRoot });
+    if (!stdout.trim()) return;
+
+    const title = sourcePage?.fm.title ?? sourcePage?.slug ?? "source";
+    const summary = `ingest: ${title}`;
+    const body = `Source: ${sourcePage?.slug ?? "(unknown)"}\nPages: ${pagesCount + 1} (source + ${pagesCount} updates)`;
+    await execa("git", ["commit", "-m", summary, "-m", body], { cwd: brainRoot });
+    console.log(pc.green(`✓ git commit created`));
+  } catch (e: any) {
+    console.log(pc.yellow(`! git commit skipped: ${e.shortMessage ?? e.message ?? e}`));
+  }
 }

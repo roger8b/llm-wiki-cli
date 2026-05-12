@@ -86,4 +86,19 @@ export async function resetCmd(opts: { confirm?: boolean; yes?: boolean }) {
   );
 
   console.log(pc.green(`✓ brain reset — ${removed} file(s) removed`));
+
+  // git commit if applicable
+  if (fs.existsSync(path.join(ctx.root, ".git"))) {
+    const { execa } = await import("execa");
+    try {
+      await execa("git", ["add", "-A"], { cwd: ctx.root });
+      const { stdout } = await execa("git", ["status", "--porcelain"], { cwd: ctx.root });
+      if (stdout.trim()) {
+        await execa("git", ["commit", "-m", "reset: brain wiped to seed state"], { cwd: ctx.root });
+        console.log(pc.green(`✓ git commit created`));
+      }
+    } catch (e: any) {
+      console.log(pc.yellow(`! git commit skipped: ${e.shortMessage ?? e.message ?? e}`));
+    }
+  }
 }
