@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import { sha256, slugify, today } from "../src/utils/misc";
 import fs from "fs-extra";
 import path from "node:path";
@@ -18,9 +18,9 @@ describe("misc utils", () => {
       expect(hash).toBe("sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
     });
 
-    it("should throw an error if the file does not exist", async () => {
+    it("should reject with a missing-file error if the file does not exist", async () => {
       const nonExistentFile = path.join(tempDir, "nope.txt");
-      await expect(sha256(nonExistentFile)).rejects.toThrow();
+      await expect(sha256(nonExistentFile)).rejects.toMatchObject({ code: "ENOENT" });
     });
 
     afterAll(async () => {
@@ -49,11 +49,16 @@ describe("misc utils", () => {
 
   describe("today", () => {
     it("should return today's date in YYYY-MM-DD format", () => {
-      const date = today();
-      expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-
-      const now = new Date().toISOString().slice(0, 10);
-      expect(date).toBe(now);
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-05-12T12:00:00Z"));
+      try {
+        const date = today();
+        expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        // today() uses toISOString().slice(0, 10) which is UTC
+        expect(date).toBe("2026-05-12");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
