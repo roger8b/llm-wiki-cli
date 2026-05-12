@@ -14,6 +14,7 @@ import { logAdd } from "./commands/log.js";
 import { linksCheck } from "./commands/links.js";
 import { projectInit } from "./commands/project.js";
 import { configShow, configSetRoot, configClear } from "./commands/config.js";
+import { resetCmd } from "./commands/reset.js";
 import {
   protocolShow,
   schemaList,
@@ -56,6 +57,13 @@ config.command("set-root <path>").description("register the global brain root").
 config.command("clear").description("clear global config").action(configClear);
 
 program.command("doctor").description("validate brain structure").action(doctorCmd);
+
+program
+  .command("reset")
+  .description("wipe all sources and pages — preserves schemas, skills, config")
+  .option("--confirm", "actually do it (without this flag, prints what will be removed)")
+  .option("-y, --yes", "alias for --confirm")
+  .action(resetCmd);
 
 // ── read-only navigation (no paths needed) ───────────────────────────────────
 

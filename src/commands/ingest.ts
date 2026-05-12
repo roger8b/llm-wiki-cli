@@ -159,7 +159,61 @@ export async function ingestCommit(sourcePath: string) {
     }
   }
 
-  // 6. log must reference the source
+  // 6. related/sources on the source page must be valid slugs of existing pages
+  if (sourcePage) {
+    const allSlugs = new Set(pages.map((p) => p.slug));
+    for (const field of ["related", "sources"] as const) {
+      const refs = sourcePage.fm[field];
+      if (!Array.isArray(refs)) continue;
+      for (const ref of refs) {
+        if (typeof ref !== "string") continue;
+        if (ref.includes("/") || ref.endsWith(".md")) {
+          issues.push(
+            `source page ${field}[] must be slugs (not paths): "${ref}" — use the slug like "broker-local-pi-intercom"`,
+          );
+          continue;
+        }
+        if (!allSlugs.has(ref)) {
+          issues.push(`source page ${field}[] references unknown slug: "${ref}"`);
+        }
+      }
+    }
+  }
+
+  // 7. validate every page created during this ingest (concepts, etc) that has source_hash matching
+  const ingestedPages = pages.filter((p) => p.type !== "source").filter((p) => {
+    try {
+      const raw = fs.readFileSync(p.file, "utf8");
+      const fm = matter(raw).data as Record<string, any>;
+      const sources = Array.isArray(fm.sources) ? fm.sources : [];
+      return sources.some((s: any) => typeof s === "string" && (s === sourcePage?.slug || s === rel));
+    } catch {
+      return false;
+    }
+  });
+  const allSlugs = new Set(pages.map((p) => p.slug));
+  for (const ip of ingestedPages) {
+    const raw = fs.readFileSync(ip.file, "utf8");
+    const fm = matter(raw).data as Record<string, any>;
+    for (const field of ["related", "sources"] as const) {
+      const refs = fm[field];
+      if (!Array.isArray(refs)) continue;
+      for (const ref of refs) {
+        if (typeof ref !== "string") continue;
+        if (ref.includes("/") || ref.endsWith(".md")) {
+          issues.push(
+            `page "${ip.slug}" ${field}[] must be slugs (not paths): "${ref}"`,
+          );
+          continue;
+        }
+        if (!allSlugs.has(ref)) {
+          issues.push(`page "${ip.slug}" ${field}[] references unknown slug: "${ref}"`);
+        }
+      }
+    }
+  }
+
+  // 8. log must reference the source
   const logPath = path.join(ctx.wikiDir, "log.md");
   if (fs.existsSync(logPath)) {
     const log = await fs.readFile(logPath, "utf8");
