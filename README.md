@@ -1,51 +1,70 @@
-# llm-wiki
+# wiki
 
-CLI for the Global LLM Wiki.
+CLI for your personal AI-maintained brain — a persistent, compounding knowledge base operated by LLM agents.
 
 ## Install
 
 ```bash
-cd cli
-npm install
-npm run build
-npm link
+curl -fsSL https://raw.githubusercontent.com/your-org/wiki-cli/main/install.sh | bash
 ```
 
-`llm-wiki` is now available globally.
+The script installs the `wiki` command globally and bootstraps `~/brain` in one step.
+
+**Options:**
+
+```bash
+# custom brain location
+curl -fsSL .../install.sh | bash -s -- --brain ~/knowledge
+
+# install CLI only, skip brain creation
+curl -fsSL .../install.sh | bash -s -- --no-brain
+
+# skip git init inside the brain
+curl -fsSL .../install.sh | bash -s -- --no-git
+```
+
+**Manual install (from source):**
+
+```bash
+git clone <repo> && cd wiki-cli
+npm install && npm run build && npm link
+wiki bootstrap ~/brain --git
+```
 
 ## Mental model
 
-- **One wiki per machine.** Created once with `wiki bootstrap` and registered globally.
-- **Any project can be wired to the wiki** with `wiki init` — installs skills + agent rule files into that project so any agent (Claude Code, Codex, Cursor, Gemini) operates against the shared wiki.
-- **All operational commands** (`source add`, `ingest`, `query`, `lint`, …) work from any directory and target the registered global wiki.
+- **One brain per machine.** Created once with `wiki bootstrap` — the CLI ships everything needed, no extra repo to clone.
+- **Any project wires to the brain** with `wiki init` — interactive setup that appends wiki rules to existing agent config files and installs skills.
+- **All commands work from any directory** — the global brain is always resolved automatically.
 
 ## First-time setup
 
 ```bash
-# 1. create the single wiki on this machine
-wiki bootstrap ~/wiki --git
-#    → builds the structure and registers ~/wiki as the global wiki root
+# 1. install (brain created at ~/brain automatically)
+curl -fsSL .../install.sh | bash
 
-# 2. wire a project to use it (from inside the project directory)
+# 2. wire a project — run inside any repo
 cd ~/code/my-project
 wiki init
-#    → installs .claude/skills/, AGENTS.md, CLAUDE.md, GEMINI.md,
-#      .cursor/rules/llm-wiki.mdc, .llm-wiki.json
+#    → select which agents (Claude Code, PI, Gemini, Cursor…)
+#    → symlink or copy skills
+#    → appends wiki rules to existing CLAUDE.md / AGENTS.md / etc.
 
-# 3. from anywhere, add sources and operate on the wiki
-cd ~/anywhere
+# 3. from anywhere — add sources and let the agent ingest them
 wiki source add ./some-article.md --type article
 wiki ingest prepare raw/articles/some-article.md
+# agent reads .wiki/cache/ingest-context.md and updates brain pages
+wiki ingest commit raw/articles/some-article.md
 ```
 
 ## Commands
 
 ```bash
-# project setup (run inside a project repo)
-wiki init [path] [--wiki <wiki-root>] [--force]
-#   subset flags: --skills --agents --claude --gemini --cursor
+# project setup — interactive, run inside a project repo
+wiki init [path] [--wiki <path>] [--force] [-y]
+#   -y / --yes: non-interactive, installs claude-code with copy method
 
-# wiki creation (run once per machine)
+# brain creation (run once per machine, default: ~/brain)
 wiki bootstrap [path] [--git] [--force] [--no-register]
 
 # global config (~/.llm-wiki/config.json)
@@ -61,13 +80,13 @@ wiki source add <file> --type <type>   # article|book|document|transcript|spec|i
 wiki source list [--status <status>]
 wiki source status <source>
 
-# ingestion (read raw → integrate into wiki)
+# ingestion (raw → brain pages)
 wiki ingest prepare <source>           # writes .wiki/cache/ingest-context.md for the agent
 wiki ingest commit  <source>           # validates and flips manifest to ingested
 
-# query (answer using the wiki)
+# query
 wiki search <query> [--type <type>] [--status <status>]
-wiki query prepare <question>
+wiki query prepare <question>          # writes context file for agent to answer
 wiki query save <file> --as <type> --title <title>
 
 # maintenance
@@ -79,87 +98,82 @@ wiki links check
 wiki log add --type <type> --message <message>
 ```
 
-Both `wiki` and `llm-wiki` are valid bin names.
+## Brain root resolution
 
-## Wiki root resolution
-
-The CLI picks the wiki root in this order:
+The CLI resolves the brain in this order:
 
 1. `$LLM_WIKI_ROOT` env var
 2. `wiki_root` in `~/.llm-wiki/config.json` (set by `wiki bootstrap` or `wiki config set-root`)
 3. Walk-up search for `wiki.config.yaml` starting from the current directory
 
-This lets you run any wiki command from any directory once the global root is set.
+Once the global root is set, every command works from any directory.
 
 ## Use cases
 
-The wiki is a persistent, agent-maintained knowledge base. The CLI handles bookkeeping; an LLM agent (Claude Code, Codex, Cursor, Gemini) reads sources and writes the wiki via the installed skills.
+The brain is a persistent, agent-maintained knowledge base. The CLI handles bookkeeping; an LLM agent (Claude Code, PI, Codex, Cursor, Gemini) reads sources and writes the brain via the installed skills.
 
 ### 1. Personal knowledge base
 
 Track psychology, health, goals, self-improvement. Drop journal entries, articles, podcast notes into `raw/`; the agent files them, updates entity pages about people in your life, threads themes across entries.
 
 ```bash
-llm-wiki source add ~/journal/2026-05-11.md --type document
-llm-wiki ingest prepare raw/documents/2026-05-11.md
-# agent reads .wiki/cache/ingest-context.md and updates wiki pages
-llm-wiki ingest commit raw/documents/2026-05-11.md
+wiki source add ~/journal/2026-05-11.md --type document
+wiki ingest prepare raw/documents/2026-05-11.md
+wiki ingest commit  raw/documents/2026-05-11.md
 ```
 
 ### 2. Deep research over weeks or months
 
-Reading 30 papers on a topic. Each paper becomes a `wiki/sources/` page; recurring concepts become `wiki/concepts/`; the evolving thesis lives in `wiki/synthesis/`. Contradictions surface automatically as new papers contradict old claims.
+Reading 30 papers on a topic. Each paper becomes a `brain/sources/` page; recurring concepts become `brain/concepts/`; the evolving thesis lives in `brain/synthesis/`. Contradictions surface automatically as new papers contradict old claims.
 
 ```bash
-llm-wiki source add ./paper-12.pdf --type document
-llm-wiki ingest prepare raw/documents/paper-12.pdf
-llm-wiki query prepare "Where does this paper disagree with what we have?"
+wiki source add ./paper-12.pdf --type document
+wiki ingest prepare raw/documents/paper-12.pdf
+wiki query prepare "Where does this paper disagree with what we have?"
 ```
 
 ### 3. Companion wiki for a book
 
-Read a novel or non-fiction with a wiki growing alongside. Characters → `wiki/entities/`, themes → `wiki/concepts/`, plot threads → `wiki/synthesis/`. By chapter 30 you have your own Tolkien-Gateway-style cross-referenced companion.
+Read a novel or non-fiction with a brain growing alongside. Characters → `entities/`, themes → `concepts/`, plot threads → `synthesis/`. By chapter 30 you have your own cross-referenced companion.
 
 ```bash
-llm-wiki source add ./book/chapter-04.md --type book
-llm-wiki ingest prepare raw/books/chapter-04.md
+wiki source add ./book/chapter-04.md --type book
+wiki ingest prepare raw/books/chapter-04.md
 ```
 
 ### 4. Team / project knowledge base
 
-Slack threads, meeting transcripts, customer calls, design docs all ingested. The wiki keeps current because the LLM (not a human) does the maintenance. Decisions live under `wiki/decisions/`, playbooks under `wiki/playbooks/`, comparisons under `wiki/comparisons/`.
+Slack threads, meeting transcripts, customer calls, design docs all ingested. The brain keeps current because the LLM (not a human) does the maintenance. Decisions live under `decisions/`, playbooks under `playbooks/`, comparisons under `comparisons/`.
 
 ```bash
-llm-wiki project init ~/work/my-product --wiki ~/wiki
-# now Claude Code inside ~/work/my-product reads the wiki via .claude/skills/
-llm-wiki source add ./meetings/2026-05-11-architecture.md --type transcript
+cd ~/work/my-product && wiki init
+wiki source add ./meetings/2026-05-11-architecture.md --type transcript
 ```
 
 ### 5. Competitive analysis / due diligence
 
-Track competitors over time. Each competitor → `wiki/entities/`, each report → `wiki/sources/`, each cross-comparison → `wiki/comparisons/`. The wiki becomes the durable artifact instead of one-shot decks.
+Track competitors over time. Each competitor → `entities/`, each report → `sources/`, each cross-comparison → `comparisons/`. The brain becomes the durable artifact instead of one-shot decks.
 
 ```bash
-llm-wiki query prepare "How has Competitor X's pricing strategy evolved over the past year?"
-llm-wiki query save ./answer.md --as synthesis --title "Competitor X pricing evolution"
+wiki query prepare "How has Competitor X's pricing strategy evolved over the past year?"
+wiki query save ./answer.md --as synthesis --title "Competitor X pricing evolution"
 ```
 
 ### 6. Course notes / hobby deep-dive
 
-Lecture notes, practice problems, references, tutorials accumulate. The wiki cross-links by topic so review covers connections, not isolated pages.
+Lecture notes, practice problems, references, tutorials accumulate. The brain cross-links by topic so review covers connections, not isolated pages.
 
 ```bash
-llm-wiki source add ./lectures/week-05.md --type document
-llm-wiki search "fourier transform" --type concept
+wiki source add ./lectures/week-05.md --type document
+wiki search "fourier transform" --type concept
 ```
 
-### 7. Decision log for an organization
+### 7. Decision log
 
-Architectural choices, hiring rubrics, product principles. `wiki/decisions/` captures the *why* and the rejected alternatives. New decisions can `supersedes` old ones — the audit trail is preserved.
+Architectural choices, hiring rubrics, product principles. `decisions/` captures the *why* and the rejected alternatives. New decisions can `supersedes` old ones — the audit trail is preserved.
 
 ```bash
-llm-wiki page new decision "Adopt Postgres over MongoDB for new services"
-# agent fills out rationale, options considered, consequences
+wiki page new decision "Adopt Postgres over MongoDB for new services"
 ```
 
 ### 8. Trip / event planning
@@ -167,21 +181,19 @@ llm-wiki page new decision "Adopt Postgres over MongoDB for new services"
 Restaurants, neighborhoods, contacts, itineraries, prior trips. Cumulative across years — useful next time you go.
 
 ```bash
-llm-wiki source add ./trips/lisbon-2026.md --type document
-llm-wiki query prepare "Best ramen places in Lisbon based on what we've collected?"
+wiki source add ./trips/lisbon-2026.md --type document
+wiki query prepare "Best ramen places in Lisbon based on what we've collected?"
 ```
 
 ### Common workflow
 
-For all of these, the loop is the same:
-
-1. **Add a source** — `llm-wiki source add <file> --type <type>`
-2. **Prepare ingest** — `llm-wiki ingest prepare <raw-path>` writes a context file the agent reads
-3. **Agent updates the wiki** — using the `wiki-ingest` skill installed via `llm-wiki project init`
-4. **Commit** — `llm-wiki ingest commit <raw-path>` validates and flips status to `ingested`
-5. **Query** — `llm-wiki query prepare "<question>"` gives the agent candidate pages; agent answers grounded in the wiki
-6. **Save durable answers** — `llm-wiki query save <file> --as synthesis --title "..."` so answers compound instead of dying in chat
-7. **Lint periodically** — `llm-wiki lint` flags broken links, orphan pages, uncited claims, duplicates
+1. **Add a source** — `wiki source add <file> --type <type>`
+2. **Prepare ingest** — `wiki ingest prepare <raw-path>` writes a context file the agent reads
+3. **Agent updates the brain** — using the `wiki-ingest` skill installed via `wiki init`
+4. **Commit** — `wiki ingest commit <raw-path>` validates and flips status to `ingested`
+5. **Query** — `wiki query prepare "<question>"` gives the agent candidate pages; agent answers grounded in the brain
+6. **Save durable answers** — `wiki query save <file> --as synthesis --title "..."` so answers compound instead of dying in chat
+7. **Lint periodically** — `wiki lint` flags broken links, orphan pages, uncited claims, duplicates
 8. **Refactor when messy** — agent uses `wiki-refactor` skill to merge, split, deprecate without losing knowledge
 
 Everything is plain Markdown in a Git repo. Obsidian works as a viewer.

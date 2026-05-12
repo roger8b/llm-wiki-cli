@@ -9,7 +9,10 @@ import { readAllPages } from "./index.js";
 
 export async function ingestPrepare(sourcePath: string) {
   const ctx = loadContext();
-  const abs = path.resolve(sourcePath);
+  let abs = path.resolve(sourcePath);
+  if (!fs.existsSync(abs)) {
+    abs = path.resolve(ctx.root, sourcePath);
+  }
   if (!fs.existsSync(abs)) {
     console.error(pc.red(`source not found: ${sourcePath}`));
     process.exitCode = 1;
@@ -88,7 +91,10 @@ export async function ingestPrepare(sourcePath: string) {
 
 export async function ingestCommit(sourcePath: string) {
   const ctx = loadContext();
-  const abs = path.resolve(sourcePath);
+  let abs = path.resolve(sourcePath);
+  if (!fs.existsSync(abs)) {
+    abs = path.resolve(ctx.root, sourcePath);
+  }
   const rel = path.relative(ctx.root, abs);
   const meta = await getSourceByPath(rel);
   if (!meta) {

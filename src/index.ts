@@ -23,14 +23,10 @@ program
 
 program
   .command("init [path]")
-  .description("install skills + agent rule files into a project (default: cwd)")
+  .description("wire a project to the wiki — interactive agent setup (default: cwd)")
   .option("--wiki <path>", "wiki root (uses global config / $LLM_WIKI_ROOT otherwise)")
-  .option("--skills", "only install .claude/skills/")
-  .option("--agents", "only write AGENTS.md")
-  .option("--claude", "only write CLAUDE.md")
-  .option("--gemini", "only write GEMINI.md")
-  .option("--cursor", "only write .cursor/rules/llm-wiki.mdc")
-  .option("--force", "overwrite existing files")
+  .option("--force", "overwrite / re-append even if wiki section already present")
+  .option("-y, --yes", "non-interactive: install claude-code with copy method")
   .action((p, o) => projectInit(p, o));
 
 program
