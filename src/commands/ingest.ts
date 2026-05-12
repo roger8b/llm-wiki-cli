@@ -104,27 +104,68 @@ export async function ingestCommit(sourcePath: string) {
   }
 
   const issues: string[] = [];
+  const matter = (await import("gray-matter")).default;
+  const { validatePage } = await import("./page.js");
 
+  // 1. raw source hash must be unchanged
   const currentHash = await sha256(abs);
   if (currentHash !== meta.hash) {
-    issues.push(`raw source hash changed (was immutable): ${rel}`);
+    issues.push(`raw source hash changed (sources are immutable): ${rel}`);
   }
 
+  // 2. find the source page that references this raw path
   const pages = await readAllPages(ctx);
   const sourcePages = pages.filter((p) => p.type === "source");
-  const slug = path.parse(abs).name.toLowerCase();
-  const sourcePage = sourcePages.find(
-    (p) => p.rel.includes(slug) || p.slug.includes(slug),
-  );
-  if (!sourcePage) {
-    issues.push("no matching source summary page found under wiki/sources/");
+  let sourcePage = null;
+  for (const sp of sourcePages) {
+    const raw = await fs.readFile(sp.file, "utf8");
+    const fm = matter(raw).data as Record<string, any>;
+    if (fm.raw_path === rel) {
+      sourcePage = { ...sp, fm };
+      break;
+    }
   }
 
+  if (!sourcePage) {
+    issues.push(
+      `no source page has raw_path = "${rel}" — create one with \`wiki page save --type source\``,
+    );
+  } else {
+    // 3. validate source page frontmatter via wiki page validate
+    const validation = await validatePage(sourcePage.file);
+    for (const v of validation) {
+      if (v.level === "error") {
+        issues.push(`source page invalid: ${v.message}`);
+      }
+    }
+
+    // 4. source_hash on the page must match the manifest hash
+    if (!sourcePage.fm.source_hash) {
+      issues.push(`source page missing source_hash field`);
+    } else if (sourcePage.fm.source_hash !== meta.hash) {
+      issues.push(
+        `source page source_hash does not match manifest:\n      page:     ${sourcePage.fm.source_hash}\n      manifest: ${meta.hash}`,
+      );
+    }
+
+    // 5. date fields must be YYYY-MM-DD strings (not ISO datetimes or Date objects)
+    for (const field of ["created_at", "updated_at"]) {
+      const val = sourcePage.fm[field];
+      if (val instanceof Date || (typeof val === "string" && /T\d{2}:/.test(val))) {
+        issues.push(
+          `source page ${field} must be YYYY-MM-DD string, got: ${val instanceof Date ? val.toISOString() : val}`,
+        );
+      }
+    }
+  }
+
+  // 6. log must reference the source
   const logPath = path.join(ctx.wikiDir, "log.md");
   if (fs.existsSync(logPath)) {
     const log = await fs.readFile(logPath, "utf8");
+    const slug = path.parse(abs).name.toLowerCase();
     if (!log.includes(rel) && !log.includes(slug)) {
-      issues.push("no log entry references this ingest");
+      issues.push(`no log entry references this ingest — append one with \`wiki log add\``);
     }
   } else {
     issues.push("wiki/log.md missing");
@@ -132,7 +173,7 @@ export async function ingestCommit(sourcePath: string) {
 
   if (issues.length > 0) {
     for (const i of issues) console.log(pc.red("✗ ") + i);
-    console.log(pc.red("\ningest commit failed."));
+    console.log(pc.red(`\ningest commit failed (${issues.length} issue${issues.length === 1 ? "" : "s"}).`));
     process.exitCode = 1;
     return;
   }

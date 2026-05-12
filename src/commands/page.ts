@@ -174,7 +174,7 @@ export async function pageSave(opts: {
     title: opts.title,
     slug,
     status: opts.status ?? existingFm.status ?? "draft",
-    created_at: existingFm.created_at ?? today(),
+    created_at: normalizeDate(existingFm.created_at) ?? today(),
     updated_at: today(),
     sources: opts.sources ?? existingFm.sources ?? [],
     related: opts.related ?? existingFm.related ?? [],
@@ -185,6 +185,16 @@ export async function pageSave(opts: {
   if (existingFm.source_hash) fm.source_hash = existingFm.source_hash;
   await fs.writeFile(dest, matter.stringify(body.trimStart(), fm));
   console.log(pc.green(`✓ saved: ${opts.type}/${slug}`));
+}
+
+function normalizeDate(v: any): string | undefined {
+  if (v == null) return undefined;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "string") {
+    const m = v.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
+  return undefined;
 }
 
 export async function pageUpdate(slug: string, opts: { file?: string; status?: string }) {
@@ -217,12 +227,16 @@ export async function pageUpdate(slug: string, opts: { file?: string; status?: s
       body = parsed.content;
     }
   } catch { /* ignore */ }
-  const fm = {
+  // preserve existing body if incoming body is empty (frontmatter-only patch)
+  if (!body.trim()) body = existing.content;
+  const merged: Record<string, any> = {
     ...existing.data,
     ...incomingFm,
     updated_at: today(),
     ...(opts.status ? { status: opts.status } : {}),
   };
+  if (merged.created_at) merged.created_at = normalizeDate(merged.created_at) ?? today();
+  const fm = merged;
   await fs.writeFile(target, matter.stringify(body.trimStart(), fm));
   console.log(pc.green(`✓ updated: ${slug}`));
 }
