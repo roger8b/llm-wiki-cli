@@ -1,88 +1,104 @@
 ---
 name: wiki-ingest
-description: Incorporate a new raw source — article, paper, transcript, doc, spec — into the user's Global LLM Wiki. Use this skill whenever the user adds a file under `raw/`, says "ingest this", drops a link or PDF they want preserved, or runs `llm-wiki ingest prepare`. Use it even when the user only asks for a summary of a new document, because the wiki pattern is to integrate every new source into existing pages (concepts, decisions, comparisons) rather than dump a one-off summary into chat.
+description: Incorporate a new raw source into the brain. Use this skill whenever the user wants to add a document, article, transcript, PDF, or any file to the wiki — even if they just say "add this to the wiki", "ingest this", "save this to the brain", or give you a file path. The skill must run before creating any wiki pages. Trigger it even when the user only asks for a summary, because the wiki pattern is to integrate knowledge into existing pages, not dump one-off summaries into chat.
 ---
 
 # Wiki Ingest
 
 ## Mission
 
-Ingestion is not summarization. The goal is to weave the source into the wiki: create a source page, update related concept pages, surface contradictions with prior knowledge, and leave the index and log accurate. A good ingest is judged later, when someone asks a question and the answer falls out of the wiki cleanly.
+Ingestion is not summarization. The goal is to weave the source into the brain: create a source page, update related concept pages, surface contradictions with prior knowledge, and leave the index and log accurate.
 
-## Inputs
+## STOP — CLI first, always
 
-Required:
+**Do not create, edit, or write any wiki file until steps 1 and 2 below are complete.**
 
-- A source path under `raw/` (e.g., `raw/articles/foo.md`).
+This is not optional. The CLI registers the source in the manifest and generates the ingest context. Skipping it leaves the source orphaned — invisible to `wiki source list`, `wiki lint`, and `wiki ingest commit`.
 
-Optional but useful:
+## Step 1 — Register the source
 
-- source type (`article`, `book`, `transcript`, `document`, `spec`, `image`, `external`);
-- target domain or emphasis from the user;
-- related pages the user already knows about.
+If the file is not already under `raw/`, run:
 
-If you ran `llm-wiki ingest prepare <source>`, read `.wiki/cache/ingest-context.md` — it gives you the hash, candidate related pages, and the checklist already.
+```bash
+wiki source add <absolute-path-to-file> --type <type>
+```
 
-## Workflow
+Types: `article`, `book`, `document`, `transcript`, `spec`, `image`, `external`.
 
-### 1. Read the protocol
+This copies the file into the brain's `raw/<type>/` directory and records it in the manifest.
 
-Read `WIKI_PROTOCOL.md`, `wiki/index.md`, and these schemas: `schemas/source.schema.md`, `schemas/concept.schema.md`, plus any others matching what you find.
+## Step 2 — Prepare the ingest context
 
-### 2. Read the source carefully
+```bash
+wiki ingest prepare raw/<type>/<filename>
+```
 
-Extract: core claims, named concepts, entities, decisions implied, workflows described, methods proposed, contradictions with prior pages, open questions, reusable definitions.
+This writes `.wiki/cache/ingest-context.md`. Read that file — it gives you the hash, the raw path, the source status, and candidate related pages.
 
-### 3. Find affected pages
+## Step 3 — Read protocol and schemas
 
-Use `wiki/index.md` and grep/search across `wiki/` for the concepts and entities you extracted. Common landing spots: `wiki/sources/`, `wiki/concepts/`, `wiki/entities/`, `wiki/decisions/`, `wiki/synthesis/`, `wiki/comparisons/`.
+Read:
+- `WIKI_PROTOCOL.md`
+- `wiki/index.md`
+- `schemas/source.schema.md`
+- `schemas/concept.schema.md`
+- Any other schemas matching what you find in the source
 
-### 4. Create the source summary
+## Step 4 — Read the source
 
-Create one page under `wiki/sources/<slug>.md` using `schemas/source.schema.md`. Set `raw_path` to the source path, fill `source_hash`, and complete every section. The source page is your audit trail — if a future reader doubts a claim elsewhere, they come here.
+Extract: core claims, named concepts, entities, decisions implied, workflows described, methods, contradictions with prior pages, open questions.
 
-### 5. Update existing pages
+## Step 5 — Find affected pages
 
-For each affected page: add the new evidence, update outdated claims, add cross-links to the source page and to other related pages, flag contradictions inline ("**Conflict:** this contradicts `wiki/decisions/x.md`"), preserve still-valid prior context. Do not overwrite reviewed/canonical material silently.
+Search `wiki/` for the concepts and entities you extracted. Common landing spots: `wiki/sources/`, `wiki/concepts/`, `wiki/entities/`, `wiki/decisions/`, `wiki/synthesis/`, `wiki/comparisons/`.
 
-### 6. Create new pages only when the concept is durable
+## Step 6 — Create the source summary page
 
-A new concept page is justified when the idea is likely to be referenced again, has a clear definition, and would not fit as a section of an existing page. Trivial mentions go inline, not into new files.
+Create `wiki/sources/<slug>.md` using `schemas/source.schema.md`. Set `raw_path` to the path from step 1 (must be under `raw/`). Copy the `source_hash` from `.wiki/cache/ingest-context.md`. Complete every section — this is the audit trail.
 
-### 7. Update the index
+## Step 7 — Update existing pages
 
-Add new pages and refresh modified ones in `wiki/index.md`. Group by type. Include status and `updated_at`. Or just run `llm-wiki index rebuild` afterward.
+For each affected page: add new evidence, update outdated claims, add cross-links, flag contradictions inline (`**Conflict:** this contradicts wiki/decisions/x.md`). Do not silently overwrite reviewed or canonical material.
 
-### 8. Append the log
+## Step 8 — Create new pages only for durable concepts
 
-Add an entry to `wiki/log.md`:
+A new concept page is justified when the idea will likely be referenced again and has a clear definition. Trivial mentions go inline.
+
+## Step 9 — Update index and log
+
+- Update `wiki/index.md` with new and modified pages, or run `wiki index rebuild`
+- Append to `wiki/log.md`:
 
 ```
 ## [YYYY-MM-DD] ingest | <source title>
-- source: <raw path>
+- source: raw/<type>/<filename>
 - pages created: ...
 - pages updated: ...
 - contradictions: ...
 - open questions: ...
 ```
 
-### 9. Validate
+## Step 10 — Commit
 
-Run `llm-wiki ingest commit <source>` to flip the manifest status to `ingested` and check the source summary, log, and hash.
+```bash
+wiki ingest commit raw/<type>/<filename>
+```
+
+This validates the source page, log entry, and hash — then flips the manifest status to `ingested`. Fix any errors it reports before finishing.
 
 ## Guardrails
 
-- Never edit files in `raw/`. The hash must stay stable for citations to remain meaningful.
-- Default new synthesized pages to `status: draft`. Only the user promotes pages to `reviewed` or `canonical`.
-- Never hide contradictions — even small ones. The wiki's main value over RAG is that conflicts are flagged, not averaged away.
-- Trace every claim. If you write something in a page, the source page or a `raw/` file must back it.
+- Never edit files under `raw/`. The hash must stay stable for citations to remain meaningful.
+- `raw_path` in source page frontmatter must be a `raw/` path — never an external path.
+- `source_hash` must be filled from the ingest context, never left empty.
+- Default new synthesized pages to `status: draft`. Only the user promotes to `reviewed` or `canonical`.
+- Never hide contradictions — even small ones. Conflicts flagged, not averaged away.
 
 ## Done criteria
 
-- `wiki/sources/<slug>.md` exists with valid frontmatter and complete sections.
-- Affected pages updated with cross-links.
-- New pages, if any, have valid frontmatter.
-- `wiki/index.md` reflects the changes.
-- `wiki/log.md` has the ingest entry.
-- Contradictions are explicit.
-- The raw source file is byte-for-byte unchanged.
+- `wiki source add` and `wiki ingest prepare` were run before any file was written
+- `wiki/sources/<slug>.md` exists with valid frontmatter, populated `raw_path` and `source_hash`
+- Affected pages updated with cross-links
+- `wiki/index.md` reflects changes
+- `wiki/log.md` has the ingest entry
+- `wiki ingest commit` passed without errors
