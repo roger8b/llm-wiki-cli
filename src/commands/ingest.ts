@@ -271,7 +271,8 @@ async function maybeGitCommit(
     const title = sourcePage?.fm.title ?? sourcePage?.slug ?? "source";
     const summary = `ingest: ${title}`;
     const body = `Source: ${sourcePage?.slug ?? "(unknown)"}\nPages: ${pagesCount + 1} (source + ${pagesCount} updates)`;
-    await execa("git", ["commit", "-m", summary, "-m", body], { cwd: brainRoot });
+    const message = `${summary}\n\n${body}`;
+    await execa("git", ["commit", "-F", "-"], { cwd: brainRoot, input: message });
     console.log(pc.green(`✓ git commit created`));
   } catch (e: any) {
     console.log(pc.yellow(`! git commit skipped: ${e.shortMessage ?? e.message ?? e}`));
