@@ -134,6 +134,58 @@ async function readInput(file?: string): Promise<string> {
   });
 }
 
+// strip "type/" prefix and ".md" suffix so the agent can use either form
+export function normalizeSlugInput(input: string): string {
+  let s = input.trim();
+  if (s.endsWith(".md")) s = s.slice(0, -3);
+  const slashIdx = s.indexOf("/");
+  if (slashIdx > -1) s = s.slice(slashIdx + 1);
+  return s;
+}
+
+// validate refs against the brain — used upstream in save/update
+async function validateRefs(
+  ctx: ReturnType<typeof loadContext> extends Promise<infer T> ? T : any,
+  pageType: string,
+  fm: Record<string, any>,
+): Promise<string[]> {
+  const errs: string[] = [];
+  const fgMod = await import("fast-glob");
+  const files = await fgMod.default("**/*.md", { cwd: ctx.wikiDir, absolute: true });
+  const slugToType = new Map<string, string>();
+  for (const f of files) {
+    if (path.basename(f) === "index.md" || path.basename(f) === "log.md") continue;
+    try {
+      const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
+      if (data.slug) slugToType.set(data.slug, data.type ?? "unknown");
+    } catch { /* ignore */ }
+  }
+  for (const field of ["related", "sources"] as const) {
+    const refs = fm[field];
+    if (!Array.isArray(refs)) continue;
+    for (const ref of refs) {
+      if (typeof ref !== "string") continue;
+      if (ref.includes("/") || ref.endsWith(".md")) {
+        errs.push(`${field}[] must be a bare slug (no "/" or ".md"): "${ref}"`);
+        continue;
+      }
+      if (ref === fm.slug) {
+        errs.push(`${field}[] cannot reference the page itself: "${ref}"`);
+        continue;
+      }
+      const refType = slugToType.get(ref);
+      if (!refType) {
+        errs.push(`${field}[] references unknown slug: "${ref}" — run \`wiki page list\` to see valid slugs`);
+        continue;
+      }
+      if (field === "sources" && pageType !== "source" && refType !== "source") {
+        errs.push(`sources[] must reference a type=source page; "${ref}" is type=${refType}`);
+      }
+    }
+  }
+  return errs;
+}
+
 export async function pageSave(opts: {
   type: string;
   title: string;
@@ -183,6 +235,13 @@ export async function pageSave(opts: {
   if (existingFm.confidence) fm.confidence = existingFm.confidence;
   if (existingFm.raw_path) fm.raw_path = existingFm.raw_path;
   if (existingFm.source_hash) fm.source_hash = existingFm.source_hash;
+  const errs = await validateRefs(ctx, opts.type, fm);
+  if (errs.length > 0) {
+    for (const e of errs) console.error(pc.red("✗ ") + e);
+    console.error(pc.red(`\npage save failed (${errs.length} ref error${errs.length === 1 ? "" : "s"}). Fix and re-run.`));
+    process.exitCode = 1;
+    return;
+  }
   await fs.writeFile(dest, matter.stringify(body.trimStart(), fm));
   console.log(pc.green(`✓ saved: ${opts.type}/${slug}`));
 }
@@ -197,8 +256,9 @@ function normalizeDate(v: any): string | undefined {
   return undefined;
 }
 
-export async function pageUpdate(slug: string, opts: { file?: string; status?: string }) {
+export async function pageUpdate(slugInput: string, opts: { file?: string; status?: string }) {
   const ctx = loadContext();
+  const slug = normalizeSlugInput(slugInput);
   const files = await import("fast-glob").then((m) =>
     m.default("**/*.md", { cwd: ctx.wikiDir, absolute: true }),
   );
@@ -213,6 +273,7 @@ export async function pageUpdate(slug: string, opts: { file?: string; status?: s
   }
   if (!target) {
     console.error(pc.red(`page not found: ${slug}`));
+    console.error(pc.dim("run `wiki page list` to see available slugs"));
     process.exitCode = 1;
     return;
   }
@@ -237,6 +298,13 @@ export async function pageUpdate(slug: string, opts: { file?: string; status?: s
   };
   if (merged.created_at) merged.created_at = normalizeDate(merged.created_at) ?? today();
   const fm = merged;
+  const errs = await validateRefs(ctx, fm.type ?? "concept", fm);
+  if (errs.length > 0) {
+    for (const e of errs) console.error(pc.red("✗ ") + e);
+    console.error(pc.red(`\npage update failed (${errs.length} ref error${errs.length === 1 ? "" : "s"}). Fix and re-run.`));
+    process.exitCode = 1;
+    return;
+  }
   await fs.writeFile(target, matter.stringify(body.trimStart(), fm));
   console.log(pc.green(`✓ updated: ${slug}`));
 }

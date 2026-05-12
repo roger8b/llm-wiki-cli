@@ -84,9 +84,11 @@ The user maintains a persistent knowledge base — "the brain". You interact wit
 
 **Skills:** \`${skillsDir}/wiki-*/SKILL.md\` — load them when their triggers apply.
 
-## The only rule
+## Three hard rules
 
-**Never read or write files inside the brain directly.** Every operation has a CLI command. If you don't know which, run \`wiki --help\`.
+1. **Never read or write files inside the brain directly.** Every operation has a CLI command. If you don't know which, run \`wiki --help\`.
+2. **Always maintain a todo list in working memory** when running a wiki workflow (use TodoWrite or your platform's in-memory todo tool). **Never persist the todo list as a file.** Multi-step wiki workflows lose track without one.
+3. **Compose page content in memory and pipe via stdin (heredoc).** **Never write a temp file under \`/tmp/\`** to pass content to \`wiki page save\` / \`wiki page update\`.
 
 | To … | Use … |
 |------|-------|
@@ -101,9 +103,9 @@ The user maintains a persistent knowledge base — "the brain". You interact wit
 | Prepare ingest context | \`wiki ingest prepare <raw-path>\` |
 | Read ingest context | \`wiki ingest context\` |
 | Commit an ingest | \`wiki ingest commit <raw-path>\` |
-| Save a new page | \`wiki page save --type X --title "Y" --file <tmp-file>\` |
-| Update an existing page | \`wiki page update <slug> --file <tmp-file>\` |
-| Save a query answer | \`wiki query save <tmp-file> --as <type> --title "Y"\` |
+| Save a new page (stdin) | \`cat <<'EOF' \| wiki page save --type X --title "Y" ... EOF\` |
+| Update an existing page (stdin) | \`cat <<'EOF' \| wiki page update <bare-slug> ... EOF\` |
+| Save a query answer (stdin) | \`cat <<'EOF' \| wiki page save --type synthesis --title "Y" ... EOF\` |
 | Rebuild the index | \`wiki index rebuild\` |
 | Append a log entry | \`wiki log add --type X --message "..."\` |
 | Lint / check links / doctor | \`wiki lint\` / \`wiki links check\` / \`wiki doctor\` |

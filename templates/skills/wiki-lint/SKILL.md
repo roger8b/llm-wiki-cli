@@ -5,6 +5,10 @@ description: Audit the brain for structural and knowledge-quality issues — mis
 
 # Brain — Lint
 
+## Step 0 — Maintain a todo list (in working memory, not as a file)
+
+Use TodoWrite or your platform's in-memory todo equivalent.
+
 ## Mission
 
 Linting protects the brain's reliability over time. The structural parts (frontmatter, links, orphans) are mechanical and the CLI handles them. The valuable part is judgment: which concepts are duplicates, which pages contradict, which `reviewed` claims actually lack evidence, which sources are stale.
@@ -77,12 +81,27 @@ Look for: conflicting definitions, decisions that disagree on scope, source page
 
 ### 7. Produce a health report
 
-Compose the report as a synthesis page (group findings by severity: critical, error, warning, info):
+Compose in memory, pipe via stdin (no `/tmp/` file):
 
 ```bash
-wiki page save --type synthesis \
-  --title "Brain health report — YYYY-MM-DD" \
-  --file /tmp/lint-report.md
+cat <<'EOF' | wiki page save --type synthesis --title "Brain health report — YYYY-MM-DD"
+---
+status: draft
+related: []
+tags: [health, lint]
+---
+
+# Brain health report — YYYY-MM-DD
+
+## Critical
+...
+## Errors
+...
+## Warnings
+...
+## Info
+...
+EOF
 ```
 
 For each finding include: affected slugs, what's wrong, suggested fix. Concrete is better than abstract.

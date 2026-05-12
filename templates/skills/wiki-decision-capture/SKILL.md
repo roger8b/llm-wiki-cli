@@ -5,6 +5,10 @@ description: Persist decisions the user makes during conversation as durable dec
 
 # Brain — Decision Capture
 
+## Step 0 — Maintain a todo list (in working memory)
+
+Use TodoWrite (or your platform's equivalent in-memory todo) — never write the list as a file.
+
 ## Mission
 
 A decision page is not a summary of a debate. It records: what was decided, why, what alternatives were rejected and on what grounds, and what consequences follow. Future readers consult it instead of re-litigating. If you ingest a great article and update concept pages but skip writing the decisions that came from the discussion, the most valuable output of the session is the part you didn't save.
@@ -59,26 +63,54 @@ Fill every section. Defaults to `status: draft` — the user promotes to `review
 
 ### 5. Save the page
 
+Compose in memory, pipe via stdin — **no `/tmp/` files**:
+
 ```bash
-wiki page save --type decision \
-  --title "<title>" \
-  --file /tmp/decision.md
+cat <<'EOF' | wiki page save --type decision --title "<title>"
+---
+status: draft
+sources: [<bare slugs of evidence sources>]
+related: [<bare slugs of affected pages>]
+supersedes: [<bare slug of decision being replaced, or omit>]
+tags: [...]
+---
+
+# <title>
+
+## Decision
+...
+## Context
+...
+## Options considered
+...
+(rest of schema sections)
+EOF
 ```
+
+The CLI validates `sources[]` and `related[]` against existing slugs at save time.
 
 ### 6. Mark supersession (if applicable)
 
-If this decision supersedes another, set `supersedes` in your saved page's frontmatter, and update the old page:
+If this decision supersedes another, the `supersedes` field in step 5 handles the forward link. Now deprecate the old page:
 
 ```bash
-wiki page update <old-slug> --status deprecated --file /tmp/old-with-superseded-by.md
+cat <<'EOF' | wiki page update <old-slug> --status deprecated
+---
+superseded_by: <new-slug>
+---
+EOF
 ```
 
 ### 7. Cross-link affected pages
 
-For every page this decision affects, update it to reference the new decision (`**Decision:** see decision <slug>`):
+For every page this decision affects (use bare slugs only):
 
 ```bash
-wiki page update <affected-slug> --file /tmp/updated.md
+cat <<'EOF' | wiki page update <affected-slug>
+---
+related: [<existing related slugs>, <new-decision-slug>]
+---
+EOF
 ```
 
 ### 8. Refresh index and log

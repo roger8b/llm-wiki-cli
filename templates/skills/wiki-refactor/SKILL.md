@@ -5,6 +5,10 @@ description: Restructure the brain without losing knowledge — merge duplicated
 
 # Brain — Refactor
 
+## Step 0 — Maintain a todo list (in working memory, not as a file)
+
+Use TodoWrite or your platform's in-memory todo equivalent.
+
 ## Mission
 
 The brain is a living codebase. Concepts split, merge, rename, and decay. The whole point of treating it like code is that refactors are safe — backlinks update, history is preserved, deprecations leave breadcrumbs.
@@ -54,35 +58,72 @@ Write a short plan listing pages to create, update, deprecate, and links to rewr
 
 ### 4. Apply the changes via CLI
 
+Always pipe content via stdin (heredoc) — **never write to `/tmp/`**.
+
 **Merge:**
 ```bash
-# move unique content into the survivor
-wiki page update <survivor-slug> --file /tmp/merged.md
+cat <<'EOF' | wiki page update <survivor-slug>
+---
+related: [<merged related slugs>]
+---
 
-# leave the absorbed page as a deprecated stub pointing to the survivor
-wiki page update <absorbed-slug> --status deprecated --file /tmp/stub.md
+# Survivor Title
+
+(merged body)
+EOF
+
+cat <<'EOF' | wiki page update <absorbed-slug> --status deprecated
+---
+superseded_by: <survivor-slug>
+---
+
+# (deprecated) — see <survivor-slug>
+EOF
 ```
 
 **Split:**
 ```bash
-wiki page save --type <type> --title "<new title>" --file /tmp/new-page.md
+cat <<'EOF' | wiki page save --type <type> --title "<new title>"
+---
+sources: [...]
+related: [<original-slug>]
+---
 
-# update the original to contain only an index + see-pointers
-wiki page update <original-slug> --file /tmp/index-pointer.md
+# New Title
+
+(extracted body)
+EOF
 ```
 
 **Rename:**
 ```bash
-# create new page (use the new title)
-wiki page save --type <type> --title "<new title>" --file /tmp/content.md
+cat <<'EOF' | wiki page save --type <type> --title "<new title>"
+---
+supersedes: [<old-slug>]
+---
 
-# deprecate the old slug with a superseded_by pointer
-wiki page update <old-slug> --status deprecated --file /tmp/stub.md
+# New Title
+
+(body)
+EOF
+
+cat <<'EOF' | wiki page update <old-slug> --status deprecated
+---
+superseded_by: <new-slug>
+---
+EOF
 ```
 
 **Deprecate:**
 ```bash
-wiki page update <slug> --status deprecated --file /tmp/with-deprecation-note.md
+cat <<'EOF' | wiki page update <slug> --status deprecated
+---
+---
+
+# (deprecated) — see <replacement-slug>
+
+(short deprecation note)
+EOF
 ```
 
 **Schema evolution:** migrate one page at a time. After each:

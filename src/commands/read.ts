@@ -48,6 +48,14 @@ export async function schemaShow(type: string) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
+function normalizeSlugInput(input: string): string {
+  let s = input.trim();
+  if (s.endsWith(".md")) s = s.slice(0, -3);
+  const slashIdx = s.indexOf("/");
+  if (slashIdx > -1) s = s.slice(slashIdx + 1);
+  return s;
+}
+
 export async function pageList(opts: { type?: string; status?: string }) {
   const ctx = loadContext();
   const pages = await readAllPages(ctx);
@@ -56,12 +64,15 @@ export async function pageList(opts: { type?: string; status?: string }) {
   if (opts.status) rows = rows.filter((p) => p.status === opts.status);
   if (rows.length === 0) {
     console.log(pc.dim("(no pages match)"));
+    console.log(pc.dim("note: slug is bare (no 'type/' prefix). Use slug directly with `wiki page show <slug>`."));
     return;
   }
   rows.sort((a, b) => a.type.localeCompare(b.type) || a.title.localeCompare(b.title));
+  console.log(pc.dim(`# slug is the bare identifier — use it with \`wiki page show <slug>\` and \`wiki page update <slug>\``));
+  console.log(pc.dim(`# columns: TYPE  STATUS  SLUG  TITLE`));
   for (const p of rows) {
     console.log(
-      `${pc.bold(p.type.padEnd(15))} ${p.status.padEnd(10)} ${p.slug.padEnd(40)} ${p.title}`,
+      `[${p.type}]  ${p.status.padEnd(10)} slug=${pc.cyan(p.slug)}  "${p.title}"`,
     );
   }
 }
@@ -69,14 +80,15 @@ export async function pageList(opts: { type?: string; status?: string }) {
 export async function pageShow(target: string) {
   const ctx = loadContext();
   const pages = await readAllPages(ctx);
-  // try slug match first, then path match, then partial slug
+  const slug = normalizeSlugInput(target);
   let match =
+    pages.find((p) => p.slug === slug) ||
     pages.find((p) => p.slug === target) ||
     pages.find((p) => p.rel === target || p.rel.endsWith(target)) ||
-    pages.find((p) => p.slug.includes(target));
+    pages.find((p) => p.slug.includes(slug));
   if (!match) {
     console.error(pc.red(`page not found: ${target}`));
-    console.error(pc.dim("run `wiki page list` to see available pages"));
+    console.error(pc.dim("run `wiki page list` to see available slugs"));
     process.exitCode = 1;
     return;
   }
