@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "fs-extra";
 import pc from "picocolors";
-import { checkbox, select, confirm } from "@inquirer/prompts";
+import { checkbox, select } from "@inquirer/prompts";
 import { templatesDir } from "../utils/templates-dir.js";
 import { findWikiRoot } from "../utils/paths.js";
 
