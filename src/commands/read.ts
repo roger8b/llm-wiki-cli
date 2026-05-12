@@ -36,7 +36,17 @@ export async function schemaList() {
 
 export async function schemaShow(type: string) {
   const ctx = loadContext();
+  if (type.includes("/") || type.includes("\\") || type === "..") {
+    console.error(pc.red(`invalid schema type: ${type}`));
+    process.exitCode = 1;
+    return;
+  }
   const file = path.join(ctx.schemasDir, `${type}.schema.md`);
+  if (!file.startsWith(ctx.schemasDir)) {
+    console.error(pc.red(`schema access denied`));
+    process.exitCode = 1;
+    return;
+  }
   if (!fs.existsSync(file)) {
     console.error(pc.red(`schema not found: ${type}`));
     console.error(pc.dim("run `wiki schema list` to see available types"));
