@@ -4,7 +4,8 @@
   "description": "CLI for the Global LLM Wiki — init, ingest, query, lint, index.",
   "type": "module",
   "bin": {
-    "llm-wiki": "./dist/index.js"
+    "llm-wiki": "./dist/index.js",
+    "wiki": "./dist/index.js"
   },
   "files": [
     "dist",

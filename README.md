@@ -13,35 +13,83 @@ npm link
 
 `llm-wiki` is now available globally.
 
+## Mental model
+
+- **One wiki per machine.** Created once with `wiki bootstrap` and registered globally.
+- **Any project can be wired to the wiki** with `wiki init` — installs skills + agent rule files into that project so any agent (Claude Code, Codex, Cursor, Gemini) operates against the shared wiki.
+- **All operational commands** (`source add`, `ingest`, `query`, `lint`, …) work from any directory and target the registered global wiki.
+
+## First-time setup
+
+```bash
+# 1. create the single wiki on this machine
+wiki bootstrap ~/wiki --git
+#    → builds the structure and registers ~/wiki as the global wiki root
+
+# 2. wire a project to use it (from inside the project directory)
+cd ~/code/my-project
+wiki init
+#    → installs .claude/skills/, AGENTS.md, CLAUDE.md, GEMINI.md,
+#      .cursor/rules/llm-wiki.mdc, .llm-wiki.json
+
+# 3. from anywhere, add sources and operate on the wiki
+cd ~/anywhere
+wiki source add ./some-article.md --type article
+wiki ingest prepare raw/articles/some-article.md
+```
+
 ## Commands
 
 ```bash
-llm-wiki init [path] [--git] [--force]
-llm-wiki doctor
-llm-wiki source add <file> --type <type>
-llm-wiki source list [--status <status>]
-llm-wiki source status <source>
-llm-wiki ingest prepare <source>
-llm-wiki ingest commit <source>
-llm-wiki search <query>
-llm-wiki query prepare <question>
-llm-wiki query save <file> --as <type> --title <title>
-llm-wiki index rebuild
-llm-wiki lint
-llm-wiki page new <type> <title>
-llm-wiki page validate <path>
-llm-wiki links check
-llm-wiki log add --type <type> --message <message>
+# project setup (run inside a project repo)
+wiki init [path] [--wiki <wiki-root>] [--force]
+#   subset flags: --skills --agents --claude --gemini --cursor
 
-# install wiki integration into an external project
-llm-wiki project init [path] [--wiki <wiki-root>] [--force]
-#   drops .claude/skills/, AGENTS.md, CLAUDE.md, GEMINI.md,
-#   .cursor/rules/llm-wiki.mdc, and .llm-wiki.json into the target project.
+# wiki creation (run once per machine)
+wiki bootstrap [path] [--git] [--force] [--no-register]
+
+# global config (~/.llm-wiki/config.json)
+wiki config show
+wiki config set-root <path>
+wiki config clear
+
+# health & introspection
+wiki doctor
+
+# sources (work from any directory)
+wiki source add <file> --type <type>   # article|book|document|transcript|spec|image|external
+wiki source list [--status <status>]
+wiki source status <source>
+
+# ingestion (read raw → integrate into wiki)
+wiki ingest prepare <source>           # writes .wiki/cache/ingest-context.md for the agent
+wiki ingest commit  <source>           # validates and flips manifest to ingested
+
+# query (answer using the wiki)
+wiki search <query> [--type <type>] [--status <status>]
+wiki query prepare <question>
+wiki query save <file> --as <type> --title <title>
+
+# maintenance
+wiki index rebuild
+wiki lint
+wiki page new <type> <title>
+wiki page validate <path>
+wiki links check
+wiki log add --type <type> --message <message>
 ```
+
+Both `wiki` and `llm-wiki` are valid bin names.
 
 ## Wiki root resolution
 
-The CLI looks for `wiki.config.yaml` walking upward from the current directory. Set `LLM_WIKI_ROOT` env var to override.
+The CLI picks the wiki root in this order:
+
+1. `$LLM_WIKI_ROOT` env var
+2. `wiki_root` in `~/.llm-wiki/config.json` (set by `wiki bootstrap` or `wiki config set-root`)
+3. Walk-up search for `wiki.config.yaml` starting from the current directory
+
+This lets you run any wiki command from any directory once the global root is set.
 
 ## Use cases
 

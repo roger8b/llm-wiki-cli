@@ -4,10 +4,13 @@ import pc from "picocolors";
 import { execa } from "execa";
 import { templatesDir } from "../utils/templates-dir.js";
 import { today } from "../utils/misc.js";
+import { readGlobalConfig, writeGlobalConfig } from "../utils/global-config.js";
 
-export interface InitOpts {
+export interface BootstrapOpts {
   git?: boolean;
   force?: boolean;
+  register?: boolean;
+  noRegister?: boolean;
 }
 
 const WIKI_SUBDIRS = [
@@ -40,7 +43,7 @@ function logSeed(date: string): string {
 `;
 }
 
-export async function initCmd(targetPath: string | undefined, opts: InitOpts) {
+export async function bootstrapCmd(targetPath: string | undefined, opts: BootstrapOpts) {
   const target = path.resolve(targetPath ?? ".");
   const td = templatesDir();
   await fs.ensureDir(target);
@@ -87,5 +90,18 @@ export async function initCmd(targetPath: string | undefined, opts: InitOpts) {
     }
   }
 
-  console.log(pc.green(`✓ wiki initialized at ${target}`));
+  const existing = readGlobalConfig();
+  const shouldRegister = !opts.noRegister && (opts.register || !existing.wiki_root);
+  if (shouldRegister) {
+    await writeGlobalConfig({ ...existing, wiki_root: target });
+    console.log(pc.green(`✓ registered as global wiki root (~/.llm-wiki/config.json)`));
+  } else if (existing.wiki_root && existing.wiki_root !== target) {
+    console.log(
+      pc.yellow(
+        `note: global wiki root is ${existing.wiki_root}. Pass --register to switch.`,
+      ),
+    );
+  }
+
+  console.log(pc.green(`✓ wiki bootstrapped at ${target}`));
 }

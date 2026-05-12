@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "fs-extra";
 import yaml from "js-yaml";
+import { readGlobalConfig } from "./global-config.js";
 
 export interface WikiConfig {
   name: string;
@@ -41,6 +42,11 @@ export function findWikiRoot(start: string = process.cwd()): string | null {
   if (process.env.LLM_WIKI_ROOT) {
     const env = path.resolve(process.env.LLM_WIKI_ROOT);
     if (fs.existsSync(path.join(env, "wiki.config.yaml"))) return env;
+  }
+  const g = readGlobalConfig();
+  if (g.wiki_root) {
+    const root = path.resolve(g.wiki_root);
+    if (fs.existsSync(path.join(root, "wiki.config.yaml"))) return root;
   }
   let cur = path.resolve(start);
   while (true) {

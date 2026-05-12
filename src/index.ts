@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import pc from "picocolors";
-import { initCmd } from "./commands/init.js";
+import { bootstrapCmd } from "./commands/bootstrap.js";
 import { doctorCmd } from "./commands/doctor.js";
 import { sourceAdd, sourceList, sourceStatus } from "./commands/source.js";
 import { pageNew, pageValidate } from "./commands/page.js";
@@ -13,29 +13,18 @@ import { queryPrepare, querySave } from "./commands/query.js";
 import { logAdd } from "./commands/log.js";
 import { linksCheck } from "./commands/links.js";
 import { projectInit } from "./commands/project.js";
+import { configShow, configSetRoot, configClear } from "./commands/config.js";
 
 const program = new Command();
 program
   .name("llm-wiki")
-  .description("CLI for the Global LLM Wiki")
+  .description("CLI for the Global LLM Wiki (single wiki per machine)")
   .version("0.1.0");
 
 program
   .command("init [path]")
-  .description("initialize a wiki at the given path (default: cwd)")
-  .option("--git", "initialize git in the wiki root")
-  .option("--force", "overwrite existing files")
-  .action((p, o) => initCmd(p, o));
-
-program.command("doctor").description("validate wiki structure").action(doctorCmd);
-
-const project = program
-  .command("project")
-  .description("set up an external project to use the wiki");
-project
-  .command("init [path]")
-  .description("install skills, agent rule files, and config into a project")
-  .option("--wiki <path>", "path to the wiki root (auto-detected if omitted)")
+  .description("install skills + agent rule files into a project (default: cwd)")
+  .option("--wiki <path>", "wiki root (uses global config / $LLM_WIKI_ROOT otherwise)")
   .option("--skills", "only install .claude/skills/")
   .option("--agents", "only write AGENTS.md")
   .option("--claude", "only write CLAUDE.md")
@@ -43,6 +32,22 @@ project
   .option("--cursor", "only write .cursor/rules/llm-wiki.mdc")
   .option("--force", "overwrite existing files")
   .action((p, o) => projectInit(p, o));
+
+program
+  .command("bootstrap [path]")
+  .description("create the (single) wiki repo and register it globally")
+  .option("--git", "initialize git in the wiki root")
+  .option("--force", "overwrite existing files")
+  .option("--register", "force registration as the global wiki root")
+  .option("--no-register", "skip global registration")
+  .action((p, o) => bootstrapCmd(p, o));
+
+const config = program.command("config").description("manage global config (~/.llm-wiki/config.json)");
+config.command("show").action(configShow);
+config.command("set-root <path>").description("register the global wiki root").action(configSetRoot);
+config.command("clear").description("clear global config").action(configClear);
+
+program.command("doctor").description("validate wiki structure").action(doctorCmd);
 
 const source = program.command("source").description("manage raw sources");
 source
