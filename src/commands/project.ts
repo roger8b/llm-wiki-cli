@@ -75,50 +75,71 @@ const WIKI_SECTION_END = "<!-- llm-wiki-end -->";
 
 function boilerplate(wikiRoot: string, agentId: string): string {
   const def = AGENT_DEFS[agentId];
-  const skillsNote = def?.skillsDir
-    ? `- **Skills:** local copies live in \`${def.skillsDir}/\` (mirrored from the wiki).`
-    : `- **Skills:** install with \`wiki init --skills-only\`.`;
+  const skillsDir = def?.skillsDir ?? ".claude/skills";
 
   return `${WIKI_SECTION_MARKER}
-# Global LLM Wiki integration
+# Brain (Global Knowledge Base)
 
-This project is wired to operate against the user's Global LLM Wiki.
+**Brain root:** \`${wikiRoot}\`
+**CLI binary:** \`wiki\` (run \`wiki --help\` for the full command list — never invent commands)
+**Skills:** \`${skillsDir}/wiki-*/SKILL.md\`
 
-- **Wiki root:** \`${wikiRoot}\`
-- **Protocol:** read \`${wikiRoot}/WIKI_PROTOCOL.md\` before any persistent-knowledge task.
-- **Index:** start navigation at \`${wikiRoot}/wiki/index.md\`.
-${skillsNote}
-- **CLI:** \`wiki\` — run \`wiki --help\` for commands.
+## Hard rules
 
-## Mandatory rules for agents in this repo
+### WRITES always go through the CLI
 
-1. Persistent knowledge belongs in the wiki, not in chat history.
-2. Files under \`${wikiRoot}/raw/\` are immutable. Read, never modify.
-3. When creating or updating wiki pages, use the proper schema from \`${wikiRoot}/schemas/\` and add valid frontmatter.
-4. After any change to the wiki, update \`${wikiRoot}/wiki/index.md\` and append to \`${wikiRoot}/wiki/log.md\`.
-5. If new information conflicts with existing pages, flag the contradiction — never silently overwrite.
-6. Durable conclusions go under \`${wikiRoot}/wiki/synthesis/\`, \`comparisons/\`, \`playbooks/\`, \`decisions/\`, or \`open-questions/\`.
+Never create, edit, or write any file under \`${wikiRoot}/\` directly.
+Every write operation has a CLI command — use it:
 
-## Available wiki skills
+| Operation | Command |
+|-----------|---------|
+| Register a source | \`wiki source add <file> --type <type>\` |
+| Prepare ingest context | \`wiki ingest prepare raw/<type>/<file>\` |
+| Commit after agent creates pages | \`wiki ingest commit raw/<type>/<file>\` |
+| Rebuild index | \`wiki index rebuild\` |
+| Append to log | \`wiki log add --type ingest --message "..."\` |
+| Create a new page stub | \`wiki page new <type> <title>\` |
 
-- \`wiki-source-of-truth\` — treat the wiki as the canonical knowledge base.
-- \`wiki-ingest\` — incorporate a new raw source.
-- \`wiki-query\` — answer a question grounded in the wiki, save durable conclusions.
-- \`wiki-lint\` — audit wiki health.
-- \`wiki-refactor\` — restructure without losing knowledge.
-- \`wiki-decision-capture\` — persist decisions made during conversation.
+If you are unsure whether a command exists, run \`wiki --help\` first. Do not guess.
 
-Invoke them by name; the skills directory holds the SKILL.md files.
+### READS can be direct
+
+Reading files is fine without CLI: schemas, wiki pages, WIKI_PROTOCOL.md, index.md.
+Use read, cat, or grep freely to understand content.
+
+### Ingest workflow is non-negotiable
+
+When adding any file to the brain:
+1. \`wiki source add <absolute-path> --type <type>\` — registers in manifest, copies to \`raw/\`
+2. \`wiki ingest prepare raw/<type>/<file>\` — generates \`.wiki/cache/ingest-context.md\`
+3. Agent reads ingest context and creates wiki pages (use \`raw_path\` and \`source_hash\` from context)
+4. \`wiki ingest commit raw/<type>/<file>\` — validates and flips status to \`ingested\`
+
+Skipping steps 1–2 leaves the source orphaned — invisible to \`wiki source list\`, \`wiki lint\`, and \`wiki ingest commit\`.
+
+### Never hallucinate CLI commands
+
+Commands like \`wiki index show\`, \`wiki schema show\`, \`wiki source read\` do not exist.
+When uncertain, run \`wiki --help\` and use only commands listed there.
+
+## Available skills
+
+| Skill | When to use |
+|-------|-------------|
+| \`wiki-ingest\` | Adding any file or document to the brain |
+| \`wiki-query\` | Answering a question grounded in brain content |
+| \`wiki-source-of-truth\` | Any task requiring knowledge from the brain |
+| \`wiki-lint\` | Auditing brain health |
+| \`wiki-refactor\` | Merging, splitting, or restructuring pages |
+| \`wiki-decision-capture\` | Persisting decisions made in conversation |
 
 ## Source priority
 
-1. Current user instruction.
-2. \`${wikiRoot}/wiki/decisions/\` with status \`canonical\` or \`reviewed\`.
-3. Raw sources under \`${wikiRoot}/raw/\`.
-4. Wiki pages with status \`canonical\`.
-5. Wiki pages with status \`reviewed\`.
-6. Wiki pages with status \`draft\`.
-7. Agent inference, clearly labeled.
+1. User's current instruction
+2. \`${wikiRoot}/wiki/decisions/\` — status \`canonical\` or \`reviewed\`
+3. \`${wikiRoot}/raw/\` — immutable source files (read only, never modify)
+4. Wiki pages — \`canonical\` > \`reviewed\` > \`draft\`
+5. Agent inference — clearly labeled as such
 ${WIKI_SECTION_END}
 `;
 }
