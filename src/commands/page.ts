@@ -118,3 +118,111 @@ export async function pageValidate(file: string) {
   }
   if (issues.some((i) => i.level === "error")) process.exitCode = 1;
 }
+
+async function readInput(file?: string): Promise<string> {
+  if (file && file !== "-") {
+    const abs = path.resolve(file);
+    if (!fs.existsSync(abs)) throw new Error(`file not found: ${file}`);
+    return fs.readFile(abs, "utf8");
+  }
+  return new Promise((resolve, reject) => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (c) => (data += c));
+    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("error", reject);
+  });
+}
+
+export async function pageSave(opts: {
+  type: string;
+  title: string;
+  file?: string;
+  status?: string;
+  sources?: string[];
+  related?: string[];
+  tags?: string[];
+  force?: boolean;
+}) {
+  const ctx = loadContext();
+  if (!ctx.config.page_types.includes(opts.type)) {
+    console.error(pc.red(`invalid type: ${opts.type}`));
+    process.exitCode = 1;
+    return;
+  }
+  const content = await readInput(opts.file);
+  const slug = slugify(opts.title);
+  const dir = path.join(ctx.wikiDir, TYPE_TO_DIR[opts.type] ?? opts.type);
+  await fs.ensureDir(dir);
+  const dest = path.join(dir, `${slug}.md`);
+  if (fs.existsSync(dest) && !opts.force) {
+    console.error(pc.red(`already exists: ${slug} (use --force or 'wiki page update')`));
+    process.exitCode = 1;
+    return;
+  }
+  let body = content;
+  let existingFm: Record<string, any> = {};
+  try {
+    const parsed = matter(content);
+    if (Object.keys(parsed.data).length > 0) {
+      existingFm = parsed.data as Record<string, any>;
+      body = parsed.content;
+    }
+  } catch { /* ignore */ }
+  const fm: Record<string, any> = {
+    type: opts.type,
+    title: opts.title,
+    slug,
+    status: opts.status ?? existingFm.status ?? "draft",
+    created_at: existingFm.created_at ?? today(),
+    updated_at: today(),
+    sources: opts.sources ?? existingFm.sources ?? [],
+    related: opts.related ?? existingFm.related ?? [],
+    tags: opts.tags ?? existingFm.tags ?? [],
+  };
+  if (existingFm.confidence) fm.confidence = existingFm.confidence;
+  if (existingFm.raw_path) fm.raw_path = existingFm.raw_path;
+  if (existingFm.source_hash) fm.source_hash = existingFm.source_hash;
+  await fs.writeFile(dest, matter.stringify(body.trimStart(), fm));
+  console.log(pc.green(`✓ saved: ${opts.type}/${slug}`));
+}
+
+export async function pageUpdate(slug: string, opts: { file?: string; status?: string }) {
+  const ctx = loadContext();
+  const files = await import("fast-glob").then((m) =>
+    m.default("**/*.md", { cwd: ctx.wikiDir, absolute: true }),
+  );
+  let target: string | undefined;
+  for (const f of files) {
+    if (path.basename(f) === "index.md" || path.basename(f) === "log.md") continue;
+    const parsed = matter(await fs.readFile(f, "utf8"));
+    if (parsed.data.slug === slug) {
+      target = f;
+      break;
+    }
+  }
+  if (!target) {
+    console.error(pc.red(`page not found: ${slug}`));
+    process.exitCode = 1;
+    return;
+  }
+  const content = await readInput(opts.file);
+  const existing = matter(await fs.readFile(target, "utf8"));
+  let body = content;
+  let incomingFm: Record<string, any> = {};
+  try {
+    const parsed = matter(content);
+    if (Object.keys(parsed.data).length > 0) {
+      incomingFm = parsed.data as Record<string, any>;
+      body = parsed.content;
+    }
+  } catch { /* ignore */ }
+  const fm = {
+    ...existing.data,
+    ...incomingFm,
+    updated_at: today(),
+    ...(opts.status ? { status: opts.status } : {}),
+  };
+  await fs.writeFile(target, matter.stringify(body.trimStart(), fm));
+  console.log(pc.green(`✓ updated: ${slug}`));
+}

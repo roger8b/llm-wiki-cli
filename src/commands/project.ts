@@ -80,66 +80,68 @@ function boilerplate(wikiRoot: string, agentId: string): string {
   return `${WIKI_SECTION_MARKER}
 # Brain (Global Knowledge Base)
 
-**Brain root:** \`${wikiRoot}\`
-**CLI binary:** \`wiki\` (run \`wiki --help\` for the full command list — never invent commands)
-**Skills:** \`${skillsDir}/wiki-*/SKILL.md\`
+The user maintains a persistent knowledge base — "the brain". You interact with it **only through the \`wiki\` CLI**. You never need to know where the brain lives on disk.
 
-## Hard rules
+**Skills:** \`${skillsDir}/wiki-*/SKILL.md\` — load them when their triggers apply.
 
-### WRITES always go through the CLI
+## The only rule
 
-Never create, edit, or write any file under \`${wikiRoot}/\` directly.
-Every write operation has a CLI command — use it:
+**Never read or write files inside the brain directly.** Every operation has a CLI command. If you don't know which, run \`wiki --help\`.
 
-| Operation | Command |
-|-----------|---------|
-| Register a source | \`wiki source add <file> --type <type>\` |
-| Prepare ingest context | \`wiki ingest prepare raw/<type>/<file>\` |
-| Commit after agent creates pages | \`wiki ingest commit raw/<type>/<file>\` |
-| Rebuild index | \`wiki index rebuild\` |
-| Append to log | \`wiki log add --type ingest --message "..."\` |
-| Create a new page stub | \`wiki page new <type> <title>\` |
+| To … | Use … |
+|------|-------|
+| Read the brain protocol | \`wiki protocol\` |
+| See the index | \`wiki index show\` |
+| List schemas / read a schema | \`wiki schema list\` / \`wiki schema show <type>\` |
+| List pages / read a page | \`wiki page list [--type X] [--status Y]\` / \`wiki page show <slug>\` |
+| Search across pages | \`wiki search "<query>"\` |
+| Read recent log | \`wiki log show --last 10\` |
+| Read a raw source | \`wiki source show <id-or-name>\` |
+| Register a new source | \`wiki source add <file> --type <type>\` |
+| Prepare ingest context | \`wiki ingest prepare <raw-path>\` |
+| Read ingest context | \`wiki ingest context\` |
+| Commit an ingest | \`wiki ingest commit <raw-path>\` |
+| Save a new page | \`wiki page save --type X --title "Y" --file <tmp-file>\` |
+| Update an existing page | \`wiki page update <slug> --file <tmp-file>\` |
+| Save a query answer | \`wiki query save <tmp-file> --as <type> --title "Y"\` |
+| Rebuild the index | \`wiki index rebuild\` |
+| Append a log entry | \`wiki log add --type X --message "..."\` |
+| Lint / check links / doctor | \`wiki lint\` / \`wiki links check\` / \`wiki doctor\` |
 
-If you are unsure whether a command exists, run \`wiki --help\` first. Do not guess.
+When you need to write page content, generate the content in a temp file under \`/tmp/\` and pass it via \`--file\`, or pipe via stdin. Never write inside the brain.
 
-### READS can be direct
+### Never invent commands
 
-Reading files is fine without CLI: schemas, wiki pages, WIKI_PROTOCOL.md, index.md.
-Use read, cat, or grep freely to understand content.
+Commands not listed by \`wiki --help\` do not exist. If unsure, run \`wiki --help\` and use only what is there.
 
-### Ingest workflow is non-negotiable
+### Ingest is non-negotiable
 
-When adding any file to the brain:
-1. \`wiki source add <absolute-path> --type <type>\` — registers in manifest, copies to \`raw/\`
-2. \`wiki ingest prepare raw/<type>/<file>\` — generates \`.wiki/cache/ingest-context.md\`
-3. Agent reads ingest context and creates wiki pages (use \`raw_path\` and \`source_hash\` from context)
-4. \`wiki ingest commit raw/<type>/<file>\` — validates and flips status to \`ingested\`
+When adding any file to the brain, follow the \`wiki-ingest\` skill:
+1. \`wiki source add\` → registers and copies to the brain's raw store
+2. \`wiki ingest prepare\` + \`wiki ingest context\` → get the \`raw_path\` and \`source_hash\` to use
+3. \`wiki page save\` / \`wiki page update\` → create source and concept pages
+4. \`wiki ingest commit\` → validates and flips status to \`ingested\`
 
-Skipping steps 1–2 leaves the source orphaned — invisible to \`wiki source list\`, \`wiki lint\`, and \`wiki ingest commit\`.
-
-### Never hallucinate CLI commands
-
-Commands like \`wiki index show\`, \`wiki schema show\`, \`wiki source read\` do not exist.
-When uncertain, run \`wiki --help\` and use only commands listed there.
+Skipping the CLI leaves the source orphaned, invisible to \`wiki source list\` / \`wiki lint\` / \`wiki ingest commit\`.
 
 ## Available skills
 
-| Skill | When to use |
-|-------|-------------|
+| Skill | When to load |
+|-------|--------------|
 | \`wiki-ingest\` | Adding any file or document to the brain |
 | \`wiki-query\` | Answering a question grounded in brain content |
-| \`wiki-source-of-truth\` | Any task requiring knowledge from the brain |
+| \`wiki-source-of-truth\` | Any task that should be grounded in the brain |
 | \`wiki-lint\` | Auditing brain health |
-| \`wiki-refactor\` | Merging, splitting, or restructuring pages |
-| \`wiki-decision-capture\` | Persisting decisions made in conversation |
+| \`wiki-refactor\` | Merging, splitting, deprecating, or renaming pages |
+| \`wiki-decision-capture\` | Persisting a decision the user made in conversation |
 
 ## Source priority
 
 1. User's current instruction
-2. \`${wikiRoot}/wiki/decisions/\` — status \`canonical\` or \`reviewed\`
-3. \`${wikiRoot}/raw/\` — immutable source files (read only, never modify)
-4. Wiki pages — \`canonical\` > \`reviewed\` > \`draft\`
-5. Agent inference — clearly labeled as such
+2. Decision pages with status \`canonical\` or \`reviewed\` (\`wiki page list --type decision --status canonical\`)
+3. Raw sources (\`wiki source show <id>\`)
+4. Other pages by status: \`canonical\` > \`reviewed\` > \`draft\`
+5. Your own inference, clearly labeled
 ${WIKI_SECTION_END}
 `;
 }

@@ -1,55 +1,72 @@
 ---
 name: wiki-source-of-truth
-description: Treat the user's Global LLM Wiki as the canonical knowledge base for any persistent fact, decision, concept, or workflow. Use this skill whenever the user asks a question that prior conversations or wiki pages might have already answered, whenever you are about to assert something durable, or whenever you are tempted to answer from chat history alone — even if the user did not explicitly say "use the wiki". Also use it before writing any new wiki page, to make sure your output respects the protocol, status conventions, and source-priority order.
+description: Treat the user's brain as the canonical knowledge base for any persistent fact, decision, concept, or workflow. Use this skill whenever the user asks a question that the brain might already answer, whenever you are about to assert something durable, or whenever you are tempted to answer from chat history alone — even if the user did not explicitly say "use the brain". Also use it before writing any new brain page, to make sure your output respects the protocol, status conventions, and source-priority order.
 ---
 
-# Wiki Source of Truth
+# Brain — Source of Truth
 
 ## Mission
 
-The wiki at `wiki/` is the user's accumulating, versioned knowledge base. If you answer from memory or chat history when a relevant wiki page exists, you waste the user's investment and risk contradicting recorded decisions. Read the wiki first; answer from it; persist what is new.
+The brain is the user's accumulating, versioned knowledge base. If you answer from memory when a relevant page exists, you waste the user's investment and risk contradicting recorded decisions. Read the brain first, answer from it, persist what is new.
+
+You interact with the brain **only through the `wiki` CLI**. Never read or write files inside the brain directly — paths inside the brain are CLI-internal.
 
 ## Workflow
 
-1. Read `WIKI_PROTOCOL.md` and `wiki/index.md` before responding.
-2. Identify candidate pages by topic, slug, and tag. Prefer `canonical` and `reviewed` status.
-3. Read the candidate pages and any cited raw sources under `raw/`.
-4. Compose your answer grounded in those pages. Cite them by relative path.
-5. Separate facts (from sources/canonical pages) from inference (yours). Label inference explicitly.
-6. If your answer creates durable knowledge — a synthesis, a comparison, a decision — propose persisting it under `wiki/synthesis/`, `wiki/comparisons/`, `wiki/decisions/`, or `wiki/open-questions/`.
+### 1. Orient
+
+```bash
+wiki protocol         # the brain's rules in full
+wiki index show       # what exists, grouped by type
+```
+
+### 2. Find candidate pages
+
+```bash
+wiki search "<topic>"                         # full-text search
+wiki page list --type <type>                  # by type
+wiki page list --status canonical             # only authoritative pages
+```
+
+### 3. Read evidence
+
+```bash
+wiki page show <slug>                         # the page
+wiki source show <id-or-name>                 # the raw source it cites
+```
+
+### 4. Compose the answer
+
+Ground every assertion in a page or raw source. Cite by slug (e.g., "see decision `postgres-over-mongo`"). Separate facts from your inference — label inference explicitly ("**Inference:** based on …").
+
+### 5. Persist durable conclusions
+
+If the answer is reusable knowledge, save it via the CLI (see the `wiki-query` and `wiki-decision-capture` skills for the right command). Answers that stay in chat get lost.
 
 ## Source priority
 
-When sources disagree, use this order. Higher beats lower.
+When sources disagree, higher beats lower:
 
-1. The current user instruction.
-2. `wiki/decisions/` pages with status `canonical` or `reviewed`.
-3. Raw sources under `raw/` (primary evidence).
-4. Wiki pages with status `canonical`.
-5. Wiki pages with status `reviewed`.
-6. Wiki pages with status `draft`.
-7. Your own inference, clearly labeled as such.
+1. The current user instruction
+2. Pages with status `canonical` (especially decisions)
+3. Pages with status `reviewed`
+4. Raw sources (primary evidence — fetch with `wiki source show`)
+5. Pages with status `draft`
+6. Your own inference, clearly labeled
 
-Knowing the order matters more than memorizing it: the user encodes confidence with status, and the wiki encodes priority with location. Respect both.
+Status is how the user encodes confidence. Respect it.
 
 ## Guardrails
 
-- Never modify files under `raw/`. They are immutable evidence; if they change, citations elsewhere become unverifiable.
-- Never silently overwrite a `canonical` or `reviewed` page with conflicting content. Flag the conflict on the page and, if relevant, open a `wiki/open-questions/` page.
-- Never promote a page to `reviewed` or `canonical` without sources. The wiki's value depends on traceability.
-- Never invent. If the wiki and raw sources lack the answer, say so and suggest what to ingest next.
+- **Never write files in the brain directly.** Every write operation has a CLI command. If you don't know which, run `wiki --help`.
+- **Never modify raw sources.** They are immutable evidence. The hash backing every citation depends on this.
+- **Never silently overwrite canonical or reviewed pages.** Flag the conflict in your answer and propose a new decision or open-question.
+- **Never invent answers.** If the brain and its sources lack the answer, say so and suggest what to ingest next.
+- **Never invent CLI commands.** Run `wiki --help` if uncertain.
 
-## Output expectations
+## Done criteria
 
-When you answer:
-
-- Mention the wiki pages you used (relative paths).
-- Mark uncertainty explicitly.
-- Suggest concrete updates: "Add a note to `wiki/concepts/x.md`", "Create `wiki/decisions/y.md`".
-
-## Completion checklist
-
-- Wiki pages relevant to the question were read.
-- Contradictions, if any, are surfaced — not hidden.
-- Inference is labeled.
-- Durable conclusions are saved or proposed for saving.
+- Relevant pages were read via `wiki page show` / `wiki source show`
+- Contradictions, if any, are surfaced explicitly
+- Inference is labeled
+- Durable conclusions are saved or proposed for saving via CLI

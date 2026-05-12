@@ -1,66 +1,104 @@
 ---
 name: wiki-query
-description: Answer a user question using the Global LLM Wiki as the source of truth, then save durable conclusions back into the wiki so they compound. Use this skill whenever the user asks a substantive question that the wiki might already cover (concepts, decisions, comparisons, prior research) — not only when they explicitly say "search the wiki". Also use it when the user asks you to write a summary, comparison, synthesis, or analysis that could plausibly be reused later — the natural next step is to file the result under `wiki/synthesis/` or `wiki/comparisons/` so the work does not vanish into chat.
+description: Answer a user question using the brain as the source of truth, then save durable conclusions back so the brain compounds. Use this skill whenever the user asks a substantive question that the brain might already cover (concepts, decisions, comparisons, prior research) — not only when they explicitly say "search the brain". Also use it when the user asks for a summary, comparison, synthesis, or analysis that could plausibly be reused later — the natural next step is to file the result so the work does not vanish into chat.
 ---
 
-# Wiki Query
+# Brain — Query
 
 ## Mission
 
-A query is a chance to (a) give a grounded answer, and (b) deposit a new artifact in the wiki. The second part is what makes the wiki compound. Without it, each question costs the same to answer next time.
+A query is a chance to (a) give a grounded answer, and (b) deposit a new artifact in the brain. The second part is what makes the brain compound. Without it, each question costs the same to answer next time.
+
+You interact with the brain **only through the `wiki` CLI**. Never read or write files inside the brain directly.
 
 ## Workflow
 
-### 1. Orient
+### 1. Prepare query context (optional but useful)
 
-Read `WIKI_PROTOCOL.md` (briefly) and `wiki/index.md`. If you previously ran `llm-wiki query prepare "<question>"`, read `.wiki/cache/query-context.md` for the candidate pages and excerpts.
+```bash
+wiki query prepare "<the question>"
+wiki query context             # read the candidate pages the CLI surfaced
+```
 
-### 2. Select pages
+The context lists relevant pages, related decisions, and nearby open questions.
 
-Pick pages by relevance, prioritizing in this order:
+### 2. Orient
 
-1. `wiki/decisions/` with status `canonical` or `reviewed`;
-2. raw sources under `raw/` when precision matters;
-3. wiki pages with status `canonical`;
-4. wiki pages with status `reviewed`;
-5. wiki pages with status `draft`;
-6. open questions adjacent to the topic.
+```bash
+wiki protocol                  # if unfamiliar with the brain's rules
+wiki index show                # what exists, grouped by type
+```
 
-### 3. Read evidence
+### 3. Select pages by priority
 
-Read the selected pages. Drop into `raw/` if a claim looks shaky, status is `draft`/`needs-source`, or two pages disagree. The wiki is curated but not omniscient — primary sources are the tiebreaker.
+```bash
+wiki page list --status canonical
+wiki page list --status reviewed
+wiki search "<topic>"          # keyword search across all pages
+wiki page list --type decision # decisions related to the topic
+```
 
-### 4. Answer
+Priority order when sources disagree:
 
-Ground every assertion in a page or source. Cite by relative path. Separate facts from inference and label inference clearly ("**Inference:** based on X, …"). Disclose gaps — that signals what to ingest next.
+1. User's current instruction
+2. Pages with status `canonical` (especially decisions)
+3. Pages with status `reviewed`
+4. Raw sources (`wiki source show <id>`)
+5. Pages with status `draft`
+6. Your own inference, labeled
 
-### 5. Persist durable knowledge
+### 4. Read evidence
 
-If the answer would be useful to a future reader (you, the user, another agent), save it. Pick the right type:
+```bash
+wiki page show <slug>
+wiki source show <id>          # drop into raw evidence when a claim is shaky
+```
 
-- multi-source analysis → `wiki/synthesis/`
-- option/tool comparison → `wiki/comparisons/`
-- repeatable procedure → `wiki/playbooks/`
-- unresolved question → `wiki/open-questions/`
-- a choice made → `wiki/decisions/`
+### 5. Answer
 
-You can hand the user the file and run `llm-wiki query save <file> --as <type> --title "<title>"` to file it correctly.
+Ground every assertion in a page or source. Cite by slug. Separate facts from inference and label inference explicitly. Disclose gaps — that signals what to ingest next.
 
-### 6. Log changes
+### 6. Persist durable knowledge
 
-If you created or modified wiki files, append an entry to `wiki/log.md` with date, operation (`query` or `synthesis`), and the affected files. `llm-wiki query save` does this automatically.
+If the answer is useful to a future reader, save it via the right page type:
+
+```bash
+# multi-source analysis
+wiki query save /tmp/answer.md --as synthesis --title "<title>"
+
+# option/tool comparison
+wiki query save /tmp/answer.md --as comparison --title "<title>"
+
+# repeatable procedure
+wiki query save /tmp/answer.md --as playbook --title "<title>"
+
+# unresolved question
+wiki query save /tmp/answer.md --as open-question --title "<title>"
+
+# a choice made (use wiki-decision-capture skill for full workflow)
+wiki query save /tmp/answer.md --as decision --title "<title>"
+```
+
+`wiki query save` writes the page and appends a log entry automatically.
+
+### 7. Refresh the index
+
+```bash
+wiki index rebuild
+```
 
 ## Guardrails
 
-- Do not answer from memory when the wiki likely contains the answer — re-read.
-- Do not overrule a canonical decision without explicitly flagging the conflict.
-- Do not synthesize a "conclusion" from a single weak source. Mark it inference or open question.
-- Do not mix fact and opinion without labels. Readers (human or agent) trust the wiki because of this discipline.
+- **Do not answer from memory** when the brain likely covers it. Re-read via `wiki page show`.
+- **Do not overrule a canonical page** without explicitly flagging the conflict in your answer.
+- **Do not synthesize a "conclusion" from a single weak source.** Mark it as inference or open question.
+- **Do not mix fact and opinion without labels.** Readers (human or agent) trust the brain because of this discipline.
+- **Never write files in the brain directly.** Use `wiki query save` or `wiki page save`.
+- **Never invent CLI commands.** Run `wiki --help` if uncertain.
 
 ## Done criteria
 
-- The relevant wiki pages were read.
-- Answer is grounded with citations.
-- Uncertainty is explicit.
-- Durable conclusions were saved or proposed for saving.
-- Log was updated if files changed.
+- Relevant pages were read via CLI
+- Answer is grounded with explicit citations (by slug)
+- Uncertainty is labeled
+- Durable conclusions were saved or proposed for saving
