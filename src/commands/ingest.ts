@@ -117,9 +117,16 @@ export async function ingestCommit(sourcePath: string) {
   const pages = await readAllPages(ctx);
   const sourcePages = pages.filter((p) => p.type === "source");
   let sourcePage = null;
-  for (const sp of sourcePages) {
-    const raw = await fs.readFile(sp.file, "utf8");
-    const fm = matter(raw).data as Record<string, any>;
+
+  const resolvedSourcePages = await Promise.all(
+    sourcePages.map(async (sp) => {
+      const raw = await fs.readFile(sp.file, "utf8");
+      const fm = matter(raw).data as Record<string, any>;
+      return { sp, fm };
+    })
+  );
+
+  for (const { sp, fm } of resolvedSourcePages) {
     if (fm.raw_path === rel) {
       sourcePage = { ...sp, fm };
       break;
