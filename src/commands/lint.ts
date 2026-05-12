@@ -27,7 +27,7 @@ export async function lintCmd() {
 
   const pageFiles = await fg("**/*.md", { cwd: ctx.wikiDir, absolute: true });
   const slugs = new Map<string, string[]>();
-  const pagesByPath = new Map<string, Record<string, any>>();
+  const pagesByPath = new Map<string, { fm: Record<string, any>; raw: string }>();
 
   for (const f of pageFiles) {
     const base = path.basename(f);
@@ -43,7 +43,7 @@ export async function lintCmd() {
     } catch {
       continue;
     }
-    pagesByPath.set(f, fm);
+    pagesByPath.set(f, { fm, raw });
     if (fm.slug) {
       if (!slugs.has(fm.slug)) slugs.set(fm.slug, []);
       slugs.get(fm.slug)!.push(path.relative(ctx.root, f));
@@ -72,8 +72,8 @@ export async function lintCmd() {
   }
 
   const linkRe = /\[([^\]]+)\]\(([^)]+)\)/g;
-  for (const f of pagesByPath.keys()) {
-    const raw = await fs.readFile(f, "utf8");
+  for (const [f, page] of pagesByPath) {
+    const raw = page.raw;
     const dir = path.dirname(f);
     for (const m of raw.matchAll(linkRe)) {
       const href = m[2].split("#")[0];
