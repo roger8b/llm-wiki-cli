@@ -195,7 +195,9 @@ async function installSkills(
   for (const e of entries) {
     const from = path.join(srcSkillsDir, e);
     const to = path.join(skillsDir, e);
-    if (fs.existsSync(to) && !force) {
+    const populated = fs.existsSync(path.join(to, "SKILL.md")) ||
+      (fs.existsSync(to) && fs.lstatSync(to).isSymbolicLink());
+    if (populated && !force) {
       console.log(pc.yellow(`  skip skill (exists): ${path.relative(process.cwd(), to)}`));
       continue;
     }
