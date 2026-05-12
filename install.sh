@@ -68,9 +68,11 @@ if $INIT_BRAIN; then
     wiki config set-root "$BRAIN_PATH"
   else
     dim "creating brain at ${BRAIN_PATH} …"
-    GIT_FLAG=""
-    $INIT_GIT && GIT_FLAG="--git"
-    wiki bootstrap "$BRAIN_PATH" $GIT_FLAG
+    WIKI_ARGS=("$BRAIN_PATH")
+    if $INIT_GIT; then
+      WIKI_ARGS+=("--git")
+    fi
+    wiki bootstrap "${WIKI_ARGS[@]}"
     ok "brain ready at ${BRAIN_PATH}"
   fi
 fi
