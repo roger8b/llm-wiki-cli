@@ -61,7 +61,8 @@ export interface ValidationIssue {
 
 export async function validatePage(file: string): Promise<ValidationIssue[]> {
   const ctx = loadContext();
-  const abs = path.resolve(file);
+  let abs = path.resolve(file);
+  if (!fs.existsSync(abs)) abs = path.resolve(ctx.root, file);
   const rel = path.relative(ctx.root, abs);
   const issues: ValidationIssue[] = [];
   if (!fs.existsSync(abs)) {

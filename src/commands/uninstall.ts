@@ -112,7 +112,7 @@ export async function projectUninstall(targetPath: string | undefined, opts: Uni
   // ── scope ────────────────────────────────────────────────────────────────
   const scope: Scope = opts.scope ?? (
     opts.yes
-      ? "both"
+      ? "local"
       : await select<Scope>({
           message: "Remove from where?",
           choices: [
