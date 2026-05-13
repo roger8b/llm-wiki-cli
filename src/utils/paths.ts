@@ -10,7 +10,7 @@ export interface WikiConfig {
     raw: string;
     wiki: string;
     schemas: string;
-    skills: string;
+    skills?: string;
     cache: string;
     reports: string;
     manifests: string;
@@ -31,7 +31,7 @@ export interface WikiContext {
   rawDir: string;
   wikiDir: string;
   schemasDir: string;
-  skillsDir: string;
+  skillsDir?: string;
   cacheDir: string;
   reportsDir: string;
   manifestsDir: string;
@@ -72,7 +72,7 @@ export function loadContext(start?: string): WikiContext {
     rawDir: path.join(root, config.paths.raw),
     wikiDir: path.join(root, config.paths.wiki),
     schemasDir: path.join(root, config.paths.schemas),
-    skillsDir: path.join(root, config.paths.skills),
+    skillsDir: config.paths.skills ? path.join(root, config.paths.skills) : undefined,
     cacheDir: path.join(root, config.paths.cache),
     reportsDir: path.join(root, config.paths.reports),
     manifestsDir: path.join(root, config.paths.manifests),

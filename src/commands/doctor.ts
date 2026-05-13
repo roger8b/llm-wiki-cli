@@ -14,7 +14,7 @@ export async function doctorCmd() {
     else ok.push(`required file present: ${f}`);
   }
 
-  for (const dir of [ctx.rawDir, ctx.wikiDir, ctx.schemasDir, ctx.skillsDir]) {
+  for (const dir of [ctx.rawDir, ctx.wikiDir, ctx.schemasDir].concat(ctx.skillsDir ? [ctx.skillsDir] : [])) {
     if (!fs.existsSync(dir)) issues.push(`missing directory: ${path.relative(ctx.root, dir)}`);
     else ok.push(`dir ok: ${path.relative(ctx.root, dir)}`);
   }
