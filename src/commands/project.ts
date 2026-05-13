@@ -4,69 +4,21 @@ import pc from "picocolors";
 import { checkbox, select } from "@inquirer/prompts";
 import { templatesDir } from "../utils/templates-dir.js";
 import { findWikiRoot } from "../utils/paths.js";
+import { AGENTS, type AgentConfig, type AgentId, detectInstalledAgents } from "../utils/agents.js";
 
 export interface ProjectInitOpts {
   wiki?: string;
   force?: boolean;
   yes?: boolean;
+  scope?: "local" | "global" | "both";
+  method?: "symlink" | "copy";
+  showAll?: boolean;
+  update?: boolean;
 }
 
-// ── agent definitions ────────────────────────────────────────────────────────
-
-interface AgentDef {
-  label: string;
-  skillsDir?: string;          // relative to project root
-  ruleFile: string;            // relative to project root
-  ruleFormat: "boilerplate" | "cursor";
-  appendOk: boolean;           // true = append to existing file, false = skip/overwrite
-}
-
-const AGENT_DEFS: Record<string, AgentDef> = {
-  "claude-code": {
-    label: "Claude Code",
-    skillsDir: ".claude/skills",
-    ruleFile: "CLAUDE.md",
-    ruleFormat: "boilerplate",
-    appendOk: true,
-  },
-  "pi": {
-    label: "PI Agent",
-    skillsDir: ".pi/skills",
-    ruleFile: "AGENTS.md",
-    ruleFormat: "boilerplate",
-    appendOk: true,
-  },
-  "codex": {
-    label: "Codex / OpenAI",
-    ruleFile: "AGENTS.md",
-    ruleFormat: "boilerplate",
-    appendOk: true,
-  },
-  "gemini": {
-    label: "Gemini CLI",
-    ruleFile: "GEMINI.md",
-    ruleFormat: "boilerplate",
-    appendOk: true,
-  },
-  "cursor": {
-    label: "Cursor",
-    ruleFile: ".cursor/rules/llm-wiki.mdc",
-    ruleFormat: "cursor",
-    appendOk: false,
-  },
-  "amp": {
-    label: "Amp",
-    ruleFile: "AGENTS.md",
-    ruleFormat: "boilerplate",
-    appendOk: true,
-  },
-  "cline": {
-    label: "Cline",
-    ruleFile: ".clinerules",
-    ruleFormat: "boilerplate",
-    appendOk: true,
-  },
-};
+type Scope = "local" | "global" | "both";
+type Method = "symlink" | "copy";
+type ExistingAction = "keep" | "update" | "remove" | "ask-each";
 
 // ── content generators ───────────────────────────────────────────────────────
 
@@ -74,20 +26,22 @@ const WIKI_SECTION_MARKER = "<!-- llm-wiki-start -->";
 const WIKI_SECTION_END = "<!-- llm-wiki-end -->";
 
 function boilerplate(wikiRoot: string, agentId: string): string {
-  const def = AGENT_DEFS[agentId];
-  const skillsDir = def?.skillsDir ?? ".claude/skills";
+  const def = AGENTS[agentId];
+  const skillsDir = def?.skillsDir ?? ".agents/skills";
+  const globalSkillsDir = def?.globalSkillsDir ?? "~/.wiki-cli/templates/skills";
 
   return `${WIKI_SECTION_MARKER}
 # Brain (Global Knowledge Base)
 
 The user maintains a persistent knowledge base — "the brain". You interact with it **only through the \`wiki\` CLI**. You never need to know where the brain lives on disk.
 
-**Skills:** \`${skillsDir}/wiki-*/SKILL.md\` — load them when their triggers apply.
+**Local Skills:**  \`${skillsDir}/wiki-*/SKILL.md\`
+**Global Skills:** \`${globalSkillsDir}/wiki-*/SKILL.md\`
 
 ## Three hard rules
 
 1. **Never read or write files inside the brain directly.** Every operation has a CLI command. If you don't know which, run \`wiki --help\`.
-2. **Always maintain a todo list in working memory** when running a wiki workflow (use TodoWrite or your platform's in-memory todo tool). **Never persist the todo list as a file.** Multi-step wiki workflows lose track without one.
+2. **Always maintain a todo list in working memory** when running a wiki workflow. **Never persist the todo list as a file.**
 3. **Compose page content in memory and pipe via stdin (heredoc).** **Never write a temp file under \`/tmp/\`** to pass content to \`wiki page save\` / \`wiki page update\`.
 
 | To … | Use … |
@@ -105,26 +59,21 @@ The user maintains a persistent knowledge base — "the brain". You interact wit
 | Commit an ingest | \`wiki ingest commit <raw-path>\` |
 | Save a new page (stdin) | \`cat <<'EOF' \| wiki page save --type X --title "Y" ... EOF\` |
 | Update an existing page (stdin) | \`cat <<'EOF' \| wiki page update <bare-slug> ... EOF\` |
-| Save a query answer (stdin) | \`cat <<'EOF' \| wiki page save --type synthesis --title "Y" ... EOF\` |
 | Rebuild the index | \`wiki index rebuild\` |
 | Append a log entry | \`wiki log add --type X --message "..."\` |
 | Lint / check links / doctor | \`wiki lint\` / \`wiki links check\` / \`wiki doctor\` |
 
-When you need to write page content, generate the content in a temp file under \`/tmp/\` and pass it via \`--file\`, or pipe via stdin. Never write inside the brain.
-
 ### Never invent commands
 
-Commands not listed by \`wiki --help\` do not exist. If unsure, run \`wiki --help\` and use only what is there.
+Commands not listed by \`wiki --help\` do not exist.
 
 ### Ingest is non-negotiable
 
 When adding any file to the brain, follow the \`wiki-ingest\` skill:
 1. \`wiki source add\` → registers and copies to the brain's raw store
-2. \`wiki ingest prepare\` + \`wiki ingest context\` → get the \`raw_path\` and \`source_hash\` to use
+2. \`wiki ingest prepare\` + \`wiki ingest context\` → get \`raw_path\` and \`source_hash\`
 3. \`wiki page save\` / \`wiki page update\` → create source and concept pages
 4. \`wiki ingest commit\` → validates and flips status to \`ingested\`
-
-Skipping the CLI leaves the source orphaned, invisible to \`wiki source list\` / \`wiki lint\` / \`wiki ingest commit\`.
 
 ## Available skills
 
@@ -140,7 +89,7 @@ Skipping the CLI leaves the source orphaned, invisible to \`wiki source list\` /
 ## Source priority
 
 1. User's current instruction
-2. Decision pages with status \`canonical\` or \`reviewed\` (\`wiki page list --type decision --status canonical\`)
+2. Decision pages with status \`canonical\` or \`reviewed\`
 3. Raw sources (\`wiki source show <id>\`)
 4. Other pages by status: \`canonical\` > \`reviewed\` > \`draft\`
 5. Your own inference, clearly labeled
@@ -157,13 +106,9 @@ alwaysApply: true
 ${WIKI_SECTION_MARKER}
 This project is wired to the user's Global LLM Wiki at \`${wikiRoot}\`.
 
-- Read \`${wikiRoot}/WIKI_PROTOCOL.md\` and \`${wikiRoot}/wiki/index.md\` before persistent-knowledge tasks.
+- All brain operations go through the \`wiki\` CLI. Run \`wiki --help\`.
 - Files under \`${wikiRoot}/raw/\` are immutable.
-- Use schemas from \`${wikiRoot}/schemas/\` when creating wiki pages.
-- After updates, refresh \`wiki/index.md\` and append to \`wiki/log.md\`.
-- Skills directory holds SKILL.md files.
-
-CLI: \`wiki --help\`.
+- Load skills from \`.agents/skills/wiki-*/SKILL.md\` when triggers apply.
 ${WIKI_SECTION_END}
 `;
 }
@@ -185,11 +130,10 @@ async function writeRuleFile(
 
   const existing = await fs.readFile(file, "utf8");
 
-  // already has our section — refresh it if force, else skip
   if (existing.includes(WIKI_SECTION_MARKER)) {
     if (!force) return "skipped";
     const replaced = existing.replace(
-      new RegExp(`${WIKI_SECTION_MARKER}[\\s\\S]*?${WIKI_SECTION_END}\n?`, "m"),
+      new RegExp(`${WIKI_SECTION_MARKER}[\\s\\S]*?${WIKI_SECTION_END}\\n?`, "m"),
       content,
     );
     await fs.writeFile(file, replaced);
@@ -209,32 +153,86 @@ async function writeRuleFile(
   return "skipped";
 }
 
-async function installSkills(
-  skillsDir: string,
-  srcSkillsDir: string,
-  method: "copy" | "symlink",
-  force: boolean,
-): Promise<void> {
-  await fs.ensureDir(skillsDir);
-  const entries = await fs.readdir(srcSkillsDir);
-  for (const e of entries) {
-    const from = path.join(srcSkillsDir, e);
-    const to = path.join(skillsDir, e);
-    const populated = fs.existsSync(path.join(to, "SKILL.md")) ||
-      (fs.existsSync(to) && fs.lstatSync(to).isSymbolicLink());
-    if (populated && !force) {
-      console.log(pc.yellow(`  skip skill (exists): ${path.relative(process.cwd(), to)}`));
-      continue;
+// ── skills helpers ───────────────────────────────────────────────────────────
+
+async function detectSkillsAt(dir: string): Promise<{ count: number; isSymlink: boolean }> {
+  if (!fs.existsSync(dir)) return { count: 0, isSymlink: false };
+  let count = 0;
+  let isSymlink = false;
+  try {
+    const entries = await fs.readdir(dir);
+    for (const e of entries) {
+      const p = path.join(dir, e);
+      if (e.startsWith("wiki-") && fs.existsSync(path.join(p, "SKILL.md"))) count++;
     }
+    const wikiEntry = entries.find((e) => e.startsWith("wiki-"));
+    if (wikiEntry) isSymlink = fs.lstatSync(path.join(dir, wikiEntry)).isSymbolicLink();
+  } catch { /* ignore */ }
+  return { count, isSymlink };
+}
+
+async function installSkills(
+  destDir: string,
+  srcDir: string,
+  method: Method,
+  force: boolean,
+): Promise<number> {
+  await fs.ensureDir(destDir);
+  const entries = await fs.readdir(srcDir);
+  let installed = 0;
+
+  for (const e of entries) {
+    const from = path.join(srcDir, e);
+    const to = path.join(destDir, e);
+
+    // `to` may be: missing, regular file/dir, valid symlink, or broken symlink.
+    // existsSync follows symlinks (returns false on broken). lstatSync does
+    // not follow but throws ENOENT when nothing is there. Detect via try/catch.
+    let entryExists = false;
+    try {
+      fs.lstatSync(to);
+      entryExists = true;
+    } catch { /* truly absent */ }
+
+    if (entryExists && !force) continue;
+
+    if (entryExists) {
+      try { await fs.remove(to); } catch { /* ignore */ }
+    }
+
     if (method === "symlink") {
-      if (fs.existsSync(to)) await fs.remove(to);
-      await fs.ensureSymlink(from, to, "dir");
-      console.log(pc.green(`  ↔ skill symlinked: ${path.relative(process.cwd(), to)}`));
+      try {
+        await fs.ensureSymlink(from, to, "dir");
+      } catch {
+        // fallback to copy (e.g. Windows without symlink permission)
+        await fs.copy(from, to, { overwrite: true });
+      }
     } else {
       await fs.copy(from, to, { overwrite: true });
-      console.log(pc.green(`  ✓ skill copied: ${path.relative(process.cwd(), to)}`));
     }
+    installed++;
   }
+
+  return installed;
+}
+
+async function removeWikiSkills(dir: string): Promise<number> {
+  if (!fs.existsSync(dir)) return 0;
+  let removed = 0;
+  const entries = await fs.readdir(dir);
+  for (const e of entries) {
+    if (!e.startsWith("wiki-")) continue;
+    await fs.remove(path.join(dir, e));
+    removed++;
+  }
+  return removed;
+}
+
+function resolveSkillsDestForAgent(target: string, def: AgentConfig, scope: Scope): string[] {
+  const dests: string[] = [];
+  if (scope === "local" || scope === "both") dests.push(path.join(target, def.skillsDir));
+  if (scope === "global" || scope === "both") dests.push(def.globalSkillsDir);
+  return dests;
 }
 
 // ── main command ─────────────────────────────────────────────────────────────
@@ -258,77 +256,205 @@ export async function projectInit(targetPath: string | undefined, opts: ProjectI
   console.log(pc.dim(`project:   ${target}`));
   console.log();
 
-  // ── interactive prompts ──────────────────────────────────────────────────
+  const detected = new Set(detectInstalledAgents());
 
-  const selectedAgents = opts.yes
-    ? ["claude-code"]
-    : await checkbox({
-        message: "Which agents do you want to set up?",
-        choices: Object.entries(AGENT_DEFS).map(([id, def]) => ({
-          name: def.label,
+  // Agents that already have wiki-* skills installed (local or global).
+  // Used to pre-select checkbox items so users don't re-install accidentally.
+  const alreadySetup = new Set<AgentId>();
+  for (const [id, def] of Object.entries(AGENTS)) {
+    const localCount = (await detectSkillsAt(path.join(target, def.skillsDir))).count;
+    const globalCount = (await detectSkillsAt(def.globalSkillsDir)).count;
+    if (localCount > 0 || globalCount > 0) alreadySetup.add(id);
+  }
+
+  // ── select agents ────────────────────────────────────────────────────────
+  let selectedAgents: AgentId[];
+  if (opts.yes) {
+    if (alreadySetup.size > 0) selectedAgents = Array.from(alreadySetup);
+    else if (detected.size > 0) selectedAgents = Array.from(detected);
+    else selectedAgents = ["claude-code"];
+  } else {
+    const showAll = opts.showAll;
+    const visible = Object.entries(AGENTS).filter(([id]) =>
+      showAll || detected.has(id) || alreadySetup.has(id) || id === "claude-code"
+    );
+
+    selectedAgents = await checkbox({
+      message: showAll
+        ? `Agents (${Object.keys(AGENTS).length} total — use space to toggle)`
+        : `Detected agents (${detected.size} found, ${alreadySetup.size} with wiki skills already set up)`,
+      choices: visible.map(([id, def]) => {
+        const tags: string[] = [];
+        if (alreadySetup.has(id)) tags.push(pc.cyan("(wiki set up)"));
+        else if (detected.has(id)) tags.push(pc.green("(detected)"));
+        return {
+          name: tags.length ? `${def.displayName} ${tags.join(" ")}` : def.displayName,
           value: id,
-          checked: id === "claude-code",
-        })),
-      });
+          checked: alreadySetup.has(id), // pre-select ONLY agents already configured
+        };
+      }),
+    });
+  }
 
   if (selectedAgents.length === 0) {
     console.log(pc.yellow("no agents selected — nothing to do."));
     return;
   }
 
-  const skillMethod = opts.yes
-    ? "copy"
-    : await select({
-        message: "Skills installation method:",
+  // ── scope ────────────────────────────────────────────────────────────────
+  const scope: Scope = opts.scope ?? (
+    opts.yes
+      ? "local"
+      : await select<Scope>({
+          message: "Install skills where?",
+          choices: [
+            { name: "Local   (inside project, per agent dir)", value: "local" },
+            { name: "Global  (in each agent's home dir)", value: "global" },
+            { name: "Both    (local + global)", value: "both" },
+          ],
+        })
+  );
+
+  // ── method ───────────────────────────────────────────────────────────────
+  const method: Method = opts.method ?? (
+    opts.yes
+      ? "symlink"
+      : await select<Method>({
+          message: "Skills installation method:",
+          choices: [
+            { name: "Symlink  (recommended — auto-updates when CLI updates skills)", value: "symlink" },
+            { name: "Copy     (static snapshot)", value: "copy" },
+          ],
+        })
+  );
+
+  // ── compute unique skill destinations (dedup universal .agents/skills) ──
+  const destToAgents = new Map<string, AgentId[]>();
+  for (const id of selectedAgents) {
+    const def = AGENTS[id];
+    if (!def) continue;
+    for (const dest of resolveSkillsDestForAgent(target, def, scope)) {
+      const list = destToAgents.get(dest) ?? [];
+      list.push(id);
+      destToAgents.set(dest, list);
+    }
+  }
+
+  // ── existing skills handling ─────────────────────────────────────────────
+  const destsWithExisting: Array<{ dest: string; count: number; isSymlink: boolean }> = [];
+  for (const dest of destToAgents.keys()) {
+    const s = await detectSkillsAt(dest);
+    if (s.count > 0) destsWithExisting.push({ dest, ...s });
+  }
+
+  let existingAction: ExistingAction = "update";
+  if (destsWithExisting.length > 0 && !opts.update && !opts.force) {
+    if (opts.yes) {
+      existingAction = "update";
+    } else {
+      const total = destsWithExisting.reduce((s, d) => s + d.count, 0);
+      existingAction = await select<ExistingAction>({
+        message: `Found ${total} wiki skill(s) across ${destsWithExisting.length} location(s). Action?`,
         choices: [
-          { name: "Symlink  (recommended — auto-updates when wiki skills change)", value: "symlink" },
-          { name: "Copy     (static snapshot, committed with project)", value: "copy" },
+          { name: "Update    (re-sync all from ~/.wiki-cli/templates/skills)", value: "update" },
+          { name: "Keep      (don't touch existing)", value: "keep" },
+          { name: "Remove    (wipe wiki-* then reinstall)", value: "remove" },
+          { name: "Ask each  (prompt per location)", value: "ask-each" },
         ],
       });
+    }
+  } else if (opts.update) {
+    existingAction = "update";
+  }
 
-  const force = !!opts.force;
   const td = templatesDir();
   const srcSkillsDir = path.join(td, "skills");
+  if (!fs.existsSync(srcSkillsDir)) {
+    console.error(pc.red(`skills templates not found at ${srcSkillsDir}. Reinstall the CLI.`));
+    process.exitCode = 1;
+    return;
+  }
 
+  // ── install skills per destination ───────────────────────────────────────
   console.log();
+  for (const [dest, agentIds] of destToAgents) {
+    const rel = path.relative(target, dest) || dest;
+    const label = agentIds.length > 1
+      ? `${rel} ${pc.dim(`(shared: ${agentIds.map((a) => AGENTS[a].displayName).join(", ")})`)}`
+      : `${rel} ${pc.dim(`(${AGENTS[agentIds[0]].displayName})`)}`;
 
-  // ── install per agent ────────────────────────────────────────────────────
+    console.log(pc.bold(label));
 
-  const ruleFiles = new Map<string, string>(); // file → agentId (dedupe shared files like AGENTS.md)
+    let force = !!opts.force;
+    let skipDest = false;
 
-  for (const agentId of selectedAgents) {
-    const def = AGENT_DEFS[agentId];
-    console.log(pc.bold(`[${def.label}]`));
-
-    // skills
-    if (def.skillsDir) {
-      const dest = path.join(target, def.skillsDir);
-      await installSkills(dest, srcSkillsDir, skillMethod as "copy" | "symlink", force);
+    const existing = destsWithExisting.find((d) => d.dest === dest);
+    if (existing) {
+      let action: ExistingAction = existingAction;
+      if (action === "ask-each") {
+        action = await select<ExistingAction>({
+          message: `  ${rel}: ${existing.count} wiki skill(s) ${existing.isSymlink ? "(symlinked)" : "(copied)"}. Action?`,
+          choices: [
+            { name: "Update", value: "update" },
+            { name: "Keep", value: "keep" },
+            { name: "Remove", value: "remove" },
+          ],
+        });
+      }
+      if (action === "keep") {
+        console.log(pc.dim(`  keeping ${existing.count} existing skill(s)`));
+        skipDest = true;
+      } else if (action === "remove") {
+        const n = await removeWikiSkills(dest);
+        console.log(pc.dim(`  removed ${n} wiki skill(s)`));
+        force = true;
+      } else if (action === "update") {
+        force = true;
+      }
     }
 
-    // rule file — dedupe: if multiple agents share AGENTS.md, only first one writes, rest append
+    if (!skipDest) {
+      const n = await installSkills(dest, srcSkillsDir, method, force);
+      const verb = method === "symlink" ? "symlinked" : "copied";
+      console.log(pc.green(`  ✓ ${n} skill(s) ${verb}`));
+    }
+  }
+
+  // ── rule files per agent ─────────────────────────────────────────────────
+  console.log();
+  const writtenRuleFiles = new Map<string, AgentId>();
+  for (const agentId of selectedAgents) {
+    const def = AGENTS[agentId];
+    if (!def) continue;
+
     const ruleAbs = path.join(target, def.ruleFile);
     const content = def.ruleFormat === "cursor" ? cursorRule(wikiRoot) : boilerplate(wikiRoot, agentId);
 
-    if (ruleFiles.has(def.ruleFile)) {
-      // already written this turn by another agent — file now has our section, skip
-      console.log(pc.dim(`  shared rule file already written: ${def.ruleFile}`));
-    } else {
-      ruleFiles.set(def.ruleFile, agentId);
-      const result = await writeRuleFile(ruleAbs, content, def.appendOk, force);
-      const rel = path.relative(target, ruleAbs);
-      if (result === "wrote") console.log(pc.green(`  ✓ wrote ${rel}`));
-      else if (result === "appended") console.log(pc.green(`  ✚ appended to ${rel}`));
-      else console.log(pc.yellow(`  skip (already has wiki section): ${rel}`));
+    if (writtenRuleFiles.has(def.ruleFile)) {
+      console.log(pc.dim(`  shared rule file already written: ${def.ruleFile} (${AGENTS[writtenRuleFiles.get(def.ruleFile)!].displayName})`));
+      continue;
     }
+    writtenRuleFiles.set(def.ruleFile, agentId);
+    const result = await writeRuleFile(ruleAbs, content, def.appendOk, !!opts.force);
+    const rel = path.relative(target, ruleAbs);
+    if (result === "wrote") console.log(pc.green(`  ✓ wrote ${rel}`));
+    else if (result === "appended") console.log(pc.green(`  ✚ appended to ${rel}`));
+    else console.log(pc.yellow(`  skip (already has wiki section): ${rel}`));
   }
 
   // ── .llm-wiki.json ───────────────────────────────────────────────────────
   const configPath = path.join(target, ".llm-wiki.json");
-  if (!fs.existsSync(configPath) || force) {
+  if (!fs.existsSync(configPath) || opts.force) {
     await fs.writeJson(
       configPath,
-      { wiki_root: wikiRoot, agents: selectedAgents, version: 1, installed_at: new Date().toISOString() },
+      {
+        wiki_root: wikiRoot,
+        agents: selectedAgents,
+        scope,
+        method,
+        version: 2,
+        installed_at: new Date().toISOString(),
+      },
       { spaces: 2 },
     );
     console.log(pc.green(`\n✓ wrote .llm-wiki.json`));

@@ -5,7 +5,6 @@ paths:
   raw: raw
   wiki: wiki
   schemas: schemas
-  skills: skills
   cache: .wiki/cache
   reports: .wiki/reports
   manifests: .wiki/manifests

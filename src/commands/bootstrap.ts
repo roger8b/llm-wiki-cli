@@ -57,7 +57,6 @@ export async function bootstrapCmd(targetPath: string | undefined, opts: Bootstr
   for (const sub of RAW_SUBDIRS) await fs.ensureDir(path.join(target, "raw", sub));
   for (const sub of WIKI_SUBDIRS) await fs.ensureDir(path.join(target, "wiki", sub));
   await fs.ensureDir(path.join(target, "schemas"));
-  await fs.ensureDir(path.join(target, "skills"));
   await fs.ensureDir(path.join(target, ".wiki/cache"));
   await fs.ensureDir(path.join(target, ".wiki/manifests"));
   await fs.ensureDir(path.join(target, ".wiki/reports"));
@@ -74,7 +73,8 @@ export async function bootstrapCmd(targetPath: string | undefined, opts: Bootstr
   if (!fs.existsSync(logPath) || opts.force) await fs.writeFile(logPath, logSeed(today()));
 
   await fs.copy(path.join(td, "schemas"), path.join(target, "schemas"), { overwrite: true });
-  await fs.copy(path.join(td, "skills"), path.join(target, "skills"), { overwrite: true });
+  // Skills NOT copied into vault — they live in ~/.wiki-cli/templates/skills/
+  // and are installed per-agent via `wiki init`.
 
   const manifestPath = path.join(target, ".wiki/manifests/sources.json");
   if (!fs.existsSync(manifestPath)) {

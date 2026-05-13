@@ -13,6 +13,7 @@ import { queryPrepare, querySave } from "./commands/query.js";
 import { logAdd } from "./commands/log.js";
 import { linksCheck } from "./commands/links.js";
 import { projectInit } from "./commands/project.js";
+import { projectUninstall } from "./commands/uninstall.js";
 import { configShow, configSetRoot, configClear } from "./commands/config.js";
 import { resetCmd } from "./commands/reset.js";
 import {
@@ -39,8 +40,20 @@ program
   .description("wire a project to the brain — interactive agent setup (default: cwd)")
   .option("--wiki <path>", "brain root (uses global config / $LLM_WIKI_ROOT otherwise)")
   .option("--force", "overwrite / re-append even if wiki section already present")
-  .option("-y, --yes", "non-interactive: install claude-code with copy method")
+  .option("-y, --yes", "non-interactive: defaults (detected agents, local, symlink)")
+  .option("--scope <local|global|both>", "where to install skills")
+  .option("--method <symlink|copy>", "skills installation method")
+  .option("--update", "re-sync existing skills instead of asking")
+  .option("--show-all", "show every supported agent (not just detected ones)")
   .action((p, o) => projectInit(p, o));
+
+program
+  .command("uninstall [path]")
+  .description("remove wiki skills (and rule sections) from a project / global dirs")
+  .option("--scope <local|global|both>", "where to remove from")
+  .option("--force", "skip confirmation prompt")
+  .option("-y, --yes", "non-interactive: remove from all detected (local+global)")
+  .action((p, o) => projectUninstall(p, o));
 
 program
   .command("bootstrap [path]")

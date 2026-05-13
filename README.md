@@ -20,12 +20,18 @@ You never (or rarely) write the wiki yourself. You're in charge of sourcing, exp
 ## Architecture
 
 ```
-raw/          Your curated source documents (immutable)
-wiki/         LLM-generated markdown pages (LLM writes, you read)
-schemas/      Page templates and conventions
-skills/       Agent instructions for wiki operations
-.wiki/        Cache, manifests, and reports
+~/brain/                  Your knowledge base (the "vault")
+├── raw/                  Curated source documents (immutable)
+├── wiki/                 LLM-generated markdown pages (LLM writes, you read)
+├── schemas/              Page templates and conventions
+└── .wiki/                Cache, manifests, and reports
+
+~/.wiki-cli/              CLI install + skill source-of-truth
+├── (clone of llm-wiki-cli)
+└── templates/skills/     Canonical skill definitions (symlinked into agents)
 ```
+
+Skills do **not** live inside the brain. They live in `~/.wiki-cli/templates/skills/` and are symlinked into each agent's skill dir when you run `wiki init`. Updating the CLI updates the skills automatically.
 
 **Three layers:**
 
@@ -62,12 +68,18 @@ curl -fsSL .../install.sh | bash -s -- --no-brain
 
 # skip git init inside the brain
 curl -fsSL .../install.sh | bash -s -- --no-git
+
+# use existing ~/.wiki-cli/ (skip clone — useful when iterating after pull)
+bash install.sh --local
+
+# sync a local checkout into ~/.wiki-cli/ (development iteration)
+bash install.sh --local /path/to/llm-wiki-cli --no-brain
 ```
 
 **Manual install (from source):**
 
 ```bash
-git clone <repo> && cd wiki-cli
+git clone <repo> ~/.wiki-cli && cd ~/.wiki-cli
 npm install && npm run build && npm link
 wiki bootstrap ~/brain --git
 ```
@@ -83,8 +95,10 @@ curl -fsSL .../install.sh | bash
 # 2. Wire a project — run inside any repo
 cd ~/code/my-project
 wiki init
-#    → select which agents (Claude Code, PI, Gemini, Cursor…)
-#    → symlink or copy skills
+#    → lists detected agents on your machine (Claude Code, Cursor, Gemini, PI…)
+#    → pre-selects agents that already have wiki skills set up (none on first run)
+#    → choose scope: local (project), global (agent home dir), or both
+#    → choose method: symlink (recommended) or copy
 #    → appends wiki rules to existing CLAUDE.md / AGENTS.md / etc.
 
 # 3. From anywhere — add sources and let the agent ingest them
@@ -101,9 +115,40 @@ wiki ingest commit raw/articles/some-article.md
 ### Project Setup
 
 ```bash
-wiki init [path] [--wiki <path>] [--force] [-y]
-#   -y / --yes: non-interactive, installs claude-code with copy method
+wiki init [path] [options]
+#   --wiki <path>              brain root override
+#   --scope <local|global|both>  where to install skills (default: ask)
+#   --method <symlink|copy>     installation method (default: ask, symlink recommended)
+#   --update                   re-sync existing skills instead of asking
+#   --show-all                 show every supported agent (default: only detected)
+#   --force                    overwrite even if wiki section already present
+#   -y, --yes                  non-interactive (detected agents, local, symlink)
+
+# Remove wiki skills + rule sections from a project (and/or global dirs)
+wiki uninstall [path] [options]
+#   --scope <local|global|both>  where to remove from
+#   --force                    skip confirmation
+#   -y, --yes                  remove from all detected (local+global)
 ```
+
+**Supported agents (54 total, 14 share `.agents/skills/`):**
+aider-desk, amp, antigravity, augment, bob, claude-code, cline, codearts-agent,
+codebuddy, codemaker, codestudio, codex, command-code, continue, cortex, crush,
+cursor, deepagents, devin, dexto, droid, firebender, forgecode, gemini-cli,
+github-copilot, goose, hermes-agent, iflow-cli, junie, kilo, kimi-cli, kiro-cli,
+kode, mcpjam, mistral-vibe, mux, neovate, openclaw, opencode, openhands, pi,
+pochi, qoder, qwen-code, replit, roo, rovodev, tabnine-cli, trae, trae-cn, warp,
+windsurf, zencoder, adal.
+
+**Skill installation scopes:**
+
+| Scope    | Where skills go | Use when |
+|----------|-----------------|----------|
+| `local`  | `<project>/<agent-skills-dir>/wiki-*` | Project-scoped — checks into repo |
+| `global` | `<agent home>/skills/wiki-*` (e.g. `~/.claude/skills/`) | Once per machine, applies everywhere |
+| `both`   | local + global | Belt and suspenders |
+
+Symlink (default) makes skill updates from `wiki` CLI propagate automatically. Copy creates a static snapshot.
 
 ### Brain Creation (run once per machine)
 
@@ -219,7 +264,9 @@ Architectural choices, hiring rubrics, product principles. `decisions/` captures
 ## Mental Model
 
 - **One brain per machine.** Created once with `wiki bootstrap` — the CLI ships everything needed, no extra repo to clone.
-- **Any project wires to the brain** with `wiki init` — interactive setup that appends wiki rules to existing agent config files and installs skills.
+- **Skills live with the CLI, not the brain.** Canonical skill source is `~/.wiki-cli/templates/skills/`. The brain stays pure knowledge.
+- **Any project wires to the brain** with `wiki init` — symlinks (or copies) skills into your agent's dir and appends rules to CLAUDE.md / AGENTS.md / etc.
+- **Symlink default** means `git pull` on `~/.wiki-cli/` instantly updates every project's skills.
 - **All commands work from any directory** — the global brain is always resolved automatically.
 
 Everything is plain Markdown in a Git repo. You get version history, branching, and collaboration for free.

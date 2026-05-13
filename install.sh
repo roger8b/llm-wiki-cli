@@ -3,20 +3,40 @@ set -euo pipefail
 
 # wiki CLI installer
 # Usage: curl -fsSL <url>/install.sh | bash
-#        bash install.sh [--brain <path>] [--no-brain] [--no-git]
+#        bash install.sh [--brain <path>] [--no-brain] [--no-git] [--local]
 
 REPO_URL="https://github.com/roger8b/llm-wiki-cli"
 INSTALL_DIR="${HOME}/.wiki-cli"
 BRAIN_PATH="${HOME}/brain"
 INIT_BRAIN=true
 INIT_GIT=true
+USE_LOCAL=false
+LOCAL_SOURCE=""
 
 # ── parse args ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --brain)   BRAIN_PATH="$2"; shift 2 ;;
+    --brain)    BRAIN_PATH="$2"; shift 2 ;;
     --no-brain) INIT_BRAIN=false; shift ;;
-    --no-git)  INIT_GIT=false; shift ;;
+    --no-git)   INIT_GIT=false; shift ;;
+    --local)    USE_LOCAL=true
+                # if next arg exists and isn't a flag, treat as source path
+                if [[ $# -gt 1 && "${2:0:2}" != "--" ]]; then
+                  LOCAL_SOURCE="$2"; shift 2
+                else
+                  shift
+                fi ;;
+    --help|-h)  cat <<EOF
+Usage: $0 [--brain <path>] [--no-brain] [--no-git] [--local [src]]
+
+  --brain <path>   Brain location (default: ~/brain)
+  --no-brain       Skip brain creation
+  --no-git         Skip git init in brain
+  --local [src]    Use local checkout instead of cloning. If 'src' given,
+                   syncs from that path into ~/.wiki-cli/. Otherwise uses
+                   existing ~/.wiki-cli/.
+EOF
+                exit 0 ;;
     *) echo "unknown option: $1"; exit 1 ;;
   esac
 done
@@ -43,9 +63,27 @@ fi
 ok "Node.js $(node --version)"
 
 # ── install ───────────────────────────────────────────────────────────────────
-if [[ -d "$INSTALL_DIR" ]]; then
+if $USE_LOCAL; then
+  if [[ -n "$LOCAL_SOURCE" ]]; then
+    [[ -d "$LOCAL_SOURCE" ]] || err "local source not found: $LOCAL_SOURCE"
+    [[ -f "$LOCAL_SOURCE/package.json" ]] || err "no package.json at $LOCAL_SOURCE"
+    dim "syncing $LOCAL_SOURCE → $INSTALL_DIR …"
+    mkdir -p "$INSTALL_DIR"
+    # use rsync if available, fall back to cp -R (excluding node_modules/dist)
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a --delete --exclude node_modules --exclude dist --exclude .git "$LOCAL_SOURCE/" "$INSTALL_DIR/"
+    else
+      (cd "$LOCAL_SOURCE" && tar --exclude=node_modules --exclude=dist --exclude=.git -cf - .) | (cd "$INSTALL_DIR" && tar -xf -)
+    fi
+  else
+    [[ -d "$INSTALL_DIR" ]] || err "no local install found at $INSTALL_DIR. Run without --local first, or pass --local <src>."
+    dim "using existing $INSTALL_DIR"
+  fi
+elif [[ -d "$INSTALL_DIR/.git" ]]; then
   warn "existing install found at $INSTALL_DIR — pulling latest"
-  git -C "$INSTALL_DIR" pull --quiet
+  git -C "$INSTALL_DIR" pull --quiet || warn "git pull failed — continuing with current state"
+elif [[ -d "$INSTALL_DIR" ]]; then
+  warn "$INSTALL_DIR exists but is not a git checkout — leaving as-is"
 else
   dim "cloning to $INSTALL_DIR …"
   git clone --quiet "$REPO_URL" "$INSTALL_DIR"
@@ -56,7 +94,7 @@ dim "installing dependencies …"
 npm install --silent
 dim "building …"
 npm run build --silent
-npm link --silent
+npm link --silent 2>/dev/null || warn "npm link failed — you may need to run it manually (sudo npm link)"
 
 ok "wiki CLI installed ($(wiki --version 2>/dev/null || echo 'ok'))"
 

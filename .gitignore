@@ -5,3 +5,13 @@ dist/
 coverage/
 .env
 dummy-pages/
+.gitnexus/
+.claude/
+.cursor/
+.opencode/
+.codex/
+.windsurf/
+.roo/
+.cline/
+.agents/
+.pi
