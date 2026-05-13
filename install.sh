@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: curl -fsSL <url>/install.sh | bash
 #        bash install.sh [--brain <path>] [--no-brain] [--no-git]
 
-REPO_URL="https://github.com/your-org/wiki-cli"  # update before publishing
+REPO_URL="https://github.com/roger8b/llm-wiki-cli"
 INSTALL_DIR="${HOME}/.wiki-cli"
 BRAIN_PATH="${HOME}/brain"
 INIT_BRAIN=true
