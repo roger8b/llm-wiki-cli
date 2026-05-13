@@ -3,6 +3,7 @@ import fs from "fs-extra";
 import fg from "fast-glob";
 import matter from "gray-matter";
 import pc from "picocolors";
+import pLimit from "p-limit";
 import { loadContext } from "../utils/paths.js";
 import { validatePage } from "./page.js";
 import { today } from "../utils/misc.js";
@@ -28,27 +29,32 @@ export async function lintCmd() {
   const pageFiles = await fg("**/*.md", { cwd: ctx.wikiDir, absolute: true });
   const slugs = new Map<string, string[]>();
   const pagesByPath = new Map<string, Record<string, any>>();
+  const limit = pLimit(100);
 
-  for (const f of pageFiles) {
-    const base = path.basename(f);
-    if (base === "index.md" || base === "log.md") continue;
-    const issues = await validatePage(f);
-    for (const i of issues) {
-      findings.push({ severity: i.level === "error" ? "error" : "warning", file: i.file, message: i.message });
-    }
-    const raw = await fs.readFile(f, "utf8");
-    let fm: Record<string, any> = {};
-    try {
-      fm = matter(raw).data as Record<string, any>;
-    } catch {
-      continue;
-    }
-    pagesByPath.set(f, fm);
-    if (fm.slug) {
-      if (!slugs.has(fm.slug)) slugs.set(fm.slug, []);
-      slugs.get(fm.slug)!.push(path.relative(ctx.root, f));
-    }
-  }
+  await Promise.all(
+    pageFiles.map((f) => limit(async () => {
+      const base = path.basename(f);
+      if (base === "index.md" || base === "log.md") return;
+
+      const issues = await validatePage(f);
+      for (const i of issues) {
+        findings.push({ severity: i.level === "error" ? "error" : "warning", file: i.file, message: i.message });
+      }
+
+      const raw = await fs.readFile(f, "utf8");
+      let fm: Record<string, any> = {};
+      try {
+        fm = matter(raw).data as Record<string, any>;
+      } catch {
+        return;
+      }
+      pagesByPath.set(f, fm);
+      if (fm.slug) {
+        if (!slugs.has(fm.slug)) slugs.set(fm.slug, []);
+        slugs.get(fm.slug)!.push(path.relative(ctx.root, f));
+      }
+    }))
+  );
 
   for (const [slug, files] of slugs) {
     if (files.length > 1) {
