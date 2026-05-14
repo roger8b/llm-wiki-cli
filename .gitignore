@@ -16,3 +16,4 @@ dummy-pages/
 .agents/
 .pi
 reports/
+.stryker-tmp/
