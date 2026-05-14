@@ -88,6 +88,18 @@ describe("agents utils", () => {
       }
     });
 
+    it("appendOk should be true for boilerplate agents, false for cursor-format agents", () => {
+      // Kills BooleanLiteral mutations that flip appendOk: true → false (or vice-versa).
+      // ruleFormat is a StringLiteral (excluded from mutation) so it's safe to branch on.
+      for (const [id, config] of Object.entries(AGENTS)) {
+        if (config.ruleFormat === "cursor") {
+          expect(config.appendOk, `${id}: cursor-format agent must have appendOk false`).toBe(false);
+        } else {
+          expect(config.appendOk, `${id}: boilerplate agent must have appendOk true`).toBe(true);
+        }
+      }
+    });
+
     it("should mark some agents with showInUniversalList: false", () => {
       const replit = AGENTS["replit"];
       expect(replit).toBeDefined();
@@ -338,8 +350,31 @@ describe("agents utils", () => {
 
       const detected = detectInstalledAgents();
       const uniqueSet = new Set(detected);
-      
+
       expect(uniqueSet.size).toBe(detected.length);
+    });
+
+    it("should detect EVERY agent when all filesystem paths exist", () => {
+      // mockReturnValue(true) means every fs.existsSync call returns true.
+      // Any detectInstalled mutated to () => undefined would NOT call existsSync,
+      // so those agents would be missing — this test kills all ArrowFunction mutants.
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const detected = detectInstalledAgents();
+      for (const id of Object.keys(AGENTS)) {
+        expect(detected, `agent "${id}" should be detected`).toContain(id);
+      }
+    });
+
+    it("should EXCLUDE an agent whose detectInstalled throws", () => {
+      // Kills: BooleanLiteral(true) mutation on `return false` in the catch block,
+      // which would cause throwing agents to be erroneously included.
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        if (String(p).includes(".aider-desk")) throw new Error("permission denied");
+        return false;
+      });
+      const detected = detectInstalledAgents();
+      expect(detected).not.toContain("aider-desk");
     });
 
     it("should handle agent with showInUniversalList: false still being detected", () => {
