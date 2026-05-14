@@ -9,13 +9,14 @@ on:
 
 env:
   NODE_VERSION: '20'
-  COVERAGE_DIR: ./cli/coverage
-  COVERAGE_THRESHOLD: 90
 
 jobs:
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cli
     steps:
       - uses: actions/checkout@v4
       
@@ -23,21 +24,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: ./cli/package-lock.json
       
       - name: Install dependencies
         run: npm ci
-        working-directory: ./cli
       
       - name: Type check
         run: npm run build
-        working-directory: ./cli
 
   test:
     name: Test with Coverage
     needs: lint
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cli
     permissions:
       contents: read
       pull-requests: write
@@ -50,18 +50,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: ./cli/package-lock.json
       
       - name: Install dependencies
         run: npm ci
-        working-directory: ./cli
       
       - name: Run tests with coverage
         id: test
         run: |
           # Run tests with coverage
-          npm test -- --coverage --reporter=json 2>&1 | tee test-output.txt
+          npm test -- --coverage 2>&1 | tee test-output.txt
           
           # Generate coverage summary JSON
           node -e "
@@ -89,16 +86,15 @@ jobs:
             fs.writeFileSync('./coverage/coverage-summary.json', JSON.stringify(summary, null, 2));
             console.log('✅ Coverage summary generated');
           "
-        working-directory: ./cli
       
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage-report
+          name: coverage-report-${{ github.run_id }}
           path: |
-            ./cli/coverage
-            ./cli/test-output.txt
+            coverage/
+            test-output.txt
           retention-days: 7
       
       - name: Publish coverage to PR
@@ -116,17 +112,15 @@ jobs:
             const passed = passedMatch ? parseInt(passedMatch[1]) : 0;
             const failed = failedMatch ? parseInt(failedMatch[1]) : 0;
             
-            const threshold = process.env.COVERAGE_THRESHOLD;
-            
             const comment = `
             ## 📊 Test Coverage Report
             
             | Metric | Coverage | Status |
             |--------|----------|--------|
-            | 📝 Lines | ${summary.total.lines.pct}% | ${summary.total.lines.pct >= threshold ? '✅' : '❌'} |
-            | 📊 Statements | ${summary.total.statements.pct}% | ${summary.total.statements.pct >= threshold ? '✅' : '❌'} |
-            | 🌿 Branches | ${summary.total.branches.pct}% | ${summary.total.branches.pct >= threshold ? '✅' : '❌'} |
-            | 🔧 Functions | ${summary.total.functions.pct}% | ${summary.total.functions.pct >= threshold ? '✅' : '❌'} |
+            | 📝 Lines | ${summary.total.lines.pct}% | ${summary.total.lines.pct >= 90 ? '✅' : '❌'} |
+            | 📊 Statements | ${summary.total.statements.pct}% | ${summary.total.statements.pct >= 90 ? '✅' : '❌'} |
+            | 🌿 Branches | ${summary.total.branches.pct}% | ${summary.total.branches.pct >= 90 ? '✅' : '❌'} |
+            | 🔧 Functions | ${summary.total.functions.pct}% | ${summary.total.functions.pct >= 90 ? '✅' : '❌'} |
             
             ### Test Results
             - ✅ **Passed:** ${passed}
@@ -148,7 +142,7 @@ jobs:
           node -e "
             const fs = require('fs');
             const summary = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'));
-            const threshold = $COVERAGE_THRESHOLD;
+            const threshold = 90;
             
             console.log('\\n📊 Coverage Thresholds Check:');
             console.log('   Threshold: >=' + threshold + '%');
@@ -169,13 +163,15 @@ jobs:
             }
             console.log('✅ All coverage thresholds met!');
           "
-        working-directory: ./cli
 
   mutation-test:
     name: Mutation Testing (Stryker)
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: ./cli
     
     steps:
       - uses: actions/checkout@v4
@@ -184,28 +180,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: ./cli/package-lock.json
       
       - name: Install dependencies
         run: npm ci
-        working-directory: ./cli
       
       - name: Run mutation tests
         run: npx stryker run
-        working-directory: ./cli
       
       - name: Upload mutation report
         uses: actions/upload-artifact@v4
         with:
-          name: mutation-test-report
-          path: ./cli/reports/stryker-mutation-testing
+          name: mutation-test-report-${{ github.run_id }}
+          path: reports/stryker-mutation-testing
           retention-days: 14
-      
-      - name: Publish mutation report to PR
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Comment on PR with mutation test summary
-            console.log('Mutation testing complete');
