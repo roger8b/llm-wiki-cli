@@ -14,9 +14,6 @@ jobs:
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./cli
     steps:
       - uses: actions/checkout@v4
       
@@ -35,9 +32,6 @@ jobs:
     name: Test with Coverage
     needs: lint
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./cli
     permissions:
       contents: read
       pull-requests: write
@@ -57,19 +51,16 @@ jobs:
       - name: Run tests with coverage
         id: test
         run: |
-          # Run tests with coverage
           npm test -- --coverage 2>&1 | tee test-output.txt
           
-          # Generate coverage summary JSON
           node -e "
             const fs = require('fs');
             const output = fs.readFileSync('test-output.txt', 'utf8');
             
-            // Extract coverage percentages from text output
-            const linesMatch = output.match(/Lines\\s*:\\s*(\\d+%)/);
-            const stmtsMatch = output.match(/Statements\\s*:\\s*(\\d+%)/);
-            const branchMatch = output.match(/Branches\\s*:\\s*(\\d+%)/);
-            const funcMatch = output.match(/Functions\\s*:\\s*(\\d+%)/);
+            const linesMatch = output.match(/Lines\s*:\s*(\d+%)/);
+            const stmtsMatch = output.match(/Statements\s*:\s*(\d+%)/);
+            const branchMatch = output.match(/Branches\s*:\s*(\d+%)/);
+            const funcMatch = output.match(/Functions\s*:\s*(\d+%)/);
             
             const toNum = (str) => parseFloat(str.replace('%', ''));
             
@@ -103,12 +94,11 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const summary = JSON.parse(fs.readFileSync('./cli/coverage/coverage-summary.json', 'utf8'));
-            const output = fs.readFileSync('./cli/test-output.txt', 'utf8');
+            const summary = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'));
+            const output = fs.readFileSync('./test-output.txt', 'utf8');
             
-            // Extract test results
-            const passedMatch = output.match(/Test Files\\s+.*?(\\d+) passed/);
-            const failedMatch = output.match(/Tests\\s+.*?(\\d+) failed/);
+            const passedMatch = output.match(/Test Files\s+.*?(\d+) passed/);
+            const failedMatch = output.match(/Tests\s+.*?(\d+) failed/);
             const passed = passedMatch ? parseInt(passedMatch[1]) : 0;
             const failed = failedMatch ? parseInt(failedMatch[1]) : 0;
             
@@ -169,9 +159,6 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    defaults:
-      run:
-        working-directory: ./cli
     
     steps:
       - uses: actions/checkout@v4
