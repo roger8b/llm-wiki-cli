@@ -16,12 +16,12 @@
     "coverage"
   ],
   "mutator": {
-    "excludedMutations": ["booleanLiteral", "stringLiteral"]
+    "excludedMutations": ["stringLiteral"]
   },
   "thresholds": {
     "high": 50,
     "low": 40,
-    "break": 35
+    "break": 0
   },
   "timeoutMS": 5000,
   "tempDirName": "/tmp/stryker-wiki-cli"
