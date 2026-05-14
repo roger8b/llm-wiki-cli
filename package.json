@@ -19,7 +19,7 @@
     "test": "vitest run"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
@@ -35,11 +35,14 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.9.0",
+    "@vitest/coverage-v8": "^4.1.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.5"
+    "vitest": "^4.1.6"
   }
 }
