@@ -1,5 +1,12 @@
 # wiki — LLM-Maintained Knowledge Base CLI
 
+[![CI](https://github.com/roger8b/llm-wiki-cli/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/roger8b/llm-wiki-cli/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/llm-wiki.svg)](https://www.npmjs.com/package/llm-wiki)
+[![Node.js ≥20](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/roger8b/llm-wiki-cli/badges/coverage.json)](https://github.com/roger8b/llm-wiki-cli/actions/workflows/ci.yml)
+[![Mutation score](https://img.shields.io/badge/mutation%20score-92%25-brightgreen)](#)
+
 A persistent, compounding knowledge base operated by LLM agents. Drop in sources, the agent reads and integrates them; ask questions, the agent answers grounded in your brain.
 
 ## The Core Idea

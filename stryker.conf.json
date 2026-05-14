@@ -3,10 +3,22 @@
   "packageManager": "npm",
   "reporters": [
     "html",
-    "clear-text",
+    "json",
     "progress"
   ],
   "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.stryker.config.ts"
+  },
+  "ignorePatterns": [
+    ".claude",
+    ".llm-wiki.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "reports",
+    "coverage",
+    ".stryker-tmp"
+  ],
   "coverageAnalysis": "perTest",
   "mutate": [
     "src/utils/paths.ts",
