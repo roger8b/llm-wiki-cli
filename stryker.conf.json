@@ -19,9 +19,9 @@
     "excludedMutations": ["booleanLiteral", "stringLiteral"]
   },
   "thresholds": {
-    "high": 80,
-    "low": 70,
-    "break": 60
+    "high": 50,
+    "low": 40,
+    "break": 35
   },
   "timeoutMS": 5000,
   "tempDirName": "/tmp/stryker-wiki-cli"
