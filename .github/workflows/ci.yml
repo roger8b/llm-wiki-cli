@@ -9,6 +9,7 @@ on:
 
 env:
   NODE_VERSION: '22'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   lint:
@@ -176,37 +177,12 @@ jobs:
       
       - name: Upload mutation report
         uses: actions/upload-artifact@v4
-        if: success() || failure()
+        if: always()
         with:
           name: mutation-test-report-${{ github.run_id }}
           path: |
-            reports/stryker-mutation-testing/*.html
-            reports/stryker-mutation-testing/*.json
-            stryker-report.txt
+            reports/
+            .stryker-tmp/
           retention-days: 14
-      
-      - name: Parse mutation test results
-        if: always()
-        run: |
-          # Parse stryker report to extract key metrics
-          if [ -f reports/stryker-mutation-testing/mutation-test-outcome.json ]; then
-            node -e "
-              const fs = require('fs');
-              const report = JSON.parse(fs.readFileSync('reports/stryker-mutation-testing/mutation-test-outcome.json', 'utf8'));
-              
-              const survived = report.tables?.survived?.length || 0;
-              const killed = report.summary?.killed || 0;
-              const total = report.summary?.total || 0;
-              const score = total > 0 ? ((killed / total) * 100).toFixed(2) : 0;
-              
-              console.log('\\n🧬 Mutation Testing Results:');
-              console.log('   Total mutants: ' + total);
-              console.log('   Killed: ' + killed);
-              console.log('   Survived: ' + survived);
-              console.log('   Score: ' + score + '%');
-              
-              fs.writeFileSync('stryker-report.txt', 'Mutation Testing Report\\n========================\\nTotal: ' + total + '\\nKilled: ' + killed + '\\nSurvived: ' + survived + '\\nScore: ' + score + '%\\n');
-            "
-          else
-            echo "No stryker report found" > stryker-report.txt
-          fi
+          ignore-paths: |
+            node_modules
