@@ -1,5 +1,11 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "reporters": [
+    "html",
+    "json",
+    "progress"
+  ],
   "testRunner": "vitest",
   "vitest": {
     "configFile": "vitest.stryker.config.ts",
@@ -11,9 +17,12 @@
   ],
   "ignorePatterns": [
     ".claude",
-    ".stryker-tmp",
-    "node_modules",
-    "coverage"
+    ".llm-wiki.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "reports",
+    "coverage",
+    ".stryker-tmp"
   ],
   "mutator": {
     "excludedMutations": ["stringLiteral"]
