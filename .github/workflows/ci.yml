@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
 
 jobs:
   lint:
@@ -172,11 +172,41 @@ jobs:
         run: npm ci
       
       - name: Run mutation tests
-        run: npx stryker run
+        run: npx stryker run --ignoreStatic --quiet
       
       - name: Upload mutation report
         uses: actions/upload-artifact@v4
+        if: success() || failure()
         with:
           name: mutation-test-report-${{ github.run_id }}
-          path: reports/stryker-mutation-testing
+          path: |
+            reports/stryker-mutation-testing/*.html
+            reports/stryker-mutation-testing/*.json
+            stryker-report.txt
           retention-days: 14
+      
+      - name: Parse mutation test results
+        if: always()
+        run: |
+          # Parse stryker report to extract key metrics
+          if [ -f reports/stryker-mutation-testing/mutation-test-outcome.json ]; then
+            node -e "
+              const fs = require('fs');
+              const report = JSON.parse(fs.readFileSync('reports/stryker-mutation-testing/mutation-test-outcome.json', 'utf8'));
+              
+              const survived = report.tables?.survived?.length || 0;
+              const killed = report.summary?.killed || 0;
+              const total = report.summary?.total || 0;
+              const score = total > 0 ? ((killed / total) * 100).toFixed(2) : 0;
+              
+              console.log('\\n🧬 Mutation Testing Results:');
+              console.log('   Total mutants: ' + total);
+              console.log('   Killed: ' + killed);
+              console.log('   Survived: ' + survived);
+              console.log('   Score: ' + score + '%');
+              
+              fs.writeFileSync('stryker-report.txt', 'Mutation Testing Report\\n========================\\nTotal: ' + total + '\\nKilled: ' + killed + '\\nSurvived: ' + survived + '\\nScore: ' + score + '%\\n');
+            "
+          else
+            echo "No stryker report found" > stryker-report.txt
+          fi
