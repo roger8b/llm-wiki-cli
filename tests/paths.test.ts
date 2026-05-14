@@ -35,6 +35,8 @@ describe("paths utility", () => {
     });
 
     it("should fallback if LLM_WIKI_ROOT env var points to a dir without wiki.config.yaml", async () => {
+      vi.spyOn(globalConfigModule, "readGlobalConfig").mockReturnValue({});
+
       const rootDir = path.join(tempDir, "env-root");
       await fs.ensureDir(rootDir);
       process.env.LLM_WIKI_ROOT = rootDir;
@@ -104,6 +106,8 @@ describe("paths utility", () => {
     });
 
     it("should return a correctly populated context object when config is present", async () => {
+      vi.spyOn(globalConfigModule, "readGlobalConfig").mockReturnValue({});
+
       const rootDir = path.join(tempDir, "context-root");
       await fs.ensureDir(rootDir);
       const yamlContent = `
@@ -134,6 +138,8 @@ paths:
     });
 
     it("should handle optional paths like skillsDir", async () => {
+      vi.spyOn(globalConfigModule, "readGlobalConfig").mockReturnValue({});
+
       const rootDir = path.join(tempDir, "context-root-2");
       await fs.ensureDir(rootDir);
       const yamlContent = `
