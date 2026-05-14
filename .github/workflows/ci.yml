@@ -159,26 +159,122 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    
+    permissions:
+      contents: read
+      pull-requests: write
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Run mutation tests
         run: npx stryker run
-      
-      - name: Upload mutation report
+
+      - name: Publish mutation report to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = './reports/mutation/mutation.json';
+            if (!fs.existsSync(reportPath)) {
+              console.log('No mutation report found — skipping comment');
+              return;
+            }
+
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            const files = report.files ?? {};
+
+            let killed = 0, survived = 0, timeout = 0, noCoverage = 0, total = 0;
+            const survivedList = [];
+
+            for (const [filePath, fileData] of Object.entries(files)) {
+              for (const mutant of (fileData.mutants ?? [])) {
+                total++;
+                switch (mutant.status) {
+                  case 'Killed':     killed++;     break;
+                  case 'Survived':   survived++;   survivedList.push({ filePath, mutant }); break;
+                  case 'Timeout':    timeout++;    break;
+                  case 'NoCoverage': noCoverage++; survivedList.push({ filePath, mutant }); break;
+                }
+              }
+            }
+
+            const tested = killed + survived + timeout + noCoverage;
+            const score = tested > 0 ? ((killed + timeout) / tested * 100).toFixed(1) : '0.0';
+            const { high, low, break: brk } = report.thresholds ?? { high: 90, low: 80, break: 80 };
+            const scoreNum = parseFloat(score);
+            const scoreEmoji = scoreNum >= high ? '🟢' : scoreNum >= low ? '🟡' : '🔴';
+
+            let survivedSection = '';
+            if (survivedList.length > 0) {
+              const rows = survivedList.slice(0, 20).map(({ filePath, mutant }) => {
+                const loc = mutant.location
+                  ? `L${mutant.location.start.line}:${mutant.location.start.column}`
+                  : '—';
+                const orig = (mutant.replacement ?? mutant.original ?? '').replace(/`/g, "'").slice(0, 60);
+                return `| \`${filePath}\` | \`${loc}\` | ${mutant.mutatorName} | \`${orig}\` |`;
+              }).join('\n');
+              survivedSection = `
+            ### 🧬 Survived / NoCoverage mutants (${survivedList.length}${survivedList.length > 20 ? ', first 20 shown' : ''})
+
+            | File | Location | Mutator | Replacement |
+            |------|----------|---------|-------------|
+            ${rows}`;
+            }
+
+            const comment = `## 🧬 Mutation Test Report
+
+            | Metric | Value |
+            |--------|-------|
+            | ${scoreEmoji} **Score** | **${score}%** |
+            | ✅ Killed | ${killed} |
+            | ❌ Survived | ${survived} |
+            | ⏱ Timeout | ${timeout} |
+            | 🚫 No Coverage | ${noCoverage} |
+            | **Total mutants** | **${total}** |
+
+            **Thresholds:** 🟢 ≥${high}% · 🟡 ≥${low}% · 🔴 <${brk}% (breaks build)
+            ${survivedSection}
+            ---
+            *Full HTML report available in [CI artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})*`;
+
+            // Find and update existing comment, or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user?.type === 'Bot' && c.body?.includes('🧬 Mutation Test Report')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }
+
+      - name: Upload mutation report artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mutation-test-report-${{ github.run_id }}
-          path: |
-            reports/
+          path: reports/
           retention-days: 14
