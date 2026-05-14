@@ -357,6 +357,92 @@ describe("agents utils", () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Mutation killers: logical-operator branches for multi-path detections
+  // Each test exercises ONE path at a time, forcing the OR operand to be
+  // the sole reason the agent is detected. This kills:
+  //   - ConditionalExpression(false) mutations on individual conditions
+  //   - LogicalOperator(||→&&) mutations
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe("detectInstalled() logical operator coverage", () => {
+    // openclaw: () => A || B || C  (three paths)
+    it("openclaw: detected when ONLY .openclaw exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.endsWith("/.openclaw");
+      });
+      expect(detectInstalledAgents()).toContain("openclaw");
+    });
+
+    it("openclaw: detected when ONLY .clawdbot exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.endsWith("/.clawdbot");
+      });
+      expect(detectInstalledAgents()).toContain("openclaw");
+    });
+
+    it("openclaw: detected when ONLY .moltbot exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.endsWith("/.moltbot");
+      });
+      expect(detectInstalledAgents()).toContain("openclaw");
+    });
+
+    it("openclaw: NOT detected when none of the three paths exist", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return !s.includes(".openclaw") && !s.includes(".clawdbot") && !s.includes(".moltbot");
+      });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      expect(detectInstalledAgents()).not.toContain("openclaw");
+    });
+
+    // codebuddy: () => CWD_check || HOME_check
+    it("codebuddy: detected when ONLY project-local .codebuddy exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.startsWith(mockCwd) && s.endsWith("/.codebuddy");
+      });
+      expect(detectInstalledAgents()).toContain("codebuddy");
+    });
+
+    it("codebuddy: detected when ONLY home .codebuddy exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.includes("/.codebuddy") && !s.startsWith(mockCwd);
+      });
+      expect(detectInstalledAgents()).toContain("codebuddy");
+    });
+
+    // codex: () => existsSync(codexHome) || existsSync("/etc/codex")
+    it("codex: detected when ONLY /etc/codex exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        return String(p) === "/etc/codex";
+      });
+      expect(detectInstalledAgents()).toContain("codex");
+    });
+
+    // continue: () => CWD_check || HOME_check
+    it("continue: detected when ONLY project-local .continue exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.startsWith(mockCwd) && s.endsWith("/.continue");
+      });
+      expect(detectInstalledAgents()).toContain("continue");
+    });
+
+    it("continue: detected when ONLY home .continue exists", () => {
+      vi.mocked(fs.existsSync).mockImplementation((p: unknown) => {
+        const s = String(p);
+        return s.includes("/.continue") && !s.startsWith(mockCwd);
+      });
+      expect(detectInstalledAgents()).toContain("continue");
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Integration: Combined usage scenarios
   // ─────────────────────────────────────────────────────────────────────────
 
