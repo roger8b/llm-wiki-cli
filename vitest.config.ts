@@ -6,14 +6,21 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov', 'json-summary'],
       reportsDirectory: './coverage',
-      include: ['src/utils/paths.ts', 'src/utils/global-config.ts', 'src/utils/misc.ts'],
+      // Only cover src/utils which have proper unit tests
+      // Commands are covered via logical unit tests (interfaces, types, helpers)
+      // Integration tests would be needed for full command execution coverage
+      include: [
+        'src/utils/**/*.ts',
+      ],
+      exclude: [
+        'src/**/*.d.ts',
+      ],
       thresholds: {
         lines: 90,
-        functions: 90,
+        functions: 100,
         statements: 90,
-        // branches excluded: utility-file optional-chaining/ternaries are hard
-        // to exercise fully; CI checks lines/statements/functions instead
-      }
+        branches: 80,
+      },
     },
   },
 })
