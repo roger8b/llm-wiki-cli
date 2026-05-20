@@ -3,8 +3,9 @@ import { Command } from "commander";
 import pc from "picocolors";
 import { bootstrapCmd } from "./commands/bootstrap.js";
 import { doctorCmd } from "./commands/doctor.js";
-import { sourceAdd, sourceList, sourceStatus } from "./commands/source.js";
-import { pageNew, pageValidate, pageSave, pageUpdate } from "./commands/page.js";
+import { sourceAdd, sourceList, sourceStatus, sourceRehash, sourceVerify } from "./commands/source.js";
+import { pageNew, pageValidate, pageSave, pageUpdate, pageDelete, pageRename } from "./commands/page.js";
+import { commitCmd } from "./commands/commit.js";
 import { indexRebuild } from "./commands/index.js";
 import { searchCmd } from "./commands/search.js";
 import { lintCmd } from "./commands/lint.js";
@@ -95,8 +96,16 @@ source
   .option("--type <type>", "source type", "article")
   .action(sourceAdd);
 source.command("list").description("list registered sources").option("--status <status>").action(sourceList);
-source.command("status <source>").description("show source metadata").action(sourceStatus);
+source.command("status <source>").description("show source metadata (accepts id, path, or page slug)").action(sourceStatus);
 source.command("show <source>").description("print a raw source file content").action(sourceShow);
+source
+  .command("rehash <source>")
+  .description("recompute and update hash for a source (after intentional raw edit)")
+  .action(sourceRehash);
+source
+  .command("verify")
+  .description("verify all source hashes against on-disk content")
+  .action(sourceVerify);
 
 // ── ingest ───────────────────────────────────────────────────────────────────
 
@@ -154,9 +163,25 @@ page
   .option("--status <status>", "new status")
   .action((slug, o) => pageUpdate(slug, o));
 page.command("validate <path>").description("validate a page's frontmatter").action(pageValidate);
+page
+  .command("delete <slug>")
+  .description("delete a page (refuses unless status=deprecated and no backlinks; use --force)")
+  .option("--force", "skip status/backlink guard")
+  .action((slug, o) => pageDelete(slug, o));
+page
+  .command("rename <slug> <new-title>")
+  .description("rename a page (new slug derived from title); updates all backlinks")
+  .option("--keep-title", "only change slug, keep title text")
+  .action((slug, newTitle, o) => pageRename(slug, newTitle, o));
 
 const links = program.command("links").description("link operations");
 links.command("check").description("check for broken internal links").action(linksCheck);
+
+program
+  .command("commit")
+  .description("stage brain-managed paths and create a git commit (message defaults to last log entry)")
+  .option("-m, --message <message>", "commit subject (defaults to last log entry)")
+  .action((o) => commitCmd(o));
 
 // ── log ──────────────────────────────────────────────────────────────────────
 

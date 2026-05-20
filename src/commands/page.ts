@@ -163,7 +163,7 @@ async function validateRefs(
       } catch { /* ignore */ }
     })
   );
-  for (const field of ["related", "sources"] as const) {
+  for (const field of ["related", "sources", "supersedes"] as const) {
     const refs = fm[field];
     if (!Array.isArray(refs)) continue;
     for (const ref of refs) {
@@ -186,7 +186,146 @@ async function validateRefs(
       }
     }
   }
+  if (typeof fm.superseded_by === "string") {
+    const ref = fm.superseded_by;
+    if (ref.includes("/") || ref.endsWith(".md")) {
+      errs.push(`superseded_by must be a bare slug (no "/" or ".md"): "${ref}"`);
+    } else if (ref === fm.slug) {
+      errs.push(`superseded_by cannot reference the page itself: "${ref}"`);
+    } else if (!slugToType.has(ref)) {
+      errs.push(`superseded_by references unknown slug: "${ref}"`);
+    }
+  }
   return errs;
+}
+
+async function findPageBySlug(ctx: ReturnType<typeof loadContext>, slug: string): Promise<string | undefined> {
+  const fgMod = await import("fast-glob");
+  const files = await fgMod.default("**/*.md", { cwd: ctx.wikiDir, absolute: true });
+  for (const f of files) {
+    if (path.basename(f) === "index.md" || path.basename(f) === "log.md") continue;
+    try {
+      const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
+      if (data.slug === slug) return f;
+    } catch { /* ignore */ }
+  }
+  return undefined;
+}
+
+export async function pageDelete(slugInput: string, opts: { force?: boolean }) {
+  const ctx = loadContext();
+  const slug = normalizeSlugInput(slugInput);
+  const target = await findPageBySlug(ctx, slug);
+  if (!target) {
+    console.error(pc.red(`page not found: ${slug}`));
+    process.exitCode = 1;
+    return;
+  }
+  const fm = matter(await fs.readFile(target, "utf8")).data as Record<string, any>;
+  if (fm.status !== "deprecated" && !opts.force) {
+    console.error(pc.red(`refusing to delete page with status=${fm.status}`));
+    console.error(pc.dim("deprecate first (status: deprecated, set superseded_by) or pass --force"));
+    process.exitCode = 1;
+    return;
+  }
+  const fgMod = await import("fast-glob");
+  const files = await fgMod.default("**/*.md", { cwd: ctx.wikiDir, absolute: true });
+  const backlinks: string[] = [];
+  for (const f of files) {
+    if (f === target) continue;
+    if (path.basename(f) === "index.md" || path.basename(f) === "log.md") continue;
+    try {
+      const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
+      const refLists = [data.related, data.sources, data.supersedes].filter(Array.isArray) as string[][];
+      const hasRef = refLists.some((arr) => arr.includes(slug)) || data.superseded_by === slug;
+      if (hasRef) backlinks.push(path.relative(ctx.root, f));
+    } catch { /* ignore */ }
+  }
+  if (backlinks.length > 0 && !opts.force) {
+    console.error(pc.red(`page has ${backlinks.length} backlink(s); refusing to delete`));
+    for (const b of backlinks) console.error(pc.dim("  " + b));
+    console.error(pc.dim("clear backlinks first or pass --force"));
+    process.exitCode = 1;
+    return;
+  }
+  await fs.remove(target);
+  console.log(pc.green(`✓ deleted: ${slug} (${path.relative(ctx.root, target)})`));
+  if (backlinks.length > 0) {
+    console.log(pc.yellow(`warning: ${backlinks.length} backlink(s) now broken — fix with \`wiki page update\``));
+  }
+}
+
+export async function pageRename(oldSlugInput: string, newTitle: string, opts: { keepTitle?: boolean }) {
+  const ctx = loadContext();
+  const oldSlug = normalizeSlugInput(oldSlugInput);
+  const target = await findPageBySlug(ctx, oldSlug);
+  if (!target) {
+    console.error(pc.red(`page not found: ${oldSlug}`));
+    process.exitCode = 1;
+    return;
+  }
+  const parsed = matter(await fs.readFile(target, "utf8"));
+  const fm = parsed.data as Record<string, any>;
+  const newSlug = slugify(newTitle);
+  if (newSlug === oldSlug) {
+    console.error(pc.red(`new slug is identical to old: ${newSlug}`));
+    process.exitCode = 1;
+    return;
+  }
+  const existing = await findPageBySlug(ctx, newSlug);
+  if (existing) {
+    console.error(pc.red(`target slug already exists: ${newSlug}`));
+    process.exitCode = 1;
+    return;
+  }
+  const newPath = path.join(path.dirname(target), `${newSlug}.md`);
+  fm.slug = newSlug;
+  if (!opts.keepTitle) fm.title = newTitle;
+  fm.updated_at = today();
+  await fs.writeFile(newPath, matter.stringify(parsed.content.trimStart(), fm));
+  if (newPath !== target) await fs.remove(target);
+
+  // update backlinks: frontmatter ref fields + relative markdown links
+  const fgMod = await import("fast-glob");
+  const files = await fgMod.default("**/*.md", { cwd: ctx.wikiDir, absolute: true });
+  let touched = 0;
+  for (const f of files) {
+    if (path.basename(f) === "log.md") continue;
+    const raw = await fs.readFile(f, "utf8");
+    let parsedF: matter.GrayMatterFile<string>;
+    try {
+      parsedF = matter(raw);
+    } catch {
+      continue;
+    }
+    const data = parsedF.data as Record<string, any>;
+    let mutated = false;
+    for (const field of ["related", "sources", "supersedes"] as const) {
+      if (Array.isArray(data[field])) {
+        const idx = data[field].indexOf(oldSlug);
+        if (idx > -1) {
+          data[field][idx] = newSlug;
+          mutated = true;
+        }
+      }
+    }
+    if (data.superseded_by === oldSlug) {
+      data.superseded_by = newSlug;
+      mutated = true;
+    }
+    let body = parsedF.content;
+    const linkRe = new RegExp(`(\\(|/)${oldSlug}\\.md`, "g");
+    if (linkRe.test(body)) {
+      body = body.replace(new RegExp(`${oldSlug}\\.md`, "g"), `${newSlug}.md`);
+      mutated = true;
+    }
+    if (mutated) {
+      await fs.writeFile(f, matter.stringify(body.trimStart(), data));
+      touched++;
+    }
+  }
+  console.log(pc.green(`✓ renamed: ${oldSlug} → ${newSlug}`));
+  if (touched > 0) console.log(pc.dim(`  backlinks updated in ${touched} file(s)`));
 }
 
 export async function pageSave(opts: {
@@ -238,6 +377,14 @@ export async function pageSave(opts: {
   if (existingFm.confidence) fm.confidence = existingFm.confidence;
   if (existingFm.raw_path) fm.raw_path = existingFm.raw_path;
   if (existingFm.source_hash) fm.source_hash = existingFm.source_hash;
+  // preserve arbitrary extension fields (supersedes, superseded_by, custom keys)
+  const KNOWN = new Set([
+    "type", "title", "slug", "status", "created_at", "updated_at",
+    "sources", "related", "tags", "confidence", "raw_path", "source_hash",
+  ]);
+  for (const [k, v] of Object.entries(existingFm)) {
+    if (!KNOWN.has(k) && !(k in fm)) fm[k] = v;
+  }
   const errs = await validateRefs(ctx, opts.type, fm);
   if (errs.length > 0) {
     for (const e of errs) console.error(pc.red("✗ ") + e);

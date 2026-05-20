@@ -14,6 +14,7 @@ interface PageMeta {
   status: string;
   updated_at: string;
   summary?: string;
+  superseded_by?: string;
 }
 
 export async function readAllPages(ctx: WikiContext): Promise<PageMeta[]> {
@@ -42,6 +43,7 @@ export async function readAllPages(ctx: WikiContext): Promise<PageMeta[]> {
       status: fm.status ?? "draft",
       updated_at: String(fm.updated_at ?? ""),
       summary: firstPara?.slice(0, 200),
+      superseded_by: typeof fm.superseded_by === "string" ? fm.superseded_by : undefined,
     });
   }
   return pages;
@@ -67,7 +69,11 @@ export async function indexRebuild() {
     } else {
       for (const p of arr) {
         const linkPath = path.relative(ctx.wikiDir, p.file).replace(/\\/g, "/");
-        const tag = p.status !== "draft" ? ` _(${p.status})_` : "";
+        let tag = p.status !== "draft" ? ` _(${p.status})_` : "";
+        // G9: surface survivor next to deprecated entries
+        if (p.status === "deprecated" && p.superseded_by) {
+          tag = ` _(deprecated → ${p.superseded_by})_`;
+        }
         const upd = p.updated_at ? ` — ${p.updated_at}` : "";
         out.push(`- [${p.title}](${linkPath})${tag}${upd}`);
       }

@@ -102,13 +102,107 @@ export async function sourceStatus(target: string) {
   const ctx = loadContext();
   const manifest = await readManifest(path.join(ctx.manifestsDir, "sources.json"));
   const rel = path.relative(ctx.root, path.resolve(target));
-  const s = manifest.sources.find((e) => e.path === rel || e.path === target || e.id === target);
+  let s = manifest.sources.find((e) => e.path === rel || e.path === target || e.id === target);
+  if (!s) {
+    // fallback: treat target as a wiki page slug and resolve raw_path from its frontmatter
+    const fgMod = await import("fast-glob");
+    const matter = (await import("gray-matter")).default;
+    const files = await fgMod.default("**/*.md", { cwd: ctx.wikiDir, absolute: true });
+    for (const f of files) {
+      try {
+        const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
+        if (data.slug === target && typeof data.raw_path === "string") {
+          s = manifest.sources.find((e) => e.path === data.raw_path);
+          if (s) break;
+        }
+      } catch { /* ignore */ }
+    }
+  }
   if (!s) {
     console.log(pc.red(`source not found: ${target}`));
     process.exitCode = 1;
     return;
   }
   console.log(JSON.stringify(s, null, 2));
+}
+
+function findSourceEntry(manifest: Manifest, target: string, root: string): SourceEntry | undefined {
+  const rel = path.relative(root, path.resolve(target));
+  return manifest.sources.find((e) => e.path === rel || e.path === target || e.id === target);
+}
+
+export async function sourceRehash(target: string) {
+  const ctx = loadContext();
+  const manifestPath = path.join(ctx.manifestsDir, "sources.json");
+  const manifest = await readManifest(manifestPath);
+  const entry = findSourceEntry(manifest, target, ctx.root);
+  if (!entry) {
+    console.error(pc.red(`source not found in manifest: ${target}`));
+    process.exitCode = 1;
+    return;
+  }
+  const abs = path.join(ctx.root, entry.path);
+  if (!fs.existsSync(abs)) {
+    console.error(pc.red(`raw file missing on disk: ${entry.path}`));
+    process.exitCode = 1;
+    return;
+  }
+  const newHash = await sha256(abs);
+  const oldHash = entry.hash;
+  if (newHash === oldHash) {
+    console.log(pc.dim(`hash unchanged: ${newHash}`));
+    return;
+  }
+  entry.hash = newHash;
+  await fs.writeJson(manifestPath, manifest, { spaces: 2 });
+  // also update source page frontmatter, if one exists
+  const fgMod = await import("fast-glob");
+  const matter = (await import("gray-matter")).default;
+  const files = await fgMod.default("sources/**/*.md", { cwd: ctx.wikiDir, absolute: true });
+  for (const f of files) {
+    try {
+      const parsed = matter(await fs.readFile(f, "utf8"));
+      const data = parsed.data as Record<string, any>;
+      if (data.raw_path === entry.path && data.source_hash !== newHash) {
+        data.source_hash = newHash;
+        data.updated_at = today();
+        await fs.writeFile(f, matter.stringify(parsed.content.trimStart(), data));
+        console.log(pc.dim(`  updated source page frontmatter: ${path.relative(ctx.root, f)}`));
+      }
+    } catch { /* ignore */ }
+  }
+  console.log(pc.green(`✓ rehashed ${entry.path}`));
+  console.log(pc.dim(`  old: ${oldHash}`));
+  console.log(pc.dim(`  new: ${newHash}`));
+}
+
+export async function sourceVerify() {
+  const ctx = loadContext();
+  const manifestPath = path.join(ctx.manifestsDir, "sources.json");
+  const manifest = await readManifest(manifestPath);
+  let drift = 0;
+  let missing = 0;
+  for (const entry of manifest.sources) {
+    const abs = path.join(ctx.root, entry.path);
+    if (!fs.existsSync(abs)) {
+      console.log(pc.red(`✗ missing: ${entry.path}`));
+      missing++;
+      continue;
+    }
+    const actual = await sha256(abs);
+    if (actual !== entry.hash) {
+      console.log(pc.yellow(`✗ drift: ${entry.path}`));
+      console.log(pc.dim(`    manifest: ${entry.hash}`));
+      console.log(pc.dim(`    actual:   ${actual}`));
+      drift++;
+    }
+  }
+  if (drift === 0 && missing === 0) {
+    console.log(pc.green(`✓ all ${manifest.sources.length} source(s) match manifest`));
+  } else {
+    console.log(pc.red(`\n${drift} drift, ${missing} missing — run \`wiki source rehash <id|path>\` to refresh`));
+    process.exitCode = 1;
+  }
 }
 
 export async function setSourceStatus(rel: string, status: string) {
