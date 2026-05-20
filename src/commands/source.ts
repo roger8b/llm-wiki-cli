@@ -176,6 +176,57 @@ export async function sourceRehash(target: string) {
   console.log(pc.dim(`  new: ${newHash}`));
 }
 
+export async function sourceRemove(target: string, opts: { force?: boolean; keepRaw?: boolean }) {
+  const ctx = loadContext();
+  const manifestPath = path.join(ctx.manifestsDir, "sources.json");
+  const manifest = await readManifest(manifestPath);
+  const entry = findSourceEntry(manifest, target, ctx.root);
+  if (!entry) {
+    console.error(pc.red(`source not found in manifest: ${target}`));
+    process.exitCode = 1;
+    return;
+  }
+  // refuse if a non-deprecated wiki source page still references this raw_path
+  const fgMod = await import("fast-glob");
+  const matter = (await import("gray-matter")).default;
+  const files = await fgMod.default("sources/**/*.md", { cwd: ctx.wikiDir, absolute: true });
+  const referencing: { file: string; slug: string; status: string }[] = [];
+  for (const f of files) {
+    try {
+      const data = matter(await fs.readFile(f, "utf8")).data as Record<string, any>;
+      if (data.raw_path === entry.path) {
+        referencing.push({ file: f, slug: data.slug, status: data.status ?? "draft" });
+      }
+    } catch { /* ignore */ }
+  }
+  const live = referencing.filter((r) => r.status !== "deprecated");
+  if (live.length > 0 && !opts.force) {
+    console.error(pc.red(`refusing to remove: source is referenced by ${live.length} non-deprecated page(s):`));
+    for (const r of live) console.error(pc.dim(`  ${path.relative(ctx.root, r.file)} (slug=${r.slug}, status=${r.status})`));
+    console.error(pc.dim("deprecate or delete those pages first, or pass --force"));
+    process.exitCode = 1;
+    return;
+  }
+  // remove manifest entry
+  const before = manifest.sources.length;
+  manifest.sources = manifest.sources.filter((s) => s !== entry);
+  await fs.writeJson(manifestPath, manifest, { spaces: 2 });
+  console.log(pc.green(`✓ manifest entry removed (${before} → ${manifest.sources.length} sources)`));
+  // remove raw file unless --keep-raw
+  const abs = path.join(ctx.root, entry.path);
+  if (!opts.keepRaw && fs.existsSync(abs)) {
+    await fs.remove(abs);
+    console.log(pc.green(`✓ raw file removed: ${entry.path}`));
+  } else if (opts.keepRaw) {
+    console.log(pc.dim(`  raw file kept: ${entry.path}`));
+  }
+  if (referencing.length > 0) {
+    console.log(pc.yellow(`note: ${referencing.length} source page(s) still reference this raw_path (all deprecated):`));
+    for (const r of referencing) console.log(pc.dim(`  ${path.relative(ctx.root, r.file)}`));
+    console.log(pc.dim("clean them up with `wiki page delete <slug>` when ready"));
+  }
+}
+
 export async function sourceVerify() {
   const ctx = loadContext();
   const manifestPath = path.join(ctx.manifestsDir, "sources.json");

@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "fs-extra";
 import pc from "picocolors";
-import { loadContext } from "../utils/paths.js";
+import { loadContext, resolvePathInput } from "../utils/paths.js";
 import { sha256, today } from "../utils/misc.js";
 import { searchWiki } from "./search.js";
 import { setSourceStatus, getSourceByPath } from "./source.js";
@@ -9,10 +9,7 @@ import { readAllPages } from "./index.js";
 
 export async function ingestPrepare(sourcePath: string) {
   const ctx = loadContext();
-  let abs = path.resolve(sourcePath);
-  if (!fs.existsSync(abs)) {
-    abs = path.resolve(ctx.root, sourcePath);
-  }
+  const abs = resolvePathInput(sourcePath, ctx.root);
   if (!fs.existsSync(abs)) {
     console.error(pc.red(`source not found: ${sourcePath}`));
     process.exitCode = 1;
@@ -91,10 +88,7 @@ export async function ingestPrepare(sourcePath: string) {
 
 export async function ingestCommit(sourcePath: string) {
   const ctx = loadContext();
-  let abs = path.resolve(sourcePath);
-  if (!fs.existsSync(abs)) {
-    abs = path.resolve(ctx.root, sourcePath);
-  }
+  const abs = resolvePathInput(sourcePath, ctx.root);
   const rel = path.relative(ctx.root, abs);
   const meta = await getSourceByPath(rel);
   if (!meta) {
@@ -254,33 +248,30 @@ export async function ingestCommit(sourcePath: string) {
   await setSourceStatus(rel, "ingested");
   console.log(pc.green(`✓ ingest committed: ${rel} → status=ingested`));
 
-  // 9. git commit if the brain is a git repo
-  await maybeGitCommit(ctx.root, sourcePage, ingestedPages.length);
+  // 9. git commit if the brain is a git repo (stages only brain-managed paths)
+  await maybeGitCommit(ctx, sourcePage, ingestedPages.length);
 }
 
 async function maybeGitCommit(
-  brainRoot: string,
+  ctx: Awaited<ReturnType<typeof loadContext>>,
   sourcePage: { slug: string; fm: Record<string, any> } | null,
   pagesCount: number,
 ) {
-  const { execa } = await import("execa");
-  if (!fs.existsSync(path.join(brainRoot, ".git"))) {
-    return;
-  }
+  const { isGitRepo, stageBrainPaths, gitCommit, stagedFiles } = await import("../utils/git.js");
+  if (!(await isGitRepo(ctx.root))) return;
   try {
-    // stage everything inside the brain
-    await execa("git", ["add", "-A"], { cwd: brainRoot });
-
-    // skip if nothing to commit
-    const { stdout } = await execa("git", ["status", "--porcelain"], { cwd: brainRoot });
-    if (!stdout.trim()) return;
-
+    const staged = await stageBrainPaths(ctx);
+    if (!staged) return;
+    const files = await stagedFiles(ctx.root);
     const title = sourcePage?.fm.title ?? sourcePage?.slug ?? "source";
-    const summary = `ingest: ${title}`;
+    const subject = `ingest: ${title}`.slice(0, 72);
     const body = `Source: ${sourcePage?.slug ?? "(unknown)"}\nPages: ${pagesCount + 1} (source + ${pagesCount} updates)`;
-    const message = `${summary}\n\n${body}`;
-    await execa("git", ["commit", "-F", "-"], { cwd: brainRoot, input: message });
-    console.log(pc.green(`✓ git commit created`));
+    const res = await gitCommit(ctx.root, subject, body);
+    if (!res.ok) {
+      console.log(pc.yellow(`! git commit skipped: ${res.err ?? "unknown error"}`));
+      return;
+    }
+    console.log(pc.green(`✓ git commit created (${files.length} file${files.length === 1 ? "" : "s"})`));
   } catch (e: any) {
     console.log(pc.yellow(`! git commit skipped: ${e.shortMessage ?? e.message ?? e}`));
   }

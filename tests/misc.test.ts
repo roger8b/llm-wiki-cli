@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll, vi } from "vitest";
-import { sha256, slugify, today } from "../src/utils/misc";
+import { sha256, slugify, today, normalizeSlugInput } from "../src/utils/misc.js";
 import fs from "fs-extra";
 import path from "node:path";
 import os from "node:os";
@@ -61,4 +61,23 @@ describe("misc utils", () => {
       }
     });
   });
+
+  describe("normalizeSlugInput", () => {
+    it("should strip .md suffix", () => {
+      expect(normalizeSlugInput("my-page.md")).toBe("my-page");
+    });
+
+    it("should strip type/ prefix", () => {
+      expect(normalizeSlugInput("concept/my-page")).toBe("my-page");
+    });
+
+    it("should handle both prefix and suffix", () => {
+      expect(normalizeSlugInput("source/my-file.md")).toBe("my-file");
+    });
+
+    it("should trim whitespace", () => {
+      expect(normalizeSlugInput("  page  ")).toBe("page");
+    });
+  });
 });
+
