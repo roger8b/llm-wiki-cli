@@ -3,7 +3,7 @@ import { Command } from "commander";
 import pc from "picocolors";
 import { bootstrapCmd } from "./commands/bootstrap.js";
 import { doctorCmd } from "./commands/doctor.js";
-import { sourceAdd, sourceList, sourceStatus, sourceRehash, sourceVerify } from "./commands/source.js";
+import { sourceAdd, sourceList, sourceStatus, sourceRehash, sourceVerify, sourceRemove } from "./commands/source.js";
 import { pageNew, pageValidate, pageSave, pageUpdate, pageDelete, pageRename } from "./commands/page.js";
 import { commitCmd } from "./commands/commit.js";
 import { indexRebuild } from "./commands/index.js";
@@ -106,6 +106,12 @@ source
   .command("verify")
   .description("verify all source hashes against on-disk content")
   .action(sourceVerify);
+source
+  .command("remove <source>")
+  .description("remove a source from the manifest and delete its raw file (refuses if a non-deprecated source page references it)")
+  .option("--force", "remove even if live source pages reference the raw path")
+  .option("--keep-raw", "remove manifest entry only, keep the raw file on disk")
+  .action((src, o) => sourceRemove(src, o));
 
 // ── ingest ───────────────────────────────────────────────────────────────────
 
@@ -196,5 +202,6 @@ log
 
 program.parseAsync(process.argv).catch((e: any) => {
   console.error(pc.red("error: ") + (e?.message ?? String(e)));
-  process.exit(1);
+  process.exitCode = 1;
 });
+

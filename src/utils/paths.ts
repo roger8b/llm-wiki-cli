@@ -79,3 +79,12 @@ export function loadContext(start?: string): WikiContext {
     tempDir: path.join(root, config.paths.temp),
   };
 }
+
+export function resolvePathInput(input: string, root: string): string {
+  const abs = path.resolve(input);
+  if (fs.existsSync(abs)) {
+    return abs;
+  }
+  return path.resolve(root, input);
+}
+

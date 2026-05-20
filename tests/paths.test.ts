@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { findWikiRoot, loadContext } from "../src/utils/paths";
+import { findWikiRoot, loadContext, resolvePathInput } from "../src/utils/paths.js";
 import * as globalConfigModule from "../src/utils/global-config";
 import fs from "fs-extra";
 import path from "node:path";
@@ -161,4 +161,20 @@ paths:
       expect(ctx.skillsDir).toBe(path.join(path.resolve(rootDir), "sk"));
     });
   });
+
+  describe("resolvePathInput", () => {
+    it("should return the absolute path directly if the path exists", async () => {
+      const file = path.join(tempDir, "existing.txt");
+      await fs.writeFile(file, "hello");
+      const resolved = resolvePathInput(file, tempDir);
+      expect(resolved).toBe(path.resolve(file));
+    });
+
+    it("should resolve relative to root if the path does not exist", () => {
+      const file = "non-existent.txt";
+      const resolved = resolvePathInput(file, tempDir);
+      expect(resolved).toBe(path.resolve(tempDir, file));
+    });
+  });
 });
+

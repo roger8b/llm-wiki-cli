@@ -23,6 +23,7 @@ The CLI has dedicated commands for the moves that used to require shell tricks:
 | Remove a deprecated, orphaned page | `wiki page delete <slug>` |
 | Reflect an intentional raw edit | `wiki source rehash <id\|path>` |
 | Verify all raw hashes vs manifest | `wiki source verify` |
+| Drop a registered source entirely | `wiki source remove <id\|path>` |
 | Stage brain paths and commit | `wiki commit [-m "..."]` |
 
 Prefer these over heredoc + shell; they update backlinks, frontmatter, and manifests in one pass.
@@ -139,6 +140,13 @@ wiki page delete <slug> --force                      # skip guards (still prefer
 wiki source rehash <id|path>                         # refresh manifest + source page hash
 ```
 Without this, `wiki lint` will flag the drift as an error (raw_is_immutable).
+
+**Drop a source entirely:**
+```bash
+wiki source remove <id|path>                         # removes manifest entry + raw file; refuses if any live source page still references it
+wiki source remove <id|path> --keep-raw              # manifest entry only, leave the raw file on disk
+wiki source remove <id|path> --force                 # bypass the live-reference guard
+```
 
 **Schema evolution:** migrate one page at a time. After each:
 ```bash

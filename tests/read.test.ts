@@ -45,38 +45,19 @@ vi.mock('../src/commands/index.js', () => ({
   ]),
 }));
 
+import { normalizeSlugInput } from "../src/utils/misc.js";
+
 describe('read.ts - normalizeSlugInput', () => {
   it('should strip .md suffix', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('my-page.md')).toBe('my-page');
+    expect(normalizeSlugInput('my-page.md')).toBe('my-page');
   });
 
   it('should strip type/ prefix', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('concept/my-page')).toBe('my-page');
+    expect(normalizeSlugInput('concept/my-page')).toBe('my-page');
   });
 
   it('should handle both prefix and suffix', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('source/my-file.md')).toBe('my-file');
+    expect(normalizeSlugInput('source/my-file.md')).toBe('my-file');
   });
 });
 

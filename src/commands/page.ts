@@ -2,8 +2,8 @@ import path from "node:path";
 import fs from "fs-extra";
 import matter from "gray-matter";
 import pc from "picocolors";
-import { loadContext } from "../utils/paths.js";
-import { slugify, today } from "../utils/misc.js";
+import { loadContext, resolvePathInput } from "../utils/paths.js";
+import { slugify, today, normalizeSlugInput } from "../utils/misc.js";
 
 const TYPE_TO_DIR: Record<string, string> = {
   source: "sources",
@@ -61,8 +61,7 @@ export interface ValidationIssue {
 
 export async function validatePage(file: string): Promise<ValidationIssue[]> {
   const ctx = loadContext();
-  let abs = path.resolve(file);
-  if (!fs.existsSync(abs)) abs = path.resolve(ctx.root, file);
+  const abs = resolvePathInput(file, ctx.root);
   const rel = path.relative(ctx.root, abs);
   const issues: ValidationIssue[] = [];
   if (!fs.existsSync(abs)) {
@@ -136,13 +135,7 @@ async function readInput(file?: string): Promise<string> {
 }
 
 // strip "type/" prefix and ".md" suffix so the agent can use either form
-export function normalizeSlugInput(input: string): string {
-  let s = input.trim();
-  if (s.endsWith(".md")) s = s.slice(0, -3);
-  const slashIdx = s.indexOf("/");
-  if (slashIdx > -1) s = s.slice(slashIdx + 1);
-  return s;
-}
+export { normalizeSlugInput } from "../utils/misc.js";
 
 // validate refs against the brain — used upstream in save/update
 async function validateRefs(

@@ -19,3 +19,12 @@ export async function sha256(filepath: string): Promise<string> {
   const buf = await fs.readFile(filepath);
   return "sha256:" + crypto.createHash("sha256").update(buf).digest("hex");
 }
+
+export function normalizeSlugInput(input: string): string {
+  let s = input.trim();
+  if (s.endsWith(".md")) s = s.slice(0, -3);
+  const slashIdx = s.indexOf("/");
+  if (slashIdx > -1) s = s.slice(slashIdx + 1);
+  return s;
+}
+

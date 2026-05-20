@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import path from 'node:path';
 
+import { normalizeSlugInput } from "../src/commands/page.js";
+
 // Mock dependencies
 vi.mock('fs-extra');
 vi.mock('picocolors', () => ({
@@ -9,47 +11,19 @@ vi.mock('picocolors', () => ({
 
 describe('page.ts - normalizeSlugInput', () => {
   it('should strip .md suffix', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('my-page.md')).toBe('my-page');
+    expect(normalizeSlugInput('my-page.md')).toBe('my-page');
   });
 
   it('should strip type/ prefix', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('concept/my-page')).toBe('my-page');
+    expect(normalizeSlugInput('concept/my-page')).toBe('my-page');
   });
 
   it('should handle both', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('source/file.md')).toBe('file');
+    expect(normalizeSlugInput('source/file.md')).toBe('file');
   });
 
   it('should trim whitespace', () => {
-    const fn = (input: string) => {
-      let s = input.trim();
-      if (s.endsWith('.md')) s = s.slice(0, -3);
-      const slashIdx = s.indexOf('/');
-      if (slashIdx > -1) s = s.slice(slashIdx + 1);
-      return s;
-    };
-    expect(fn('  page  ')).toBe('page');
+    expect(normalizeSlugInput('  page  ')).toBe('page');
   });
 });
 

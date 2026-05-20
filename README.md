@@ -182,14 +182,17 @@ wiki source list [--status <status>]
 wiki source status <source>            # accepts id, path, or wiki page slug
 wiki source rehash <id|path>           # recompute hash after an intentional raw edit
 wiki source verify                     # check every source hash against on-disk content
+wiki source remove <id|path>           # remove from manifest + delete raw file (refuses if a live source page references it)
 ```
 
 ### Ingestion (raw → wiki pages)
 
 ```bash
 wiki ingest prepare <source>           # writes .wiki/cache/ingest-context.md for the agent
-wiki ingest commit  <source>           # validates and flips manifest to ingested
+wiki ingest commit  <source>           # validates, flips manifest to ingested, and creates a git commit (brain-only paths)
 ```
+
+`wiki ingest commit` and `wiki commit` share the same staging logic — only brain-managed paths (`wiki/`, `raw/`, `schemas/`, `skills/`, `.wiki/manifests/`, top-level config) are staged. User files like `.obsidian/` are never touched.
 
 ### Query
 

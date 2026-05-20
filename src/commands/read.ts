@@ -4,6 +4,7 @@ import fg from "fast-glob";
 import matter from "gray-matter";
 import pc from "picocolors";
 import { loadContext } from "../utils/paths.js";
+import { normalizeSlugInput } from "../utils/misc.js";
 import { readAllPages } from "./index.js";
 
 // ── protocol ─────────────────────────────────────────────────────────────────
@@ -56,15 +57,7 @@ export async function schemaShow(type: string) {
   process.stdout.write(await fs.readFile(file, "utf8"));
 }
 
-// ── page ─────────────────────────────────────────────────────────────────────
 
-function normalizeSlugInput(input: string): string {
-  let s = input.trim();
-  if (s.endsWith(".md")) s = s.slice(0, -3);
-  const slashIdx = s.indexOf("/");
-  if (slashIdx > -1) s = s.slice(slashIdx + 1);
-  return s;
-}
 
 export async function pageList(opts: { type?: string; status?: string }) {
   const ctx = loadContext();
