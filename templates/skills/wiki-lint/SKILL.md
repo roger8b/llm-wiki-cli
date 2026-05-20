@@ -20,12 +20,18 @@ You interact with the brain **only through the `wiki` CLI**.
 ### 1. Run the mechanical checks
 
 ```bash
-wiki lint                          # frontmatter, broken links, duplicates, orphans
+wiki lint                          # frontmatter, broken links, duplicates, orphans, raw hash drift
 wiki links check                   # broken internal links
 wiki doctor                        # structural sanity
+wiki source verify                 # all source hashes match disk content
 ```
 
 Read the CLI output carefully before doing any judgment work.
+
+`wiki lint` also enforces the policies in `wiki.config.yaml`:
+- `source_policy.raw_is_immutable` → raw file hash drift becomes an **error**, not a warning. If the mutation was intentional, run `wiki source rehash <id|path>` to acknowledge it.
+- `source_policy.require_source_for_{reviewed,canonical}` → a page in that status without `sources` becomes an **error**, not a warning.
+- `lint.orphan_severity` → controls whether pages not listed in the index are `info` (default), `warning`, or `error`.
 
 ### 2. Structural review (cross-check)
 

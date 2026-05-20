@@ -6,7 +6,7 @@ import pc from "picocolors";
 import pLimit from "p-limit";
 import { loadContext } from "../utils/paths.js";
 import { validatePage } from "./page.js";
-import { today } from "../utils/misc.js";
+import { sha256, today } from "../utils/misc.js";
 
 type Severity = "info" | "warning" | "error" | "critical";
 
@@ -37,8 +37,17 @@ export async function lintCmd() {
       if (base === "index.md" || base === "log.md") return;
 
       const issues = await validatePage(f);
+      const policy = ctx.config.source_policy ?? {};
       for (const i of issues) {
-        findings.push({ severity: i.level === "error" ? "error" : "warning", file: i.file, message: i.message });
+        let severity: Severity = i.level === "error" ? "error" : "warning";
+        // G5: escalate "reviewed/canonical requires sources" warning → error when policy says so
+        if (i.message.startsWith("status reviewed requires") && policy.require_source_for_reviewed) {
+          severity = "error";
+        }
+        if (i.message.startsWith("status canonical requires") && policy.require_source_for_canonical) {
+          severity = "error";
+        }
+        findings.push({ severity, file: i.file, message: i.message });
       }
 
       const raw = await fs.readFile(f, "utf8");
@@ -69,10 +78,16 @@ export async function lintCmd() {
   const indexPath = path.join(ctx.wikiDir, "index.md");
   if (fs.existsSync(indexPath)) {
     const idx = await fs.readFile(indexPath, "utf8");
+    // G6: orphan severity configurable; default info
+    const orphanSeverityRaw = (ctx.config.lint as Record<string, any> | undefined)?.orphan_severity;
+    const orphanSeverity: Severity =
+      orphanSeverityRaw === "warning" || orphanSeverityRaw === "error" || orphanSeverityRaw === "critical"
+        ? orphanSeverityRaw
+        : "info";
     for (const f of pagesByPath.keys()) {
       const rel = path.relative(ctx.wikiDir, f).replace(/\\/g, "/");
       if (!idx.includes(rel)) {
-        findings.push({ severity: "info", file: path.relative(ctx.root, f), message: "not listed in index.md" });
+        findings.push({ severity: orphanSeverity, file: path.relative(ctx.root, f), message: "not listed in index.md" });
       }
     }
   }
@@ -94,9 +109,26 @@ export async function lintCmd() {
   const manifestPath = path.join(ctx.manifestsDir, "sources.json");
   if (fs.existsSync(manifestPath)) {
     const m = await fs.readJson(manifestPath);
+    const immutable = ctx.config.source_policy?.raw_is_immutable;
     for (const s of m.sources ?? []) {
       if (s.status === "pending_ingest") {
         findings.push({ severity: "info", file: s.path, message: "source pending ingest" });
+      }
+      // G1: enforce raw_is_immutable — compare disk hash against manifest
+      if (immutable && s.path && s.hash) {
+        const abs = path.join(ctx.root, s.path);
+        if (!fs.existsSync(abs)) {
+          findings.push({ severity: "error", file: s.path, message: "raw file missing on disk" });
+        } else {
+          const actual = await sha256(abs);
+          if (actual !== s.hash) {
+            findings.push({
+              severity: "error",
+              file: s.path,
+              message: `raw file hash drift (manifest: ${s.hash.slice(0, 19)}…, actual: ${actual.slice(0, 19)}…) — run \`wiki source rehash <id|path>\` if mutation was intentional`,
+            });
+          }
+        }
       }
     }
   }

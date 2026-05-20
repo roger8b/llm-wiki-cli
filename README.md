@@ -179,7 +179,9 @@ wiki doctor          # validate structure, files, and git state
 ```bash
 wiki source add <file> --type <type>   # article|book|document|transcript|spec|image|external
 wiki source list [--status <status>]
-wiki source status <source>
+wiki source status <source>            # accepts id, path, or wiki page slug
+wiki source rehash <id|path>           # recompute hash after an intentional raw edit
+wiki source verify                     # check every source hash against on-disk content
 ```
 
 ### Ingestion (raw → wiki pages)
@@ -200,13 +202,22 @@ wiki query save <file> --as <type> --title <title>
 ### Maintenance
 
 ```bash
-wiki index rebuild    # rebuild wiki/index.md from frontmatter
-wiki lint             # audit: broken links, orphan pages, uncited claims, duplicates
+wiki index rebuild                              # rebuild wiki/index.md from frontmatter
+wiki lint                                       # audit: frontmatter, broken links, duplicates, orphans, raw hash drift
 wiki page new <type> <title>
 wiki page validate <path>
+wiki page rename <slug> "<new title>"           # rename slug + update every backlink
+wiki page delete <slug> [--force]               # refuses unless status=deprecated and no backlinks
 wiki links check
 wiki log add --type <type> --message <message>
+wiki commit [-m <message>]                      # stage brain-managed paths and commit; message defaults to last log entry
 ```
+
+`wiki lint` honors `source_policy` and `lint.orphan_severity` in `wiki.config.yaml`. Notably:
+
+- `raw_is_immutable: true` → drift between a raw file and its manifest hash is an **error**. Use `wiki source rehash` to acknowledge an intentional edit.
+- `require_source_for_reviewed|canonical: true` → a page promoted without `sources` is an **error**.
+- `lint.orphan_severity: info|warning|error|critical` → pick the severity for pages not listed in the index.
 
 ---
 

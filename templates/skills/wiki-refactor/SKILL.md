@@ -15,6 +15,18 @@ The brain is a living codebase. Concepts split, merge, rename, and decay. The wh
 
 You interact with the brain **only through the `wiki` CLI**. Never read or write files inside the brain directly.
 
+The CLI has dedicated commands for the moves that used to require shell tricks:
+
+| Move | Command |
+|------|---------|
+| Rename a slug (and every backlink) | `wiki page rename <old-slug> "<New Title>"` |
+| Remove a deprecated, orphaned page | `wiki page delete <slug>` |
+| Reflect an intentional raw edit | `wiki source rehash <id\|path>` |
+| Verify all raw hashes vs manifest | `wiki source verify` |
+| Stage brain paths and commit | `wiki commit [-m "..."]` |
+
+Prefer these over heredoc + shell; they update backlinks, frontmatter, and manifests in one pass.
+
 ## When to use
 
 - Two pages are near-duplicates and should merge
@@ -95,29 +107,19 @@ related: [<original-slug>]
 EOF
 ```
 
-**Rename:**
+**Rename (slug only or slug + title):**
 ```bash
-cat <<'EOF' | wiki page save --type <type> --title "<new title>"
----
-supersedes: [<old-slug>]
----
-
-# New Title
-
-(body)
-EOF
-
-cat <<'EOF' | wiki page update <old-slug> --status deprecated
----
-superseded_by: <new-slug>
----
-EOF
+wiki page rename <old-slug> "<New Title>"            # rewrites slug + title, updates every backlink
+wiki page rename <old-slug> "<New Title>" --keep-title  # rewrites slug only
 ```
+
+This handles frontmatter (`related`, `sources`, `supersedes`, `superseded_by`) and relative markdown links ending in `<old-slug>.md` across the brain.
 
 **Deprecate:**
 ```bash
 cat <<'EOF' | wiki page update <slug> --status deprecated
 ---
+superseded_by: <replacement-slug>
 ---
 
 # (deprecated) — see <replacement-slug>
@@ -125,6 +127,18 @@ cat <<'EOF' | wiki page update <slug> --status deprecated
 (short deprecation note)
 EOF
 ```
+
+**Delete (only when truly safe):**
+```bash
+wiki page delete <slug>                              # refuses if status≠deprecated or page has backlinks
+wiki page delete <slug> --force                      # skip guards (still prefers deprecation)
+```
+
+**Raw file changes:** If you need to edit a registered source file (e.g. fix broken image paths), then run:
+```bash
+wiki source rehash <id|path>                         # refresh manifest + source page hash
+```
+Without this, `wiki lint` will flag the drift as an error (raw_is_immutable).
 
 **Schema evolution:** migrate one page at a time. After each:
 ```bash
@@ -145,13 +159,22 @@ wiki log add --type refactor \
   --message "<summary> — before: <old slugs>; after: <new slugs>; backlinks updated"
 ```
 
+### 7. Commit
+
+```bash
+wiki commit                          # message defaults to the last log entry
+wiki commit -m "refactor: <summary>" # explicit subject when you prefer
+```
+
+`wiki commit` stages only brain-managed paths (`wiki/`, `raw/`, `schemas/`, `skills/`, `.wiki/manifests/`, `wiki.config.yaml`, `AGENTS.md`, `WIKI_PROTOCOL.md`) and refuses to commit `raw/` changes when `wiki/log.md` is not also staged (policy: `require_log_entry_for_updates`).
+
 ## Guardrails
 
-- **Prefer deprecation over deletion.** Deletion breaks citations; deprecation preserves them.
+- **Prefer deprecation over deletion.** Deletion breaks citations; `wiki page delete` enforces this by default (refuses on non-deprecated pages or pages with backlinks).
 - **Preserve every raw source reference.** If you can't see where a source should live in the new structure, the structure is wrong.
 - **Do not rewrite canonical decisions silently.** If a refactor changes meaning, that's a new decision (use `wiki-decision-capture`), not a refactor.
 - **After every change** the brain should still pass `wiki doctor` and `wiki lint`. Finish the job before stopping.
-- **Never write files in the brain directly.** Use `wiki page save` / `wiki page update`.
+- **Never write files in the brain directly.** Use `wiki page save` / `wiki page update` / `wiki page rename` / `wiki page delete`. For raw edits, follow with `wiki source rehash`.
 - **Never invent CLI commands.** Run `wiki --help` if unsure.
 
 ## Done criteria
