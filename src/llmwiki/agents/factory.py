@@ -30,24 +30,36 @@ def _prompt(name: str) -> str:
 
 
 def _build_model(model_str: str) -> Any:
-    """Constrói o objeto de modelo correto para o DeepAgent.
+    """Build the correct model object for the DeepAgent.
 
-    Modelos Ollama recebem ``disable_streaming=True`` + timeout generoso para
-    evitar 502/unexpected-EOF em conexões cloud (ollama.com proxy não suporta
-    respostas longas via SSE).  Outros provedores usam a string diretamente.
+    Ollama models (local or cloud) are returned as a ChatOllama instance that
+    forces ``stream=False`` at the HTTP level.  The langchain_ollama default is
+    ``stream=True`` which streams over SSE; cloud Ollama proxies (ollama.com)
+    drop long streaming connections with 502/EOF.  We override ``_chat_params``
+    to always set ``stream=False`` so the proxy returns the full response in
+    one JSON blob.
+
+    Other providers are returned as-is (DeepAgents resolves the string).
     """
     if not model_str.startswith("ollama:"):
         return model_str
 
-    ollama_model = model_str[len("ollama:"):]  # ex: "gemma4:31b-cloud"
+    ollama_model = model_str[len("ollama:"):]  # e.g. "gemma4:31b-cloud"
     try:
         from langchain_ollama import ChatOllama  # noqa: PLC0415
     except ImportError:
-        return model_str  # fallback: deixa DeepAgents resolver
+        return model_str  # fallback: let DeepAgents resolve
 
-    return ChatOllama(
+    class _NoStreamOllama(ChatOllama):  # type: ignore[misc]
+        """ChatOllama subclass that always uses stream=False in HTTP requests."""
+
+        def _chat_params(self, messages: Any, stop: Any = None, **kwargs: Any) -> Any:  # type: ignore[override]
+            params = super()._chat_params(messages, stop, **kwargs)
+            params["stream"] = False
+            return params
+
+    return _NoStreamOllama(
         model=ollama_model,
-        disable_streaming=True,
         client_kwargs={"timeout": 300.0},
     )
 

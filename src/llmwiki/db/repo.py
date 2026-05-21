@@ -7,6 +7,7 @@ acontecem aqui; o resto da app não escreve SQL.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 from ..core.misc import now_iso
@@ -153,18 +154,49 @@ class PageFtsRepo:
         )
         self.conn.commit()
 
+    @staticmethod
+    def _sanitize_fts_query(query: str) -> str:
+        """Make a free-form query safe for FTS5 MATCH.
+
+        FTS5 uses a rich query syntax where hyphens, parentheses, colons, and
+        operators (AND/OR/NOT) have special meaning.  LLM-generated queries often
+        contain those characters and blow up with "no such column" / "syntax
+        error".  Strategy: keep only alphanumeric chars + spaces, collapse
+        whitespace, then OR the tokens together.
+        """
+        tokens = re.sub(r"[^a-zA-Z0-9À-ÿ\s]", " ", query).split()
+        if not tokens:
+            return '""'  # empty phrase — returns nothing gracefully
+        # Join as OR query; FTS5 treats space-separated terms as AND by default,
+        # so we use explicit OR for broader recall.
+        return " OR ".join(tokens)
+
     def search(self, query: str, limit: int = 20) -> list[tuple[str, str, float]]:
-        """Retorna (path, title, rank) ordenado por relevância (bm25, menor = melhor)."""
-        rows = self.conn.execute(
-            """
-            SELECT path, title, bm25(pages_fts) AS rank
-            FROM pages_fts
-            WHERE pages_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (query, limit),
-        ).fetchall()
+        """Return (path, title, rank) sorted by relevance (bm25, lower = better)."""
+        safe_query = self._sanitize_fts_query(query)
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT path, title, bm25(pages_fts) AS rank
+                FROM pages_fts
+                WHERE pages_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (safe_query, limit),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Last-resort fallback: phrase search on original query
+            rows = self.conn.execute(
+                """
+                SELECT path, title, bm25(pages_fts) AS rank
+                FROM pages_fts
+                WHERE pages_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (f'"{query}"', limit),
+            ).fetchall()
         return [(r["path"], r["title"], float(r["rank"])) for r in rows]
 
 

@@ -1,0 +1,17 @@
+{
+  "timestamp": "20260521T172039Z",
+  "model": "ollama:gemma4:31b-cloud",
+  "source": "eval/rag_overview.md",
+  "rounds": 1,
+  "runs": [
+    {
+      "model": "ollama:gemma4:31b-cloud",
+      "source": "eval/rag_overview.md",
+      "error": "no such column: Augmented",
+      "score": {
+        "total_pages": 0,
+        "score": 0.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "timestamp": "20260521T172538Z",
+  "model": "ollama:gemma4:31b-cloud",
+  "source": "eval/rag_overview.md",
+  "rounds": 1,
+  "runs": [
+    {
+      "model": "ollama:gemma4:31b-cloud",
+      "source": "eval/rag_overview.md",
+      "agent_summary": "Criação da página de conceito 'Retrieval-Augmented Generation (RAG)' detalhando seu funcionamento, componentes, variantes e trade-offs.",
+      "pages": [
+        "wiki/concepts/rag.md"
+      ],
+      "score": {
+        "total_pages": 1,
+        "score": 100.0,
+        "metrics": {
+          "frontmatter_complete": 100.0,
+          "type_valid": 100.0,
+          "confidence_valid": 100.0,
+          "correct_dir": 100.0,
+          "has_sources": 100.0,
+          "has_internal_links": 100.0,
+          "body_substantial": 100.0,
+          "has_headings": 100.0
+        },
+        "details": {
+          "wiki/concepts/rag.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 5,
+            "body_length": 1846,
+            "body_substantial": true,
+            "has_headings": true
+          }
+        },
+        "avg_body_length": 1846,
+        "avg_links_per_page": 5.0
+      }
+    }
+  ]
+}

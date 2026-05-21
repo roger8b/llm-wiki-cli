@@ -1,0 +1,118 @@
+{
+  "timestamp": "20260521T172710Z",
+  "model": "ollama:gemma4:31b-cloud",
+  "source": "eval/rag_overview.md",
+  "rounds": 1,
+  "runs": [
+    {
+      "model": "ollama:gemma4:31b-cloud",
+      "source": "eval/rag_overview.md",
+      "agent_summary": "Integrated comprehensive overview of Retrieval-Augmented Generation (RAG). Decomposed the source into a main conceptual page and 5 detailed supporting pages covering the embedding model, vector stores, chunking strategies, re-rankers, and RAG architectural variants.",
+      "pages": [
+        "wiki/concepts/vector_store.md",
+        "wiki/concepts/rag.md",
+        "wiki/concepts/embedding_model.md",
+        "wiki/concepts/chunking_strategy.md",
+        "wiki/concepts/reranker.md",
+        "wiki/concepts/rag_variants.md"
+      ],
+      "score": {
+        "total_pages": 6,
+        "score": 100.0,
+        "metrics": {
+          "frontmatter_complete": 100.0,
+          "type_valid": 100.0,
+          "confidence_valid": 100.0,
+          "correct_dir": 100.0,
+          "has_sources": 100.0,
+          "has_internal_links": 100.0,
+          "body_substantial": 100.0,
+          "has_headings": 100.0,
+          "granularity": 100.0
+        },
+        "details": {
+          "wiki/concepts/vector_store.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 2,
+            "body_length": 856,
+            "body_substantial": true,
+            "has_headings": true
+          },
+          "wiki/concepts/rag.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 7,
+            "body_length": 1913,
+            "body_substantial": true,
+            "has_headings": true
+          },
+          "wiki/concepts/embedding_model.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 1,
+            "body_length": 881,
+            "body_substantial": true,
+            "has_headings": true
+          },
+          "wiki/concepts/chunking_strategy.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 2,
+            "body_length": 884,
+            "body_substantial": true,
+            "has_headings": true
+          },
+          "wiki/concepts/reranker.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 3,
+            "body_length": 793,
+            "body_substantial": true,
+            "has_headings": true
+          },
+          "wiki/concepts/rag_variants.md": {
+            "frontmatter_complete": true,
+            "frontmatter_missing": [],
+            "type_valid": true,
+            "confidence_valid": true,
+            "correct_dir": true,
+            "has_sources": true,
+            "has_internal_links": true,
+            "internal_link_count": 2,
+            "body_length": 1105,
+            "body_substantial": true,
+            "has_headings": true
+          }
+        },
+        "avg_body_length": 1072,
+        "avg_links_per_page": 2.8
+      }
+    }
+  ]
+}
