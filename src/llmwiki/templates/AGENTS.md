@@ -1,17 +1,17 @@
-# AGENTS — como operar este brain
+# AGENTS — how to operate this brain
 
-Este diretório é um brain do **llm-wiki**. Conhecimento mora em Markdown
-(`wiki/`), fontes brutas em `raw/` (imutáveis), metadados em `.llmwiki/`.
+This directory is a **llm-wiki** brain. Knowledge lives in Markdown
+(`wiki/`), raw sources in `raw/` (immutable), metadata in `.llmwiki/`.
 
-## Princípios
-- `raw/` é imutável: leia, nunca edite.
-- O LLM **propõe** mudanças como change request; o humano revisa e aplica.
-- `wiki/index.md` e `wiki/log.md` são gerados — não edite à mão.
+## Principles
+- `raw/` is immutable: read only, never edit.
+- The LLM **proposes** changes as change requests; the human reviews and applies.
+- `wiki/index.md` and `wiki/log.md` are generated — do not edit by hand.
 
-## Comandos
-- `llmwiki ingest <arquivo>` — ler uma fonte e propor mudanças.
-- `llmwiki ask "<pergunta>"` — responder usando a wiki.
-- `llmwiki lint` — auditar a saúde da base.
-- `llmwiki index` — reconstruir índice e metadados.
+## Commands
+- `wiki ingest <file>` — read a source and propose wiki changes.
+- `wiki ask "<question>"` — answer using the wiki as source.
+- `wiki lint` — audit the health of the knowledge base.
+- `wiki index` — rebuild the index and metadata.
 
-Ver `WIKI_PROTOCOL.md` para as regras completas de manutenção.
+See `WIKI_PROTOCOL.md` for the full maintenance rules.

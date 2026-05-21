@@ -31,7 +31,7 @@ from ...services import (
 from ...sources.manager import add_source
 
 app = typer.Typer(
-    help="llm-wiki — base de conhecimento local mantida por LLM.",
+    help="wiki — local-first knowledge base maintained by an LLM.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -76,7 +76,7 @@ def init(
         _fail(str(exc))
         return
     console.print(f"[green]Brain criado em[/green] {paths.root}")
-    console.print("Próximo passo:  llmwiki source add <arquivo>")
+    console.print("Próximo passo:  wiki source add <arquivo>")
 
 
 @source_app.command("add")
@@ -252,7 +252,7 @@ def ask(
     if cr is not None:
         console.print(
             f"\n[green]Resposta salva como change request {cr.id}[/green] "
-            f"— revise com llmwiki review {cr.id}"
+            f"— revise com wiki review {cr.id}"
         )
 
 
@@ -340,7 +340,7 @@ def ingest(file: str = typer.Argument(..., help="Arquivo de fonte a ingerir.")) 
         )
         return
     console.print(f"Change request criado: [bold]{cr.id}[/bold] ({cr.files_changed} arquivos)")
-    console.print(f"Revise com:  llmwiki review {cr.id}")
+    console.print(f"Revise com:  wiki review {cr.id}")
 
 
 @app.command()

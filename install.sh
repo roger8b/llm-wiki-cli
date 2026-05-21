@@ -2,15 +2,15 @@
 # Instalador do llm-wiki (v2, Python).
 #
 # Cria um venv dedicado, instala o pacote (com extras) e expõe o binário
-# `llmwiki` no PATH via symlink.
+# `wiki` no PATH via symlink.
 #
 # Uso:
 #   ./install.sh                  # instala do diretório atual
 #   LLMWIKI_EXTRAS=api,mcp ./install.sh
-#   LLMWIKI_HOME=~/.llmwiki LLMWIKI_BIN=~/.local/bin ./install.sh
+#   LLMWIKI_HOME=~/.wiki LLMWIKI_BIN=~/.local/bin ./install.sh
 set -euo pipefail
 
-HOME_DIR="${LLMWIKI_HOME:-$HOME/.llmwiki}"
+HOME_DIR="${LLMWIKI_HOME:-$HOME/.wiki}"
 BIN_DIR="${LLMWIKI_BIN:-$HOME/.local/bin}"
 EXTRAS="${LLMWIKI_EXTRAS:-api,mcp,agent,ollama}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,16 +38,16 @@ else
   "$HOME_DIR/venv/bin/pip" install --quiet "$SRC_DIR"
 fi
 
-echo "==> Expondo binário em $BIN_DIR/llmwiki"
+echo "==> Expondo binário em $BIN_DIR/wiki"
 mkdir -p "$BIN_DIR"
-ln -sf "$HOME_DIR/venv/bin/llmwiki" "$BIN_DIR/llmwiki"
+ln -sf "$HOME_DIR/venv/bin/wiki" "$BIN_DIR/wiki"
 
 echo ""
 echo "OK. llm-wiki instalado."
-"$HOME_DIR/venv/bin/llmwiki" version
+"$HOME_DIR/venv/bin/wiki" version
 case ":$PATH:" in
   *":$BIN_DIR:"*) : ;;
   *) echo ""; echo "ATENÇÃO: adicione $BIN_DIR ao PATH:"; echo "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 echo ""
-echo "Próximo passo:  llmwiki init meu-brain && cd meu-brain"
+echo "Próximo passo:  wiki init meu-brain && cd meu-brain"

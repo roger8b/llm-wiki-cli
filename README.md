@@ -4,10 +4,10 @@
 > who think in plain text and want their notes to stay sharp over time.
 
 ```
-llmwiki init my-brain
-llmwiki source add docs/architecture.md
-llmwiki ingest raw/articles/architecture.md
-llmwiki ask "What are the trade-offs of our current auth approach?"
+wiki init my-brain
+wiki source add docs/architecture.md
+wiki ingest raw/articles/architecture.md
+wiki ask "What are the trade-offs of our current auth approach?"
 ```
 
 ---
@@ -52,9 +52,9 @@ cd llm-wiki-cli
 ```
 
 The installer:
-1. Creates a dedicated venv at `~/.llmwiki/venv`
+1. Creates a dedicated venv at `~/.wiki/venv`
 2. Installs `llm-wiki[api,mcp,agent,ollama]` and all extras
-3. Symlinks `llmwiki` → `~/.local/bin/llmwiki`
+3. Symlinks `wiki` → `~/.local/bin/wiki`
 
 Add `~/.local/bin` to your `PATH` if not already there:
 
@@ -65,7 +65,7 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 ### Custom paths / extras
 
 ```bash
-LLMWIKI_HOME=~/.config/llmwiki \
+LLMWIKI_HOME=~/.config/wiki \
 LLMWIKI_BIN=~/.local/bin \
 LLMWIKI_EXTRAS=api,mcp,agent,anthropic \
 ./install.sh
@@ -97,7 +97,7 @@ pip install -e ".[agent,ollama,api,mcp,dev]"
 
 ```bash
 # 1. Create a brain
-llmwiki init my-brain
+wiki init my-brain
 cd my-brain
 
 # 2. Configure the model (edit .llmwiki/config.yaml)
@@ -105,22 +105,22 @@ cd my-brain
 #    Examples: ollama:gemma4:31b-cloud  |  anthropic:claude-sonnet-4-6
 
 # 3. Add a raw source
-llmwiki source add ~/articles/rag-overview.md
+wiki source add ~/articles/rag-overview.md
 
 # 4. Ingest it — the LLM reads the source and proposes wiki pages
-llmwiki ingest raw/articles/rag-overview.md
+wiki ingest raw/articles/rag-overview.md
 
 # 5. Review the proposed changes
-llmwiki review            # list pending change requests
-llmwiki review CR-2026-0001  # see the diffs
+wiki review                  # list pending change requests
+wiki review CR-2026-0001     # see the diffs
 
 # 6. Apply or reject
-llmwiki apply CR-2026-0001
-# llmwiki reject CR-2026-0001
+wiki apply CR-2026-0001
+# wiki reject CR-2026-0001
 
 # 7. Search and query
-llmwiki search "retrieval augmented generation"
-llmwiki ask "What are the trade-offs of RAG vs fine-tuning?"
+wiki search "retrieval augmented generation"
+wiki ask "What are the trade-offs of RAG vs fine-tuning?"
 ```
 
 ---
@@ -179,22 +179,22 @@ fts_limit: 20               # max FTS5 search results
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki init <dir>` | Create a new brain at `<dir>` |
-| `llmwiki index` | Rebuild FTS index + regenerate `wiki/index.md` |
-| `llmwiki log` | Print `wiki/log.md` (applied change history) |
+| `wiki init <dir>` | Create a new brain at `<dir>` |
+| `wiki index` | Rebuild FTS index + regenerate `wiki/index.md` |
+| `wiki log` | Print `wiki/log.md` (applied change history) |
 
 ### Sources
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki source add <file>` | Register a raw file into `raw/` |
-| `llmwiki source list` | List registered sources and their status |
+| `wiki source add <file>` | Register a raw file into `raw/` |
+| `wiki source list` | List registered sources and their status |
 
 ### Ingestion (LLM-powered)
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki ingest <path>` | Read source with LLM → create change request |
+| `wiki ingest <path>` | Read source with LLM → create change request |
 
 The LLM reads the source, searches existing pages for context, then writes new
 or updated pages. All writes are staged — not applied until you `apply`.
@@ -203,41 +203,41 @@ or updated pages. All writes are staged — not applied until you `apply`.
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki review` | List pending change requests |
-| `llmwiki review <CR-id>` | Show full diff for a specific CR |
-| `llmwiki apply <CR-id>` | Apply changes: write files, reindex, log |
-| `llmwiki reject <CR-id>` | Reject — keeps diff for audit |
+| `wiki review` | List pending change requests |
+| `wiki review <CR-id>` | Show full diff for a specific CR |
+| `wiki apply <CR-id>` | Apply changes: write files, reindex, log |
+| `wiki reject <CR-id>` | Reject — keeps diff for audit |
 
 ### Search & query
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki search <query>` | Full-text search (FTS5) |
-| `llmwiki ask "<question>"` | Grounded Q&A using wiki as source |
-| `llmwiki ask "<question>" --save` | Same, and save the answer as a wiki page |
+| `wiki search <query>` | Full-text search (FTS5) |
+| `wiki ask "<question>"` | Grounded Q&A using wiki as source |
+| `wiki ask "<question>" --save` | Same, and save the answer as a wiki page |
 
 ### Quality
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki lint` | Structural checks (broken links, missing frontmatter) |
-| `llmwiki lint --all` | Adds semantic checks via LLM (contradictions, duplicates) |
-| `llmwiki maintain` | Run lint + auto-propose fixes as change request |
+| `wiki lint` | Structural checks (broken links, missing frontmatter) |
+| `wiki lint --all` | Adds semantic checks via LLM (contradictions, duplicates) |
+| `wiki maintain` | Run lint + auto-propose fixes as change request |
 
 ### Pages
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki page create "<title>" --type <type>` | Create a page from type template |
-| `llmwiki page open <path>` | Print a wiki page |
+| `wiki page create "<title>" --type <type>` | Create a page from type template |
+| `wiki page open <path>` | Print a wiki page |
 
 ### Server & integrations
 
 | Command | Description |
 |---------|-------------|
-| `llmwiki serve` | Start FastAPI review UI on `http://localhost:8000` |
-| `llmwiki mcp` | Start MCP server (stdio) for agent integrations |
-| `llmwiki jobs` | List background jobs (ingest / lint / query) |
+| `wiki serve` | Start FastAPI review UI on `http://localhost:8000` |
+| `wiki mcp` | Start MCP server (stdio) for agent integrations |
+| `wiki jobs` | List background jobs (ingest / lint / query) |
 
 ---
 
@@ -279,7 +279,7 @@ grounded, factual answers. See also: [[Vector Store]], [[Embedding Model]].
 ### Internal links
 
 Use `[[Page Title]]` to link between pages. The indexer resolves and tracks
-these links; broken ones are reported by `llmwiki lint`.
+these links; broken ones are reported by `wiki lint`.
 
 ---
 
@@ -288,8 +288,8 @@ these links; broken ones are reported by `llmwiki lint`.
 Start the server:
 
 ```bash
-llmwiki serve               # default: http://localhost:8000
-llmwiki serve --port 9000
+wiki serve               # default: http://localhost:8000
+wiki serve --port 9000
 ```
 
 Endpoints:
@@ -314,7 +314,7 @@ Endpoints:
 Expose the wiki to Claude Desktop, Cursor, or any MCP-compatible agent:
 
 ```bash
-llmwiki mcp          # starts stdio MCP server
+wiki mcp          # starts stdio MCP server
 ```
 
 Available MCP tools:
@@ -408,8 +408,8 @@ src/llmwiki/
 ```
 
 What gets removed:
-- `~/.llmwiki/venv` — the dedicated Python venv
-- `~/.local/bin/llmwiki` — the binary symlink
+- `~/.wiki/venv` — the dedicated Python venv
+- `~/.local/bin/wiki` — the binary symlink
 
 What is **never** touched:
 - Your brain directories (plain Markdown folders you own)
@@ -418,7 +418,7 @@ What is **never** touched:
 Custom paths follow the same env vars as `install.sh`:
 
 ```bash
-LLMWIKI_HOME=~/.config/llmwiki LLMWIKI_BIN=~/.local/bin ./uninstall.sh --yes
+LLMWIKI_HOME=~/.config/wiki LLMWIKI_BIN=~/.local/bin ./uninstall.sh --yes
 ```
 
 ---

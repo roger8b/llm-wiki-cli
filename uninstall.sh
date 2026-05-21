@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Uninstaller for llm-wiki.
 #
-# Removes the venv and the llmwiki binary symlink created by install.sh.
+# Removes the venv and the wiki binary symlink created by install.sh.
 # Brain directories (your knowledge bases) are NEVER touched.
 #
 # Usage:
 #   ./uninstall.sh
-#   LLMWIKI_HOME=~/.llmwiki LLMWIKI_BIN=~/.local/bin ./uninstall.sh
+#   LLMWIKI_HOME=~/.wiki LLMWIKI_BIN=~/.local/bin ./uninstall.sh
 #   ./uninstall.sh --yes     # skip confirmation prompt
 set -euo pipefail
 
-HOME_DIR="${LLMWIKI_HOME:-$HOME/.llmwiki}"
+HOME_DIR="${LLMWIKI_HOME:-$HOME/.wiki}"
 BIN_DIR="${LLMWIKI_BIN:-$HOME/.local/bin}"
-BINARY="$BIN_DIR/llmwiki"
+BINARY="$BIN_DIR/wiki"
 VENV="$HOME_DIR/venv"
 SKIP_CONFIRM=0
 
