@@ -29,6 +29,29 @@ def _prompt(name: str) -> str:
     )
 
 
+def _build_model(model_str: str) -> Any:
+    """Constrói o objeto de modelo correto para o DeepAgent.
+
+    Modelos Ollama recebem ``disable_streaming=True`` + timeout generoso para
+    evitar 502/unexpected-EOF em conexões cloud (ollama.com proxy não suporta
+    respostas longas via SSE).  Outros provedores usam a string diretamente.
+    """
+    if not model_str.startswith("ollama:"):
+        return model_str
+
+    ollama_model = model_str[len("ollama:"):]  # ex: "gemma4:31b-cloud"
+    try:
+        from langchain_ollama import ChatOllama  # noqa: PLC0415
+    except ImportError:
+        return model_str  # fallback: deixa DeepAgents resolver
+
+    return ChatOllama(
+        model=ollama_model,
+        disable_streaming=True,
+        client_kwargs={"timeout": 300.0},
+    )
+
+
 def _response_format(schema: type[BaseModel]) -> Any:
     """Força structured output via tool call (ToolStrategy).
 
@@ -90,7 +113,7 @@ def run_ingestion(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=cfg.model,
+        model=_build_model(cfg.model),
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("ingestion.md"),
         backend=backend,
@@ -115,7 +138,7 @@ def run_query(
     from deepagents import create_deep_agent
 
     kwargs: dict[str, Any] = {
-        "model": cfg.model,
+        "model": _build_model(cfg.model),
         "tools": [make_search_pages(cfg.paths)],
         "system_prompt": _prompt("query.md"),
         "response_format": _response_format(QueryResult),
@@ -134,7 +157,7 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=cfg.model,
+        model=_build_model(cfg.model),
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("lint.md"),
         response_format=_response_format(LintReport),
@@ -154,7 +177,7 @@ def run_maintenance(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=cfg.model,
+        model=_build_model(cfg.model),
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("maintenance.md"),
         backend=backend,

@@ -43,7 +43,10 @@ def ask(
 ) -> tuple[QueryResult, ChangeRequest | None]:
     """Responde a pergunta. Se ``save`` e houver página sugerida, cria um CR."""
     runner = runner or _default_runner
-    result = runner(cfg, None, question=question, save=save)
+    # Backend sempre presente: scopa read_file ao brain root.
+    # Writes do agente ficam no staging e são descartados (operação read-only).
+    read_backend = ChangeRequestBackend(paths.root)
+    result = runner(cfg, read_backend, question=question, save=save)
 
     cr: ChangeRequest | None = None
     if save and result.suggested_page is not None:
