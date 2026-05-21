@@ -403,11 +403,23 @@ src/llmwiki/
 ## Uninstall
 
 ```bash
-rm -rf ~/.llmwiki          # removes venv
-rm -f ~/.local/bin/llmwiki # removes binary symlink
+./uninstall.sh          # interactive — asks for confirmation
+./uninstall.sh --yes    # non-interactive (CI / scripts)
 ```
 
-Your brain directories are **not removed** — they are plain folders you own.
+What gets removed:
+- `~/.llmwiki/venv` — the dedicated Python venv
+- `~/.local/bin/llmwiki` — the binary symlink
+
+What is **never** touched:
+- Your brain directories (plain Markdown folders you own)
+- Shell config files (`~/.zshrc`, `~/.bashrc`)
+
+Custom paths follow the same env vars as `install.sh`:
+
+```bash
+LLMWIKI_HOME=~/.config/llmwiki LLMWIKI_BIN=~/.local/bin ./uninstall.sh --yes
+```
 
 ---
 
