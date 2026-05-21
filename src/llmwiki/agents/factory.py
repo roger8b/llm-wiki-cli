@@ -29,14 +29,55 @@ def _prompt(name: str) -> str:
     )
 
 
+def _response_format(schema: type[BaseModel]) -> Any:
+    """Força structured output via tool call (ToolStrategy).
+
+    Mais robusto que a estratégia nativa: muitos modelos servidos via Ollama não
+    cumprem JSON schema nativo, mas suportam tool calling. ``handle_errors`` deixa
+    o agente reparar saídas malformadas em vez de quebrar a execução.
+    """
+    from langchain.agents.structured_output import ToolStrategy
+
+    return ToolStrategy(schema, handle_errors=True)
+
+
 def _structured[T: BaseModel](state: dict[str, Any], schema: type[T]) -> T:
-    """Extrai a resposta estruturada do estado retornado pelo agente."""
+    """Extrai a resposta estruturada do estado retornado pelo agente.
+
+    Se o agente não produzir structured_response (modelos fracos às vezes não
+    chamam a tool final), cai para um resultado mínimo derivado da última
+    mensagem, evitando quebrar o fluxo de change request já capturado no backend.
+    """
     resp = state.get("structured_response")
-    if resp is None:
-        raise RuntimeError("Agente não devolveu structured_response.")
     if isinstance(resp, schema):
         return resp
-    return schema.model_validate(resp)
+    if isinstance(resp, dict):
+        return schema.model_validate(resp)
+    # Fallback: tenta montar um resultado mínimo com o texto da última mensagem.
+    last = ""
+    for msg in reversed(state.get("messages", [])):
+        content = getattr(msg, "content", None)
+        if isinstance(content, str) and content.strip():
+            last = content.strip()
+            break
+    return _fallback(schema, last)
+
+
+def _fallback[T: BaseModel](schema: type[T], text: str) -> T:
+    """Constrói um resultado mínimo quando não há structured_response."""
+    summary = text[:500] or "(sem resumo do agente)"
+    fields = schema.model_fields
+    data: dict[str, Any] = {}
+    if "summary" in fields:
+        data["summary"] = summary
+    if "answer" in fields:
+        data["answer"] = summary
+    try:
+        return schema.model_validate(data)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"Agente não devolveu structured_response e fallback falhou: {exc}"
+        ) from exc
 
 
 def run_ingestion(
@@ -53,7 +94,7 @@ def run_ingestion(
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("ingestion.md"),
         backend=backend,
-        response_format=IngestionResult,
+        response_format=_response_format(IngestionResult),
     )
     message = (
         f"FONTE: {source_path}\n\n"
@@ -77,7 +118,7 @@ def run_query(
         "model": cfg.model,
         "tools": [make_search_pages(cfg.paths)],
         "system_prompt": _prompt("query.md"),
-        "response_format": QueryResult,
+        "response_format": _response_format(QueryResult),
     }
     if backend is not None:
         kwargs["backend"] = backend
@@ -96,7 +137,7 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
         model=cfg.model,
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("lint.md"),
-        response_format=LintReport,
+        response_format=_response_format(LintReport),
     )
     state = agent.invoke(
         {"messages": [{"role": "user", "content": "Audite a wiki e liste os problemas."}]}
@@ -117,7 +158,7 @@ def run_maintenance(
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("maintenance.md"),
         backend=backend,
-        response_format=MaintenanceResult,
+        response_format=_response_format(MaintenanceResult),
     )
     message = f"Problemas detectados:\n{findings_text}\n\nProponha correções."
     state = agent.invoke({"messages": [{"role": "user", "content": message}]})

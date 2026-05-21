@@ -11,6 +11,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape as _esc
 from rich.table import Table
 
 from ... import __version__
@@ -115,7 +116,7 @@ def source_list() -> None:
         return
     table = Table("Path", "Tipo", "Status", "Título")
     for s in sources:
-        table.add_row(s.path, s.type, s.status.value, s.title or "")
+        table.add_row(_esc(s.path), s.type, s.status.value, _esc(s.title or ""))
     console.print(table)
 
 
@@ -151,7 +152,7 @@ def page_open(path: str = typer.Argument(..., help="Caminho da página.")) -> No
         return
     if not target.is_file():
         _fail(f"Página não encontrada: {path}")
-    console.print(target.read_text(encoding="utf-8"))
+    console.print(target.read_text(encoding="utf-8"), markup=False)
 
 
 @app.command()
@@ -189,7 +190,7 @@ def search(query: str = typer.Argument(..., help="Termo de busca (FTS5).")) -> N
         return
     table = Table("Página", "Título")
     for path, title, _rank in results:
-        table.add_row(path, title)
+        table.add_row(_esc(path), _esc(title))
     console.print(table)
 
 
@@ -215,7 +216,10 @@ def lint(
         return
     color = {Severity.info: "blue", Severity.warn: "yellow", Severity.error: "red"}
     for f in findings:
-        console.print(f"[{color[f.severity]}]{f.severity.value.upper()}[/] {f.kind}: {f.message}")
+        console.print(
+            f"[{color[f.severity]}]{f.severity.value.upper()}[/] "
+            f"{_esc(f.kind)}: {_esc(f.message)}"
+        )
     errors = sum(1 for f in findings if f.severity == Severity.error)
     if errors:
         raise typer.Exit(code=1)
@@ -239,12 +243,12 @@ def ask(
         return
     finally:
         conn.close()
-    console.print(result.answer)
+    console.print(result.answer, markup=False)
     if result.citations:
         console.print("\n[dim]Fontes:[/dim]")
         for i, c in enumerate(result.citations, 1):
             ref = c.page or c.source or "?"
-            console.print(f"  [{i}] {ref}")
+            console.print(f"  [{i}] {_esc(ref)}")
     if cr is not None:
         console.print(
             f"\n[green]Resposta salva como change request {cr.id}[/green] "
@@ -288,7 +292,7 @@ def log() -> None:
     paths = _brain()
     if not paths.log_path.is_file():
         _fail("log.md não encontrado.")
-    console.print(paths.log_path.read_text(encoding="utf-8"))
+    console.print(paths.log_path.read_text(encoding="utf-8"), markup=False)
 
 
 def _print_diff(diff: str) -> None:
@@ -302,15 +306,17 @@ def _print_diff(diff: str) -> None:
 
 @app.command()
 def ingest(file: str = typer.Argument(..., help="Arquivo de fonte a ingerir.")) -> None:
-    """Lê uma fonte com o LLM e cria um change request (não escreve a wiki)."""
+    """Lê uma fonte com o LLM e cria um change request (não escreve a wiki).
+
+    Aceita um caminho dentro do brain (ex.: raw/articles/x.md) ou qualquer
+    arquivo legível do sistema (lido como fonte, sem cópia).
+    """
     paths = _brain()
-    try:
-        target = resolve_input(file, paths.root)
-    except WikiError as exc:
-        _fail(str(exc))
-        return
+    direct = Path(file)
+    target = direct if direct.is_file() else (paths.root / file)
     if not target.is_file():
         _fail(f"Arquivo não encontrado: {file}")
+    target = target.resolve()
     cfg = load_config(paths)
     conn = get_connection(paths.db_path)
     try:
@@ -325,7 +331,14 @@ def ingest(file: str = typer.Argument(..., help="Arquivo de fonte a ingerir.")) 
     console.print(f"[green]Fonte processada[/green] (modelo: {cfg.model}).")
     for c in cr.changes:
         mark = "+" if c.operation == "create" else "~"
-        console.print(f"  {mark} {c.path} ({c.operation})")
+        console.print(f"  {mark} {_esc(c.path)} ({c.operation})")
+    if cr.files_changed == 0:
+        console.print(
+            f"[yellow]Atenção: o modelo não escreveu nenhuma página[/yellow] "
+            f"(CR {cr.id} vazio). Modelos pequenos costumam falhar nisso — "
+            f"use um modelo com bom suporte a tool calling (ex.: maior/cloud)."
+        )
+        return
     console.print(f"Change request criado: [bold]{cr.id}[/bold] ({cr.files_changed} arquivos)")
     console.print(f"Revise com:  llmwiki review {cr.id}")
 
@@ -343,16 +356,16 @@ def review(cr_id: str = typer.Argument(None, help="ID do CR. Vazio = lista pende
                 return
             table = Table("CR", "Arquivos", "Resumo")
             for cr in crs:
-                table.add_row(cr.id, str(cr.files_changed), (cr.summary or "")[:60])
+                table.add_row(cr.id, str(cr.files_changed), _esc((cr.summary or "")[:60]))
             console.print(table)
             return
         cr = change_request_service.get(cr_id, conn)
         if cr is None:
             _fail(f"Change request não encontrado: {cr_id}")
             return
-        console.print(f"[bold]{cr.id}[/bold] — {cr.status} — {cr.summary or ''}")
+        console.print(f"[bold]{cr.id}[/bold] — {cr.status} — {_esc(cr.summary or '')}")
         for c in cr.changes:
-            console.print(f"\n[cyan]{c.operation}: {c.path}[/cyan]")
+            console.print(f"\n[cyan]{_esc(c.operation)}: {_esc(c.path)}[/cyan]")
             _print_diff(c.diff)
     finally:
         conn.close()
@@ -408,7 +421,8 @@ def jobs() -> None:
     table = Table("ID", "Tipo", "Status", "Criado", "Erro")
     for r in rows:
         table.add_row(
-            str(r["id"]), r["type"], r["status"], r["created_at"][:19], (r["error"] or "")[:30]
+            str(r["id"]), r["type"], r["status"], r["created_at"][:19],
+            _esc((r["error"] or "")[:30]),
         )
     console.print(table)
 
