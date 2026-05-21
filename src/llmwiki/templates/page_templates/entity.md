@@ -8,11 +8,11 @@ confidence: medium
 ---
 # {{title}}
 
-## Resumo
+## Summary
 
-## Detalhes
+## Details
 
-## Relacionado
-<!-- Adicione links relacionados com [[Título da Página]] -->
+## Related
+<!-- Add related links with [[Page Title]] -->
 
-## Fontes
+## Sources

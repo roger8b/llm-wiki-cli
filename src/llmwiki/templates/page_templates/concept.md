@@ -8,14 +8,13 @@ confidence: medium
 ---
 # {{title}}
 
-## Definição
+## Definition
 
-## Ideia central
+## Core idea
 
-## Relação com outros conceitos
-<!-- Adicione links relacionados com [[Título da Página]] -->
+## Related concepts
+<!-- Add related links with [[Page Title]] -->
 
+## Caveats
 
-## Pontos de atenção
-
-## Fontes
+## Sources
