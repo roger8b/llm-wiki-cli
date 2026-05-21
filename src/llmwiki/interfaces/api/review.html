@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<title>llm-wiki — Review Changes</title>
+<style>
+ body{font-family:system-ui,sans-serif;margin:0;display:flex;height:100vh}
+ #list{width:280px;border-right:1px solid #ddd;overflow:auto;padding:12px}
+ #detail{flex:1;overflow:auto;padding:16px}
+ .cr{padding:8px;border:1px solid #ccc;border-radius:6px;margin-bottom:8px;cursor:pointer}
+ .cr:hover{background:#f5f5f5}
+ pre{background:#0d1117;color:#c9d1d9;padding:12px;border-radius:6px;overflow:auto}
+ .add{color:#3fb950}.del{color:#f85149}
+ button{padding:6px 12px;margin-right:8px;border-radius:6px;border:1px solid #ccc;cursor:pointer}
+ .apply{background:#238636;color:#fff;border:none}
+ .reject{background:#da3633;color:#fff;border:none}
+</style></head><body>
+<div id="list"><h3>Pendentes</h3><div id="crs"></div></div>
+<div id="detail"><p>Selecione um change request.</p></div>
+<script>
+async function load(){
+ const r=await fetch('/change-requests?status=pending_review');
+ const crs=await r.json();
+ const el=document.getElementById('crs');el.innerHTML='';
+ if(!crs.length){el.innerHTML='<p>Nenhum pendente.</p>';return;}
+ crs.forEach(cr=>{
+  const d=document.createElement('div');d.className='cr';
+  d.innerHTML='<b>'+cr.id+'</b><br><small>'+cr.files_changed+' arquivos</small><br>'+(cr.summary||'');
+  d.onclick=()=>show(cr.id);el.appendChild(d);
+ });
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function renderDiff(diff){
+ return diff.split('\n').map(l=>{
+  const e=esc(l);
+  if(l.startsWith('+'))return '<span class="add">'+e+'</span>';
+  if(l.startsWith('-'))return '<span class="del">'+e+'</span>';
+  return e;
+ }).join('\n');
+}
+async function show(id){
+ const r=await fetch('/change-requests/'+id);const cr=await r.json();
+ let html='<h2>'+cr.id+'</h2><p>'+(cr.summary||'')+'</p>';
+ html+='<button class="apply" onclick="act(\''+id+'\',\'apply\')">Aplicar</button>';
+ html+='<button class="reject" onclick="act(\''+id+'\',\'reject\')">Rejeitar</button>';
+ cr.changes.forEach(c=>{
+  html+='<h4>'+c.operation+': '+c.path+'</h4><pre>'+renderDiff(c.diff)+'</pre>';
+ });
+ document.getElementById('detail').innerHTML=html;
+}
+async function act(id,what){
+ await fetch('/change-requests/'+id+'/'+what,
+  {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ document.getElementById('detail').innerHTML='<p>Feito: '+what+'</p>';load();
+}
+load();
+</script></body></html>
