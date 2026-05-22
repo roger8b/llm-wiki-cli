@@ -60,7 +60,10 @@ def init_brain(root: Path, *, git: bool = True, force: bool = False) -> BrainPat
         (paths.wiki / sub).mkdir(parents=True, exist_ok=True)
     paths.schemas.mkdir(parents=True, exist_ok=True)
     (paths.schemas / "page_templates").mkdir(parents=True, exist_ok=True)
+    # .llmwiki/ is a git-tracked marker directory (stays empty in the brain repo)
     paths.dot.mkdir(parents=True, exist_ok=True)
+    # global data dirs (never committed): ~/.wiki/brains/<name>/
+    paths.global_dot.mkdir(parents=True, exist_ok=True)
     paths.change_requests.mkdir(parents=True, exist_ok=True)
 
     for name, rel in _TEMPLATE_FILES.items():
@@ -98,7 +101,8 @@ def _git_init(root: Path) -> None:
             capture_output=True,
         )
         (root / ".gitignore").write_text(
-            ".llmwiki/cache/\n.llmwiki/embeddings/\n", encoding="utf-8"
+            "# llm-wiki: brain content is tracked; metadata lives in ~/.wiki/\n",
+            encoding="utf-8",
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         # Git ausente não deve quebrar o init.

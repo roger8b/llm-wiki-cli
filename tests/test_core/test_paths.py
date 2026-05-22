@@ -57,8 +57,11 @@ class TestResolveInput:
 
 class TestBrainPaths:
     def test_derived_paths(self, tmp_path: Path) -> None:
+        import llmwiki.core.paths as _paths_mod
+
         bp = BrainPaths(root=tmp_path)
-        assert bp.db_path == tmp_path / ".llmwiki" / "metadata.db"
+        # db lives in the global home, under brains/<brain-name>/
+        assert bp.db_path == _paths_mod.WIKI_HOME / "brains" / tmp_path.name / "metadata.db"
         assert bp.index_path == tmp_path / "wiki" / "index.md"
 
     def test_relative(self, tmp_path: Path) -> None:

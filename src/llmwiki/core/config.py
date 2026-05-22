@@ -1,7 +1,11 @@
-"""Configuração do workspace, lida de ``.llmwiki/config.yaml``.
+"""Global workspace configuration, stored at ``~/.wiki/config.yaml``.
 
-Em Fase 0 só carregamos campos básicos. ``model`` é usado a partir da Fase 1
-(formato DeepAgents ``provider:model``).
+The config file is shared across all brains on this machine. It is created
+once (on the first ``wiki init``) and never overwritten by subsequent inits,
+so the user's customisations are preserved.
+
+Per-brain overrides are not currently supported; if needed in the future they
+can be layered on top (brain-local config shadows global config).
 """
 
 from __future__ import annotations
@@ -11,7 +15,14 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel
 
+from . import paths as _paths_module
 from .paths import BrainPaths
+
+# Default config written on first init.
+_DEFAULTS: dict[str, object] = {
+    "model": "ollama:llama3.1",
+    "fts_limit": 20,
+}
 
 
 class WorkspaceConfig(BaseModel):
@@ -24,13 +35,18 @@ class WorkspaceConfig(BaseModel):
         return BrainPaths(root=self.brain_root)
 
 
-def _config_file(paths: BrainPaths) -> Path:
-    return paths.dot / "config.yaml"
+def _config_file() -> Path:
+    """Global config path: ~/.wiki/config.yaml
+
+    Reading via module attribute so tests can monkeypatch
+    ``llmwiki.core.paths.WIKI_HOME`` to redirect to a temp dir.
+    """
+    return _paths_module.WIKI_HOME / "config.yaml"
 
 
 def load_config(paths: BrainPaths) -> WorkspaceConfig:
-    """Carrega config do brain; usa defaults para campos ausentes."""
-    cfg_path = _config_file(paths)
+    """Load global config; fall back to defaults for missing fields."""
+    cfg_path = _config_file()
     data: dict[str, object] = {}
     if cfg_path.exists():
         loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
@@ -40,12 +56,18 @@ def load_config(paths: BrainPaths) -> WorkspaceConfig:
     return WorkspaceConfig.model_validate(data)
 
 
-def write_default_config(paths: BrainPaths) -> None:
-    """Escreve um config.yaml inicial dentro de ``.llmwiki/``."""
-    cfg_path = _config_file(paths)
+def write_default_config(paths: BrainPaths) -> None:  # noqa: ARG001
+    """Write ~/.wiki/config.yaml with defaults if it doesn't exist yet.
+
+    The ``paths`` argument is kept for API compatibility but is no longer used
+    (config is now global, not per-brain).
+    """
+    cfg_path = _config_file()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    defaults = {"model": "ollama:llama3.1", "fts_limit": 20}
+    if cfg_path.exists():
+        # Preserve the user's existing config — never overwrite.
+        return
     cfg_path.write_text(
-        yaml.safe_dump(defaults, sort_keys=False, allow_unicode=True),
+        yaml.safe_dump(_DEFAULTS, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )

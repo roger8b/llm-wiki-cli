@@ -11,10 +11,14 @@ runner = CliRunner()
 
 class TestInit:
     def test_creates_tree(self, tmp_path: Path) -> None:
+        import llmwiki.core.paths as _paths_mod
+
         result = runner.invoke(app, ["init", str(tmp_path / "b"), "--no-git"])
         assert result.exit_code == 0
         root = tmp_path / "b"
-        assert (root / ".llmwiki" / "metadata.db").exists()
+        # DB lives in the global home (redirected by isolated_wiki_home fixture)
+        assert (_paths_mod.WIKI_HOME / "brains" / "b" / "metadata.db").exists()
+        assert (root / ".llmwiki").exists()  # marker dir still in brain
         assert (root / "wiki" / "index.md").exists()
         assert (root / "WIKI_PROTOCOL.md").exists()
 

@@ -1,9 +1,23 @@
-"""Resolução de caminhos do brain.
+"""Brain path resolution.
 
-Regras (ver CLAUDE.md / plano §11):
-- Nunca hardcode caminhos do brain — sempre derive de uma raiz descoberta.
-- Para entrada do usuário: tente o caminho absoluto; se não existir, caia para
-  ``brain_root / user_input``.
+Rules:
+- Never hardcode brain paths — always derive from a discovered root.
+- For user input: try the absolute path first; fall back to
+  ``brain_root / user_input`` if the absolute path doesn't exist.
+
+Layout
+------
+Inside the brain directory (git-tracked content):
+  <brain>/wiki/          — LLM-written knowledge pages
+  <brain>/raw/           — immutable raw sources
+  <brain>/schemas/       — YAML page schemas
+  <brain>/.llmwiki/      — marker dir (brain identity, tracked by git)
+
+Global data directory (never committed):
+  ~/.wiki/config.yaml           — global default config (model, fts_limit)
+  ~/.wiki/brains/<name>/        — per-brain metadata, indexed by root dirname
+    metadata.db                 — SQLite knowledge index
+    change_requests/            — staged diffs waiting for apply/reject
 """
 
 from __future__ import annotations
@@ -13,13 +27,16 @@ from pathlib import Path
 
 from .errors import BrainNotFoundError, PathOutsideBrainError
 
-# Marcadores que identificam a raiz de um brain.
+# Markers that identify the root of a brain.
 _MARKERS = (".llmwiki", "wiki")
+
+# Global home for config + per-brain databases/CRs.
+WIKI_HOME = Path.home() / ".wiki"
 
 
 @dataclass(frozen=True)
 class BrainPaths:
-    """Caminhos canônicos derivados da raiz do brain."""
+    """Canonical paths derived from the brain root."""
 
     root: Path
 
@@ -37,15 +54,25 @@ class BrainPaths:
 
     @property
     def dot(self) -> Path:
+        """Marker directory inside the brain (tracked by git, stays empty)."""
         return self.root / ".llmwiki"
+
+    # ------------------------------------------------------------------
+    # Global paths (live in ~/.wiki, never committed to the brain repo)
+    # ------------------------------------------------------------------
+
+    @property
+    def global_dot(self) -> Path:
+        """Per-brain data dir inside the global home (~/.wiki/brains/<name>/)."""
+        return WIKI_HOME / "brains" / self.root.resolve().name
 
     @property
     def db_path(self) -> Path:
-        return self.dot / "metadata.db"
+        return self.global_dot / "metadata.db"
 
     @property
     def change_requests(self) -> Path:
-        return self.dot / "change_requests"
+        return self.global_dot / "change_requests"
 
     @property
     def index_path(self) -> Path:

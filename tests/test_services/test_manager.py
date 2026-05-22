@@ -56,7 +56,11 @@ class TestConfig:
         assert cfg.brain_root == brain.root
 
     def test_load_reads_overrides(self, brain: BrainPaths) -> None:
-        write_default_config(brain)
-        (brain.dot / "config.yaml").write_text("model: anthropic:foo\n", encoding="utf-8")
+        import llmwiki.core.paths as _paths_mod
+
+        # Config is now global — write directly to ~/.wiki/config.yaml
+        cfg_path = _paths_mod.WIKI_HOME / "config.yaml"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_text("model: anthropic:foo\n", encoding="utf-8")
         cfg = load_config(brain)
         assert cfg.model == "anthropic:foo"

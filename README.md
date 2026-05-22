@@ -125,19 +125,18 @@ wiki ask "What are the trade-offs of RAG vs fine-tuning?"
 
 ---
 
-## Brain directory layout
+## Directory layout
+
+### Brain directory (git-tracked)
 
 ```
 my-brain/
-├── .llmwiki/
-│   ├── config.yaml          # model, fts_limit
-│   ├── metadata.db          # SQLite: pages, sources, jobs, change requests
-│   └── change_requests/     # staged diffs (JSON) — applied or rejected
+├── .llmwiki/                # brain identity marker (tracked, stays empty)
 ├── raw/                     # immutable raw sources (never edited by LLM)
 │   ├── articles/
-│   ├── books/
-│   ├── notes/
-│   └── videos/
+│   ├── pdfs/
+│   ├── meetings/
+│   └── …
 ├── wiki/                    # LLM-written knowledge pages
 │   ├── concepts/
 │   ├── entities/
@@ -145,29 +144,128 @@ my-brain/
 │   ├── decisions/
 │   ├── projects/
 │   └── research/
-├── schemas/                 # YAML schemas for page types
+├── schemas/                 # YAML schemas + page templates
 ├── WIKI_PROTOCOL.md         # rules the LLM follows
 └── wiki/index.md            # auto-generated wiki map
 ```
+
+### Global data directory (never committed)
+
+```
+~/.wiki/
+├── config.yaml              # global config — model, fts_limit
+└── brains/
+    └── my-brain/
+        ├── metadata.db      # SQLite: pages, sources, jobs, change requests
+        └── change_requests/ # staged diffs (JSON) — applied or rejected
+```
+
+Config and the database live **outside** the brain repo so they are never
+accidentally committed or pushed. All brains on the same machine share a
+single `config.yaml`; the database is isolated per brain by directory name.
 
 ---
 
 ## Configuration
 
-`my-brain/.llmwiki/config.yaml`:
+Global config file: **`~/.wiki/config.yaml`**
+
+Created automatically on the first `wiki init`. Edit it to change the model
+or search limit for all your brains.
 
 ```yaml
-model: ollama:llama3.1      # provider:model
-fts_limit: 20               # max FTS5 search results
+model: ollama:llama3.1      # provider:model  (see examples below)
+fts_limit: 20               # max full-text search results
 ```
 
-### Supported model strings
+### Model configuration examples
+
+#### Ollama — local
+
+Requires [Ollama](https://ollama.ai) running on `localhost:11434`.
+
+```yaml
+model: ollama:llama3.1
+```
+
+```yaml
+model: ollama:qwen2.5:7b
+```
+
+```yaml
+model: ollama:gemma3:12b
+```
+
+No API key needed. Pull the model first: `ollama pull qwen2.5:7b`
+
+#### Ollama — cloud (ollama.com)
+
+Hosted models via the Ollama cloud proxy. Append `-cloud` to the model name.
+
+```yaml
+model: ollama:gemma4:27b-cloud
+```
+
+```yaml
+model: ollama:llama4:scout-cloud
+```
+
+No local GPU needed. Requires an Ollama account.
+
+#### Anthropic (Claude)
+
+```yaml
+model: anthropic:claude-sonnet-4-5
+```
+
+```yaml
+model: anthropic:claude-opus-4-5
+```
+
+```yaml
+model: anthropic:claude-haiku-3-5
+```
+
+Requires `ANTHROPIC_API_KEY` env var.  
+Install extra: `pip install "llm-wiki[anthropic]"`
+
+#### OpenAI
+
+```yaml
+model: openai:gpt-4o
+```
+
+```yaml
+model: openai:gpt-4o-mini
+```
+
+```yaml
+model: openai:o3-mini
+```
+
+Requires `OPENAI_API_KEY` env var.  
+Install extra: `pip install "llm-wiki[openai]"`
+
+#### Google (Gemini)
+
+```yaml
+model: google:gemini-2.0-flash
+```
+
+```yaml
+model: google:gemini-2.5-pro
+```
+
+Requires `GOOGLE_API_KEY` env var.  
+Install extra: `pip install "llm-wiki[google]"`
+
+### Supported model string format
 
 | Provider | Format | Example |
 |----------|--------|---------|
 | Ollama (local) | `ollama:<model>` | `ollama:qwen2.5:7b` |
-| Ollama (cloud) | `ollama:<model>-cloud` | `ollama:gemma4:31b-cloud` |
-| Anthropic | `anthropic:<model>` | `anthropic:claude-sonnet-4-6` |
+| Ollama (cloud) | `ollama:<model>-cloud` | `ollama:gemma4:27b-cloud` |
+| Anthropic | `anthropic:<model>` | `anthropic:claude-sonnet-4-5` |
 | OpenAI | `openai:<model>` | `openai:gpt-4o` |
 | Google | `google:<model>` | `google:gemini-2.0-flash` |
 
