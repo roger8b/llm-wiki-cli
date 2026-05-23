@@ -43,8 +43,8 @@ jobs:
       - name: Pytest (with coverage)
         run: pytest
 
-  ui-build:
-    name: UI build (catches dependency drift)
+  build-python-pkg:
+    name: Build Python Package (CLI & Server)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,3 +57,52 @@ jobs:
         run: npm --prefix ui ci
       - name: Type-check + build SPA
         run: npm --prefix ui run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install build tools
+        run: pip install build
+      - name: Build wheel and sdist
+        run: python -m build
+      - name: Upload Python Package Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-packages
+          path: dist/*
+          if-no-files-found: error
+
+  build-desktop:
+    name: Build macOS Desktop App (Tauri)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Node dependencies
+        run: npm --prefix ui ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          pip install -e ".[agent,ollama,api,mcp,dev]"
+          pip install pyinstaller
+      - name: Build PyInstaller sidecar
+        run: ./scripts/build_sidecar.sh
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Build Tauri App
+        working-directory: ui
+        run: npx tauri build
+      - name: Upload macOS Desktop Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-desktop-app
+          path: ui/src-tauri/target/release/bundle/
+          if-no-files-found: error
+
