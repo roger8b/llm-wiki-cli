@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  lint:
+    name: Lint & type-check (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install dev deps
+        run: pip install -e ".[agent,ollama,api,mcp,dev]"
+      - name: Ruff
+        run: ruff check src/ tests/
+      - name: Mypy
+        # NOTE: mypy is `strict` but not yet clean across the tree. Keep it
+        # non-blocking until the type debt is paid down, then drop this flag.
+        continue-on-error: true
+        run: mypy src/llmwiki
+
+  test:
+    name: Tests (Python ${{ env.PYTHON_VERSION }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install deps
+        run: pip install -e ".[agent,ollama,api,mcp,dev]"
+      - name: Pytest (with coverage)
+        run: pytest
+
+  ui-build:
+    name: UI build (catches dependency drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install (clean, lockfile-faithful)
+        run: npm --prefix ui ci
+      - name: Type-check + build SPA
+        run: npm --prefix ui run build
