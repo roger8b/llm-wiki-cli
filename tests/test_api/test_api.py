@@ -125,6 +125,26 @@ class TestHealth:
         assert r.json()["status"] == "ok"
 
 
+class TestSetupEndpoints:
+    def test_onboarding_status(self, client) -> None:
+        r = client.get("/api/onboarding")
+        assert r.status_code == 200
+        body = r.json()
+        assert "needs_onboarding" in body and "ollama" in body
+
+    def test_cli_status_shape(self, client) -> None:
+        r = client.get("/api/cli")
+        assert r.status_code == 200
+        body = r.json()
+        for key in ("installed", "path", "on_path", "version"):
+            assert key in body
+
+    def test_config_test_unknown_provider(self, client) -> None:
+        r = client.post("/api/config/test", json={"model": "bogus:x"})
+        assert r.status_code == 200
+        assert r.json()["ok"] is False
+
+
 class TestSpaRouting:
     """SPA client routes must not collide with API routes."""
 

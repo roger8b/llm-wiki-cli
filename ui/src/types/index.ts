@@ -89,6 +89,7 @@ export interface WorkspaceConfig {
   num_ctx: number
   temperature: number | null
   request_timeout: number
+  onboarded: boolean
 }
 
 export interface GraphNode {
@@ -111,4 +112,30 @@ export interface SearchResult {
   path: string
   title: string
   rank: number
+}
+
+export interface OllamaStatus {
+  running: boolean
+  models: string[]
+}
+
+export interface OnboardingStatus {
+  needs_onboarding: boolean
+  model: string
+  ollama: OllamaStatus
+  brains: number
+}
+
+export interface ModelTestResult {
+  ok: boolean
+  detail: string
+}
+
+export interface CliStatus {
+  installed: boolean
+  path: string
+  found_on_path: string | null
+  on_path: boolean
+  version: string
+  source: string
 }

@@ -19,7 +19,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ...core.errors import BrainNotFoundError, WikiError
@@ -322,6 +322,7 @@ def _config_payload() -> dict[str, Any]:
         "num_ctx": cfg.num_ctx,
         "temperature": cfg.temperature,
         "request_timeout": cfg.request_timeout,
+        "onboarded": cfg.onboarded,
     }
 
 
@@ -389,7 +390,92 @@ def list_brains() -> list[dict[str, Any]]:
     return out
 
 
-# Mount every JSON endpoint under /api.
+# --------------------------------------------------------- setup / onboarding
+@api.get("/onboarding")
+def onboarding_status() -> dict[str, Any]:
+    """First-run status — drives whether the UI shows the onboarding flow."""
+    from . import setup as setup_mod
+
+    cfg = get_config()
+    brains_dir = WIKI_HOME / "brains"
+    n_brains = (
+        len([d for d in brains_dir.iterdir() if d.is_dir()])
+        if brains_dir.is_dir()
+        else 0
+    )
+    return {
+        "needs_onboarding": not cfg.onboarded,
+        "model": cfg.model,
+        "ollama": setup_mod.ollama_status(),
+        "brains": n_brains,
+    }
+
+
+@api.get("/providers/ollama")
+def providers_ollama() -> dict[str, Any]:
+    from . import setup as setup_mod
+
+    return setup_mod.ollama_status()
+
+
+@api.post("/providers/ollama/pull")
+def providers_ollama_pull(model: str = Body(..., embed=True)) -> StreamingResponse:
+    """Proxy `ollama pull` and stream progress to the client as SSE."""
+    import json as _json
+    import urllib.request
+
+    from .setup import OLLAMA_URL
+
+    def _events() -> Any:
+        body = _json.dumps({"name": model, "stream": True}).encode()
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/pull",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=600) as resp:  # noqa: S310
+                for raw in resp:
+                    line = raw.decode("utf-8").strip()
+                    if line:
+                        yield f"data: {line}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+        yield "data: {\"done\": true}\n\n"
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
+
+
+@api.post("/config/test")
+def config_test(model: str = Body(..., embed=True)) -> dict[str, Any]:
+    from . import setup as setup_mod
+
+    return setup_mod.test_model(model)
+
+
+# ----------------------------------------------------------------- cli tools
+@api.get("/cli")
+def cli_status() -> dict[str, Any]:
+    from . import setup as setup_mod
+
+    return setup_mod.cli_status()
+
+
+@api.post("/cli/install")
+def cli_install() -> dict[str, Any]:
+    from . import setup as setup_mod
+
+    return setup_mod.cli_install()
+
+
+@api.delete("/cli")
+def cli_uninstall() -> dict[str, Any]:
+    from . import setup as setup_mod
+
+    return setup_mod.cli_uninstall()
+
+
+# Mount every JSON endpoint under /api (after all routes are attached).
 app.include_router(api, prefix="/api")
 
 

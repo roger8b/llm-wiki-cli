@@ -19,7 +19,14 @@ from . import paths as _paths_module
 from .paths import BrainPaths
 
 # Fields that live in ~/.wiki/config.yaml (persisted + editable via the API).
-_CONFIG_KEYS = ("model", "fts_limit", "num_ctx", "temperature", "request_timeout")
+_CONFIG_KEYS = (
+    "model",
+    "fts_limit",
+    "num_ctx",
+    "temperature",
+    "request_timeout",
+    "onboarded",
+)
 
 # Default config written on first init.
 _DEFAULTS: dict[str, object] = {
@@ -28,6 +35,7 @@ _DEFAULTS: dict[str, object] = {
     "num_ctx": 8192,
     "temperature": None,
     "request_timeout": 300,
+    "onboarded": False,
 }
 
 
@@ -39,6 +47,8 @@ class WorkspaceConfig(BaseModel):
     num_ctx: int = 8192  # context window in tokens
     temperature: float | None = None  # None = provider default
     request_timeout: int = 300  # seconds
+    # True once the user has completed the first-run onboarding flow.
+    onboarded: bool = False
 
     @property
     def paths(self) -> BrainPaths:

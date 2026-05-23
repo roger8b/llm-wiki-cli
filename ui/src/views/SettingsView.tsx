@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react"
-import { Settings as SettingsIcon, Loader2 } from "lucide-react"
+import {
+  Settings as SettingsIcon,
+  Loader2,
+  Terminal,
+  Check,
+  AlertTriangle,
+} from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
-import type { WorkspaceConfig } from "@/types"
+import type { CliStatus, WorkspaceConfig } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -49,6 +55,8 @@ export function SettingsView() {
   const [cfg, setCfg] = useState<WorkspaceConfig | null>(null)
   const [draft, setDraft] = useState<WorkspaceConfig | null>(null)
   const [saving, setSaving] = useState(false)
+  const [cli, setCli] = useState<CliStatus | null>(null)
+  const [cliBusy, setCliBusy] = useState(false)
 
   useEffect(() => {
     api
@@ -58,7 +66,31 @@ export function SettingsView() {
         setDraft(c)
       })
       .catch((e) => toast.error((e as Error).message))
+    api.cliStatus().then(setCli).catch(() => {})
   }, [])
+
+  async function cliInstall() {
+    setCliBusy(true)
+    try {
+      setCli(await api.cliInstall())
+      toast.success("CLI installed")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setCliBusy(false)
+    }
+  }
+  async function cliUninstall() {
+    setCliBusy(true)
+    try {
+      setCli(await api.cliUninstall())
+      toast("CLI removed")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setCliBusy(false)
+    }
+  }
 
   if (!draft || !cfg) {
     return (
@@ -210,6 +242,68 @@ export function SettingsView() {
               className="w-24"
             />
           </Field>
+        </div>
+
+        {/* ── Command-line tools ── */}
+        <div className="mt-4 rounded-lg border bg-card p-5">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <Terminal className="size-3.5" /> Command-line tools
+          </div>
+          <p className="mb-3 text-[12px] text-muted-foreground">
+            Install the <code>wiki</code> command so you (and AI agents) can use
+            it from a terminal.
+          </p>
+
+          {cli && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[13px]">
+                {cli.found_on_path ? (
+                  <>
+                    <Check className="size-4 text-apply" />
+                    <span>
+                      Installed — <code>wiki</code> v{cli.version}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="size-4 text-pending" />
+                    <span>Not installed</span>
+                  </>
+                )}
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                {cli.path}
+              </div>
+
+              {cli.installed && !cli.on_path && (
+                <div className="rounded-md border border-pending/30 bg-pending/10 px-3 py-2 text-[12px]">
+                  <AlertTriangle className="mr-1 inline size-3.5 text-pending" />
+                  <code>~/.local/bin</code> isn't on your <code>PATH</code>. Add
+                  this to your shell profile:
+                  <pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-[11px]">
+                    export PATH="$HOME/.local/bin:$PATH"
+                  </pre>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button size="sm" onClick={cliInstall} disabled={cliBusy} className="gap-1.5">
+                  {cliBusy && <Loader2 className="size-4 animate-spin" />}
+                  {cli.installed ? "Reinstall" : "Install"}
+                </Button>
+                {cli.installed && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={cliUninstall}
+                    disabled={cliBusy}
+                  >
+                    Uninstall
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <p className="mt-4 text-center font-mono text-[11px] text-muted-foreground">

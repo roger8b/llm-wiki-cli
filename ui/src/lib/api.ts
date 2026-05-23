@@ -4,8 +4,12 @@
 
 import type {
   ChangeRequest,
+  CliStatus,
   Graph,
   LintFinding,
+  ModelTestResult,
+  OllamaStatus,
+  OnboardingStatus,
   PageDetail,
   PageMeta,
   QueryResult,
@@ -136,6 +140,52 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
+
+  // ── onboarding / setup ──
+  getOnboarding: () => request<OnboardingStatus>("/onboarding"),
+  ollamaModels: () => request<OllamaStatus>("/providers/ollama"),
+  testModel: (model: string) =>
+    request<ModelTestResult>("/config/test", {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
+  /** Stream `ollama pull` progress. Calls onEvent for each NDJSON status. */
+  pullModel: async (
+    model: string,
+    onEvent: (e: Record<string, unknown>) => void,
+  ): Promise<void> => {
+    const res = await fetch(`${BASE}/providers/ollama/pull`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    })
+    if (!res.body) throw new ApiError(res.status, "no stream")
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ""
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split("\n\n")
+      buf = lines.pop() ?? ""
+      for (const line of lines) {
+        const m = /^data: (.*)$/m.exec(line)
+        if (m) {
+          try {
+            onEvent(JSON.parse(m[1]))
+          } catch {
+            /* ignore malformed */
+          }
+        }
+      }
+    }
+  },
+
+  // ── CLI tools ──
+  cliStatus: () => request<CliStatus>("/cli"),
+  cliInstall: () => request<CliStatus>("/cli/install", { method: "POST" }),
+  cliUninstall: () => request<CliStatus>("/cli", { method: "DELETE" }),
 }
 
 export { ApiError }

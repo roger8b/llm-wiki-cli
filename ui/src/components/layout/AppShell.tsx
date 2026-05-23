@@ -4,17 +4,29 @@ import { TopBar } from "./TopBar"
 import { Sidebar } from "./Sidebar"
 import { CommandPalette } from "./CommandPalette"
 import { ProgressDrawer } from "@/components/shared/ProgressDrawer"
+import { OnboardingFlow } from "@/views/OnboardingFlow"
+import { api } from "@/lib/api"
 import { useAppStore } from "@/stores/app"
 import { useCrStore } from "@/stores/crs"
 
 export function AppShell() {
   const setCmdkOpen = useAppStore((s) => s.setCmdkOpen)
+  const needsOnboarding = useAppStore((s) => s.needsOnboarding)
+  const setNeedsOnboarding = useAppStore((s) => s.setNeedsOnboarding)
   const fetchCrs = useCrStore((s) => s.fetch)
 
-  // Fetch CRs once at startup so the pending badge is correct on any screen.
+  // First-run check + CR fetch at startup.
   useEffect(() => {
+    api
+      .getOnboarding()
+      .then((o) => setNeedsOnboarding(o.needs_onboarding))
+      .catch(() => setNeedsOnboarding(false))
     fetchCrs()
-  }, [fetchCrs])
+  }, [fetchCrs, setNeedsOnboarding])
+
+  if (needsOnboarding) {
+    return <OnboardingFlow onDone={() => setNeedsOnboarding(false)} />
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
