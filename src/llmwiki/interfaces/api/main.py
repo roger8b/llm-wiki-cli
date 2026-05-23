@@ -387,8 +387,9 @@ def _brains_payload() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for b in brains:
         db_path = get_brain_db_path(b.id)
-        root = Path(b.path)
-        valid = (root / ".llmwiki").exists() or (root / "wiki").exists()
+        from ...core.brains import is_brain_dir
+
+        valid = is_brain_dir(Path(b.path))
         out.append(
             {
                 "id": b.id,

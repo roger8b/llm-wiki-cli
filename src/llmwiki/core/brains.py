@@ -17,22 +17,16 @@ The database (metadata.db) remains at ``~/.wiki/brains/<id>/metadata.db``.
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 
 from . import paths as _paths_mod
 from .errors import BrainNotFoundError, WikiError
-
-if TYPE_CHECKING:
-    from .paths import BrainPaths
-
-# Markers that identify the root of a brain.
-_MARKERS = (".llmwiki", "wiki")
-
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -160,13 +154,14 @@ def get_active_brain() -> BrainInfo | None:
 
 
 def is_brain_dir(path: str | Path) -> bool:
-    """True if ``path`` contains a brain marker (.llmwiki or wiki/).
+    """True if ``path`` is a brain — i.e. it has the ``.llmwiki/`` marker.
 
-    Single source of truth for "is this a brain folder?" — reused by the API
-    deps, path loader and scaffold instead of duplicating the check.
+    Single source of truth for "is this a brain folder?" (reused by the API
+    deps, path loader and scaffold). We require ``.llmwiki/`` specifically: a
+    bare ``wiki/`` subdir is too weak (e.g. ``~`` containing ``~/wiki`` would be
+    misdetected as a brain).
     """
-    p = Path(path)
-    return any((p / m).is_dir() for m in _MARKERS)
+    return (Path(path) / ".llmwiki").is_dir()
 
 
 def get_brain_by_path(path: str | Path) -> BrainInfo | None:
@@ -186,7 +181,7 @@ def validate_brain_path(path: str | Path) -> tuple[bool, str]:
     if not p.is_dir():
         return False, f"Path is not a directory: {p}"
     if not is_brain_dir(p):
-        return False, f"No brain marker (.llmwiki or wiki/) found in: {p}"
+        return False, f"No brain marker (.llmwiki/) found in: {p}"
     return True, "valid"
 
 
@@ -342,35 +337,40 @@ def register_or_get(
     return add_brain(name or p.name, str(p), activate=activate)
 
 
-# ---------------------------------------------------------------------------
-# Path resolution helpers
-# ---------------------------------------------------------------------------
+def resolve_active() -> BrainInfo:
+    """The single brain resolver shared by CLI, MCP and the API.
 
+    Order:
+    1. ``WIKI_BRAIN`` env (explicit pin) — also synced to the registry as active
+       so every channel converges on it.
+    2. registry ``activeBrainId`` (if its folder still exists).
+    3. self-heal: first registered brain whose folder exists (and make it
+       active) — so a deleted/ephemeral active brain never breaks everything.
 
-def get_active_brain_path() -> Path:
-    """Return the filesystem path of the active brain.
-
-    Raises BrainNotFoundError if no brain is registered or active.
+    Because every command resolves through here on each call, selecting a brain
+    anywhere (front, ``wiki brain use``, ``--brain``) is instantly honoured by
+    the CLI, MCP and API alike — no need to be inside a brain directory.
     """
-    brain = get_active_brain()
-    if not brain:
-        raise BrainNotFoundError(
-            "No active brain. Use POST /api/brains/active to set one."
-        )
-    return Path(brain.path)
+    env = os.environ.get("WIKI_BRAIN")
+    if env:
+        root = Path(env).resolve()
+        if is_brain_dir(root):
+            return register_or_get(root, activate=True)
 
+    active = get_active_brain()
+    if active and is_brain_dir(Path(active.path)):
+        return active
 
-def get_paths_for_brain(brain_or_id: BrainInfo | str) -> BrainPaths:
-    """Return BrainPaths for a given BrainInfo or brain ID."""
-    from .paths import BrainPaths
+    for brain in list_brains():
+        if is_brain_dir(Path(brain.path)):
+            if active is None or active.id != brain.id:
+                set_active_brain(brain.id)
+            return brain
 
-    if isinstance(brain_or_id, str):
-        brain = get_brain(brain_or_id)
-        if not brain:
-            raise BrainNotFoundError(f"Brain not found: {brain_or_id}")
-    else:
-        brain = brain_or_id
-    return BrainPaths(root=Path(brain.path), brain_id=brain.id)
+    raise BrainNotFoundError(
+        "No usable brain. Create one (`wiki brain create <path>`) or "
+        "register one (`wiki brain add <path>`)."
+    )
 
 
 # ---------------------------------------------------------------------------

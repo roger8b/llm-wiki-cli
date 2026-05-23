@@ -18,7 +18,7 @@ from ... import __version__
 from ...core.config import load_config
 from ...core.errors import WikiError
 from ...core.models import PageType, Severity
-from ...core.paths import BrainPaths, load_brain, resolve_input
+from ...core.paths import BrainPaths, load_active_brain, resolve_input
 from ...db.connection import get_connection
 from ...db.repo import PageFtsRepo, SourceRepo
 from ...services import (
@@ -37,8 +37,13 @@ app = typer.Typer(
 )
 source_app = typer.Typer(help="Gerencia fontes brutas em raw/.", no_args_is_help=True)
 page_app = typer.Typer(help="Gerencia páginas da wiki.", no_args_is_help=True)
+brain_app = typer.Typer(
+    help="Gerencia brains (registry compartilhada com app/MCP).",
+    no_args_is_help=True,
+)
 app.add_typer(source_app, name="source")
 app.add_typer(page_app, name="page")
+app.add_typer(brain_app, name="brain")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -50,11 +55,153 @@ def _fail(message: str) -> None:
 
 
 def _brain() -> BrainPaths:
+    """Resolve the active brain from the shared registry (no cwd needed)."""
     try:
-        return load_brain()
+        return load_active_brain()
     except WikiError as exc:
         _fail(str(exc))
         raise  # inalcançável; satisfaz o type checker
+
+
+def _activate_brain_path(path: str) -> None:
+    """Create (if missing), register and activate a brain at ``path``."""
+    from ...core import brains as reg
+
+    root = Path(path).expanduser().resolve()
+    if not (root / ".llmwiki").is_dir():
+        scaffold_service.init_brain(root, git=False)  # scaffolds + registers + activates
+    else:
+        reg.register_or_get(root, activate=True)
+
+
+def _resolve_brain_ref(ref: str):
+    """Find a registered brain by id, path or name."""
+    from ...core import brains as reg
+
+    found = reg.get_brain(ref)
+    if found:
+        return found
+    candidate = Path(ref).expanduser()
+    if candidate.exists():
+        found = reg.get_brain_by_path(candidate)
+        if found:
+            return found
+    return next((b for b in reg.list_brains() if b.name == ref), None)
+
+
+# ───────────────────────────────── brain registry commands
+@brain_app.command("list")
+def brain_list() -> None:
+    """Lista os brains registrados (✓ = ativo, ⚠ = pasta ausente)."""
+    from ...core import brains as reg
+
+    brains = reg.list_brains()
+    if not brains:
+        console.print("Nenhum brain registrado. Use 'wiki brain create <path>'.")
+        return
+    active = reg.get_active_brain()
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("")
+    table.add_column("Nome")
+    table.add_column("Path")
+    table.add_column("ID")
+    for b in brains:
+        mark = "✓" if active and b.id == active.id else ""
+        if not reg.is_brain_dir(Path(b.path)):
+            mark = "⚠"
+        table.add_row(mark, b.name, b.path, b.id[:8])
+    console.print(table)
+
+
+@brain_app.command("current")
+def brain_current() -> None:
+    """Mostra o brain ativo."""
+    from ...core import brains as reg
+
+    active = reg.get_active_brain()
+    if not active:
+        console.print("Nenhum brain ativo.")
+        return
+    console.print(f"[green]{active.name}[/green]  {active.path}  ({active.id[:8]})")
+
+
+@brain_app.command("use")
+def brain_use(ref: str = typer.Argument(..., help="Nome, id ou path do brain.")) -> None:
+    """Define o brain ativo (compartilhado com app/MCP)."""
+    from ...core import brains as reg
+
+    b = _resolve_brain_ref(ref)
+    if not b:
+        _fail(f"Brain não encontrado: {ref}")
+        return
+    reg.set_active_brain(b.id)
+    console.print(f"[green]Ativo:[/green] {b.name}  {b.path}")
+
+
+@brain_app.command("add")
+def brain_add(
+    path: str = typer.Argument(..., help="Path de um brain existente."),
+    name: str | None = typer.Option(None, help="Nome (default: nome da pasta)."),
+) -> None:
+    """Registra um brain já existente (não cria estrutura)."""
+    from ...core import brains as reg
+
+    try:
+        b = reg.add_brain(name or Path(path).expanduser().resolve().name,
+                          str(Path(path).expanduser().resolve()), activate=True)
+    except WikiError as exc:
+        _fail(str(exc))
+        return
+    console.print(f"[green]Registrado + ativo:[/green] {b.name}  {b.path}")
+
+
+def _create_brain(path: str, name: str | None, *, git: bool, force: bool) -> None:
+    """Scaffold + register + activate a brain, optionally renaming it.
+
+    Shared by ``wiki brain create`` and the deprecated ``wiki init`` alias.
+    """
+    from ...core import brains as reg
+
+    try:
+        paths = scaffold_service.init_brain(
+            Path(path).expanduser(), git=git, force=force
+        )
+    except WikiError as exc:
+        _fail(str(exc))
+        return
+    b = reg.get_brain_by_path(paths.root)
+    if b and name and b.name != name:
+        reg.update_brain(b.id, {"name": name})
+        b = reg.get_brain(b.id)
+    console.print(f"[green]Criado + ativo:[/green] {b.name if b else paths.root}  {paths.root}")
+
+
+@brain_app.command("create")
+def brain_create(
+    path: str = typer.Argument(..., help="Path do novo brain a criar."),
+    name: str | None = typer.Option(None, help="Nome (default: nome da pasta)."),
+    no_git: bool = typer.Option(False, "--no-git", help="Não roda git init."),
+    force: bool = typer.Option(False, "--force", help="Sobrescreve brain existente."),
+) -> None:
+    """Cria (scaffold) um novo brain, registra e ativa."""
+    _create_brain(path, name, git=not no_git, force=force)
+
+
+@brain_app.command("rm")
+def brain_rm(ref: str = typer.Argument(..., help="Nome, id ou path.")) -> None:
+    """Remove um brain da registry (não apaga os arquivos do brain)."""
+    from ...core import brains as reg
+
+    b = _resolve_brain_ref(ref)
+    if not b:
+        _fail(f"Brain não encontrado: {ref}")
+        return
+    try:
+        reg.remove_brain(b.id)
+    except WikiError as exc:
+        _fail(str(exc))
+        return
+    console.print(f"[yellow]Removido da registry:[/yellow] {b.name}")
 
 
 @app.command()
@@ -66,17 +213,15 @@ def version() -> None:
 @app.command()
 def init(
     path: str = typer.Argument("brain", help="Diretório do brain a criar."),
+    name: str | None = typer.Option(None, help="Nome (default: nome da pasta)."),
     no_git: bool = typer.Option(False, "--no-git", help="Não roda git init."),
     force: bool = typer.Option(False, "--force", help="Sobrescreve brain existente."),
 ) -> None:
-    """Cria a estrutura de um novo brain."""
-    try:
-        paths = scaffold_service.init_brain(Path(path), git=not no_git, force=force)
-    except WikiError as exc:
-        _fail(str(exc))
-        return
-    console.print(f"[green]Brain criado em[/green] {paths.root}")
-    console.print("Próximo passo:  wiki source add <arquivo>")
+    """[DEPRECATED] Alias de 'wiki brain create'. Use 'wiki brain create'."""
+    console.print(
+        "[yellow]'wiki init' está depreciado — use 'wiki brain create'.[/yellow]"
+    )
+    _create_brain(path, name, git=not no_git, force=force)
 
 
 @source_app.command("add")
@@ -429,19 +574,24 @@ def jobs() -> None:
 
 @app.command()
 def mcp(
-    host: str = typer.Option("127.0.0.1", help="Host (transporte http)."),
+    brain: str | None = typer.Option(
+        None, help="Ativa este brain (caminho) antes de subir; senão usa o ativo."
+    ),
 ) -> None:
-    """Sobe o MCP server (stdio) expondo a wiki para agentes externos."""
-    import os
+    """Sobe o MCP server (stdio) expondo a wiki para agentes externos.
 
-    paths = _brain()
-    os.environ["WIKI_BRAIN"] = str(paths.root)
+    Segue o brain ativo da registry — o mesmo do app/CLI. Trocar de brain em
+    qualquer canal é refletido aqui a cada chamada de tool (sem reiniciar).
+    """
+    if brain is not None:
+        _activate_brain_path(brain)
+    paths = _brain()  # resolve o ativo (erro limpo se nenhum)
     try:
         from ...interfaces.mcp.server import main as mcp_main
     except ImportError:
         _fail("SDK MCP não instalado. Rode: pip install -e '.[mcp]'")
         return
-    console.print(f"[green]MCP server (stdio)[/green] — brain: {paths.root}")
+    console.print(f"[green]MCP server (stdio)[/green] — brain ativo: {paths.root}")
     mcp_main()
 
 
@@ -458,25 +608,16 @@ def serve(
 ) -> None:
     """Sobe a API + UI (requer o extra 'api').
 
-    - ``--brain X`` fixa o brain X nesta sessão (cria + registra se preciso).
-    - Sem ``--brain``: o servidor sobe de qualquer forma; o brain ativo vem da
-      registry. Se nenhum brain estiver registrado, a UI trata como first-run.
+    - ``--brain X`` ativa o brain X na registry (cria/registra se preciso).
+      Como a registry é compartilhada, isso também muda o brain do CLI/MCP.
+    - Sem ``--brain``: usa o brain ativo da registry. Se nenhum estiver
+      registrado, o servidor sobe e a UI trata como first-run/onboarding.
     """
-    import os
-
     from ...core import brains as brains_registry
 
     if brain is not None:
-        root = Path(brain).expanduser().resolve()
-        if not (root / ".llmwiki").exists():
-            from ...services import scaffold_service
-
-            scaffold_service.init_brain(root, git=False)  # registra
-            console.print(f"[green]Brain criado em[/green] {root}")
-        else:
-            brains_registry.register_or_get(root, activate=True)
-        os.environ["WIKI_BRAIN"] = str(root)  # pin desta sessão
-        console.print(f"[green]Brain[/green] {root}")
+        _activate_brain_path(brain)
+        console.print(f"[green]Brain ativo[/green] {Path(brain).expanduser().resolve()}")
     else:
         active = brains_registry.get_active_brain()
         if active:

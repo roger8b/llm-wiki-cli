@@ -4,7 +4,7 @@
 > who think in plain text and want their notes to stay sharp over time.
 
 ```
-wiki init my-brain
+wiki brain create my-brain
 wiki source add docs/architecture.md
 wiki ingest raw/articles/architecture.md
 wiki ask "What are the trade-offs of our current auth approach?"
@@ -96,11 +96,10 @@ pip install -e ".[agent,ollama,api,mcp,dev]"
 ## Quick start
 
 ```bash
-# 1. Create a brain
-wiki init my-brain
-cd my-brain
+# 1. Create a brain (scaffolds, registers + activates it — no need to cd in)
+wiki brain create my-brain
 
-# 2. Configure the model (edit .llmwiki/config.yaml)
+# 2. Configure the model (edit ~/.wiki/config.yaml — global, shared by all brains)
 #    Default: ollama:llama3.1
 #    Examples: ollama:gemma4:31b-cloud  |  anthropic:claude-sonnet-4-6
 
@@ -172,7 +171,7 @@ per brain by UUID.
 
 Global config file: **`~/.wiki/config.yaml`**
 
-Created automatically on the first `wiki init`. Edit it to change the model
+Created automatically on the first `wiki brain create`. Edit it to change the model
 or search limit for all your brains.
 
 ```yaml
@@ -306,13 +305,26 @@ Install extra: `pip install "llm-wiki[google]"`
 
 ### Brain management
 
+One **shared registry** (`~/.wiki/config.yaml`) holds every brain and the
+active selection. The CLI, MCP server and web UI all resolve the **same active
+brain** — selecting one in any channel is instantly honoured everywhere. You no
+longer need to be inside a brain directory to run commands.
+
 | Command | Description |
 |---------|-------------|
-| `wiki init <dir>` | Create a new brain at `<dir>` |
+| `wiki brain list` | List registered brains (✓ active, ⚠ folder missing) |
+| `wiki brain current` | Show the active brain |
+| `wiki brain use <name\|id\|path>` | Set the active brain (shared with app/MCP) |
+| `wiki brain create <path> [--name] [--no-git] [--force]` | Scaffold a new brain, register + activate |
+| `wiki brain add <path> [--name]` | Register an existing brain folder |
+| `wiki brain rm <name\|id\|path>` | Remove a brain from the registry (keeps files) |
+| `wiki init <dir>` | **Deprecated** alias of `wiki brain create` |
 | `wiki index` | Rebuild FTS index + regenerate `wiki/index.md` |
 | `wiki log` | Print `wiki/log.md` (applied change history) |
 
-Brains are managed via the **Settings UI** (`wiki serve` → Settings → Brains) or the REST API (`/api/brains`). The active brain is stored in `config.yaml`.
+The same is exposed in the **Settings UI** (`wiki serve` → Settings → Brains)
+and the REST API (`/api/brains*`). If the active brain's folder disappears, the
+resolver self-heals to the first valid registered brain.
 
 ### Sources
 
@@ -543,19 +555,31 @@ stand in for the PyInstaller binary while iterating on the Rust shell — see
 Expose the wiki to Claude Desktop, Cursor, or any MCP-compatible agent:
 
 ```bash
-wiki mcp          # starts stdio MCP server
+wiki mcp                      # serve the active brain (shared registry)
+wiki mcp --brain ~/notes      # activate that brain first (affects app/CLI too)
 ```
+
+The MCP server follows the **active brain** from the shared registry and picks
+up brain switches live (no restart). Configure your MCP client to run `wiki mcp`
+— no `cwd` pinning required.
 
 Available MCP tools:
 
 | Tool | Description |
 |------|-------------|
 | `wiki_search` | Full-text search the wiki |
-| `get_page` | Read a wiki page by path |
-| `ask` | Grounded Q&A |
-| `ingest` | Ingest a source (creates CR) |
-| `lint` | Run structural lint |
-| `pending_changes` | List pending change requests |
+| `wiki_get_page` | Read a wiki page by path |
+| `wiki_list_pages` | List wiki pages |
+| `wiki_list_sources` | List sources (raw/) |
+| `wiki_ask` | Grounded Q&A with citations |
+| `wiki_ingest` | Ingest a source (creates a CR) |
+| `wiki_lint` | Run structural lint |
+| `wiki_maintain` | Lint + propose fixes as a CR |
+| `wiki_pending_changes` | List pending change requests |
+| `wiki_apply` / `wiki_reject` | Apply / reject a change request |
+| `wiki_list_brains` | List registered brains |
+| `wiki_current_brain` | Show the active brain |
+| `wiki_use_brain` | Switch the active brain (affects app/CLI too) |
 
 ---
 

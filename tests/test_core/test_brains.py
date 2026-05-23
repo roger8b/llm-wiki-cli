@@ -63,6 +63,41 @@ class TestRegistry:
             update_brain(id1, {"path": str(b2.root)})
 
 
+class TestUnifiedResolver:
+    def test_resolve_active_uses_registry_not_cwd(self, tmp_path, monkeypatch) -> None:
+        # Two brains; resolve_active must follow the registry active, regardless
+        # of the current working directory.
+        a = scaffold_service.init_brain(tmp_path / "A", git=False)
+        b = scaffold_service.init_brain(tmp_path / "B", git=False)
+        monkeypatch.delenv("WIKI_BRAIN", raising=False)
+        monkeypatch.chdir(tmp_path)  # neutral cwd (not inside a brain)
+
+        ida = get_brain_by_path(a.root).id
+        idb = get_brain_by_path(b.root).id
+
+        brains.set_active_brain(ida)
+        assert brains.resolve_active().id == ida
+        from llmwiki.core.paths import load_active_brain
+
+        assert load_active_brain().root == a.root
+
+        # switch via the registry (as the API/front would) → CLI resolver follows
+        brains.set_active_brain(idb)
+        assert load_active_brain().root == b.root
+
+    def test_resolve_active_self_heals_dead_active(self, tmp_path, monkeypatch) -> None:
+        import shutil
+
+        a = scaffold_service.init_brain(tmp_path / "live", git=False)
+        dead = scaffold_service.init_brain(tmp_path / "dead", git=False)
+        monkeypatch.delenv("WIKI_BRAIN", raising=False)
+        dead_id = get_brain_by_path(dead.root).id
+        brains.set_active_brain(dead_id)
+        shutil.rmtree(dead.root)  # active brain's folder vanishes
+        # resolver falls back to the live brain instead of raising
+        assert brains.resolve_active().id == get_brain_by_path(a.root).id
+
+
 class TestMigration:
     def test_migrates_legacy_db_into_uuid_dir(self, tmp_path) -> None:
         # register a fresh brain (empty uuid db)

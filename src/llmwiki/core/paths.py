@@ -26,13 +26,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .errors import BrainNotFoundError, PathOutsideBrainError
+from .errors import PathOutsideBrainError
 
 if TYPE_CHECKING:
     from .brains import BrainInfo
-
-# Markers that identify the root of a brain.
-_MARKERS = (".llmwiki", "wiki")
 
 # Global home for config + per-brain databases/CRs.
 WIKI_HOME = Path.home() / ".wiki"
@@ -95,34 +92,15 @@ class BrainPaths:
         return target.resolve().relative_to(self.root.resolve()).as_posix()
 
 
-def find_brain_root(start: Path | None = None) -> Path | None:
-    """Sobe a árvore de diretórios procurando um marcador de brain.
+def load_active_brain() -> BrainPaths:
+    """Resolve the active brain (registry/env, with self-heal) → BrainPaths.
 
-    Retorna a raiz ou ``None`` se nenhuma for encontrada.
+    Canonical entry point used by the CLI, MCP and API so all channels share
+    the same active brain. Raises BrainNotFoundError if none is usable.
     """
-    current = (start or Path.cwd()).resolve()
-    for candidate in (current, *current.parents):
-        if any((candidate / marker).is_dir() for marker in _MARKERS):
-            return candidate
-    return None
+    from .brains import resolve_active
 
-
-def load_brain(start: Path | None = None) -> BrainPaths:
-    """Descobre a raiz e devolve ``BrainPaths`` ou levanta ``BrainNotFoundError``.
-
-    Sincroniza com a registry para resolver o ``brain_id`` (e, portanto, o
-    diretório de dados correto em ~/.wiki/brains/<id>/). Brains descobertos via
-    cwd que ainda não estão registrados são registrados (sem trocar o ativo).
-    """
-    root = find_brain_root(start)
-    if root is None:
-        raise BrainNotFoundError(
-            "Nenhum brain encontrado. Rode 'wiki init' primeiro."
-        )
-    from . import brains as _brains  # lazy: evita ciclo de import
-
-    brain = _brains.register_or_get(root, activate=False)
-    return BrainPaths(root=root, brain_id=brain.id)
+    return load_brain_for_info(resolve_active())
 
 
 def load_brain_for_info(brain: BrainInfo) -> BrainPaths:
