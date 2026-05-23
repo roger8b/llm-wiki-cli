@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom"
 import { ChevronDown, Search, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/stores/app"
+import { BrainSwitcher } from "./BrainSwitcher"
 
 interface TopBarProps {
   onOpenSearch?: () => void
@@ -10,7 +11,10 @@ interface TopBarProps {
 export function TopBar({ onOpenSearch }: TopBarProps) {
   const navigate = useNavigate()
   const pendingCount = useAppStore((s) => s.pendingCount)
-  const brainName = useAppStore((s) => s.brainName)
+  const brains = useAppStore((s) => s.brains)
+
+  // Show brain switcher only if brains are registered
+  const showBrainSwitcher = brains.length > 0
 
   return (
     <header className="flex h-[var(--topbar-h)] shrink-0 items-center gap-3 border-b-[1.5px] bg-card px-4">
@@ -20,10 +24,18 @@ export function TopBar({ onOpenSearch }: TopBarProps) {
           ◈
         </span>
         llm-wiki
-        <button className="ml-1 flex items-center gap-1 text-[13px] font-normal text-muted-foreground hover:text-foreground">
-          {brainName}
-          <ChevronDown className="size-3" />
-        </button>
+        {showBrainSwitcher ? (
+          <BrainSwitcher />
+        ) : (
+          <button
+            className="ml-1 flex items-center gap-1 text-[13px] font-normal text-muted-foreground hover:text-foreground"
+            onClick={() => navigate("/settings")}
+            title="Add brains in Settings"
+          >
+            no brain
+            <ChevronDown className="size-3" />
+          </button>
+        )}
       </div>
 
       {/* Right actions */}

@@ -22,6 +22,7 @@ import type {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { BrainSettings } from "@/components/settings/BrainSettings"
 
 type Provider = "ollama" | ProviderName
 
@@ -461,6 +462,9 @@ export function SettingsView() {
             />
           </Field>
         </div>
+
+        {/* ── Brain Configuration ── */}
+        <BrainSettings />
 
         {/* ── Command-line tools ── */}
         <div className="mt-4 rounded-lg border bg-card p-5">

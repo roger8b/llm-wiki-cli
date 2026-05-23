@@ -155,3 +155,31 @@ export interface ProviderPatch {
   model?: string | null
   api_key?: string
 }
+
+// Brain configuration
+
+export type BrainIcon =
+  | "brain"           // 🧠 default
+  | "book"            // 📖 documentation
+  | "code"            // 💻 development
+  | "briefcase"       // 💼 work
+  | "flask"           // 🔬 research
+  | "lightbulb"       // 💡 ideas
+  | "rocket"          // 🚀 project
+  | "folder"          // 📁 generic
+
+export interface BrainConfig {
+  name: string
+  path: string
+  icon?: BrainIcon
+}
+
+export interface RegisteredBrain extends BrainConfig {
+  id: string
+  createdAt: string
+}
+
+export interface BrainSettings {
+  brains: RegisteredBrain[]
+  activeBrainId: string | null
+}
