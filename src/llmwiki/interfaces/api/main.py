@@ -339,6 +339,36 @@ def patch_config_endpoint(patch: dict[str, Any] = Body(...)) -> dict[str, Any]: 
     return _config_payload()
 
 
+# ------------------------------------------------------- health / lifecycle
+@api.get("/health")
+def health() -> dict[str, Any]:
+    """Lightweight readiness probe — no brain required.
+
+    Used by the desktop (Tauri) shell to wait for the backend before showing
+    the window.
+    """
+    try:
+        root = str(get_paths().root)
+    except HTTPException:
+        root = None
+    return {"status": "ok", "brain": root}
+
+
+@api.post("/shutdown")
+def shutdown() -> dict[str, Any]:
+    """Gracefully stop the server (used by the desktop shell on app exit)."""
+    import os
+    import signal
+    import threading
+
+    def _stop() -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    # defer so the HTTP response is flushed before the process exits
+    threading.Timer(0.2, _stop).start()
+    return {"status": "stopping"}
+
+
 # ------------------------------------------------------------------ brains
 @api.get("/brains")
 def list_brains() -> list[dict[str, Any]]:

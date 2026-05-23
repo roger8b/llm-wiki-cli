@@ -449,11 +449,29 @@ def mcp(
 def serve(
     host: str = typer.Option("127.0.0.1", help="Host."),
     port: int = typer.Option(8000, help="Porta."),
+    brain: str | None = typer.Option(
+        None,
+        help="Caminho do brain a servir. Se não existir, é criado. "
+        "Default: descobre a partir do cwd.",
+    ),
 ) -> None:
-    """Sobe a API + UI de review (requer o extra 'api')."""
+    """Sobe a API + UI de review (requer o extra 'api').
+
+    Quando ``--brain`` é passado (uso típico do app desktop), o brain é
+    criado automaticamente se ainda não existir, para o servidor sempre subir.
+    """
     import os
 
-    paths = _brain()
+    if brain is not None:
+        root = Path(brain).expanduser().resolve()
+        if not (root / ".llmwiki").exists():
+            from ...services import scaffold_service
+
+            scaffold_service.init_brain(root, git=False)
+            console.print(f"[green]Brain criado em[/green] {root}")
+        paths = BrainPaths(root=root)
+    else:
+        paths = _brain()
     os.environ["WIKI_BRAIN"] = str(paths.root)
     try:
         import uvicorn

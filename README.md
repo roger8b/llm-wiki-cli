@@ -433,6 +433,68 @@ client-side SPA routes. Non-API paths fall through to the SPA shell.
 | `GET` | `/api/graph` | Page graph (nodes + edges) |
 | `GET`/`PATCH` | `/api/config` | Read / update global config |
 | `GET` | `/api/brains` | List known brains in `~/.wiki/brains/` |
+| `GET` | `/api/health` | Readiness probe (no brain required) |
+| `POST` | `/api/shutdown` | Graceful stop (used by the desktop shell) |
+
+---
+
+## Desktop app (macOS)
+
+The wiki ships a native macOS app built with **Tauri v2** (`ui/src-tauri/`).
+The Python backend runs as a **sidecar** on a dynamic port; the WebView points
+at it. Because the backend serves both the SPA and `/api` on the same origin,
+the React app works unchanged.
+
+```
+┌─ Tauri (Rust) ─────────────────────────────┐
+│  finds a free port                          │
+│  spawns  wiki-backend serve --port <p>      │  ← sidecar
+│          --brain ~/.wiki/brains/desktop     │
+│  waits until reachable → opens WebView      │
+│  kills the sidecar on exit                  │
+└─────────────────────────────────────────────┘
+```
+
+### Build
+
+```bash
+rustup default stable
+npm --prefix ui install
+npm --prefix ui run build                 # build the SPA
+
+./scripts/build_sidecar.sh                 # PyInstaller → self-contained backend
+                                           # → ui/src-tauri/binaries/wiki-backend-<triple>
+
+cd ui && cargo tauri icon path/to/icon.png # generate icons (once)
+cd ui && cargo tauri build                 # → target/release/bundle/{macos,dmg}/
+```
+
+Output: `llm-wiki.app` and `llm-wiki_<version>_aarch64.dmg`.
+
+### Dev
+
+For fast iteration, skip Tauri and run the web stack directly:
+
+```bash
+wiki serve                 # backend on :8000
+npm --prefix ui run dev    # frontend on :5173 (hot reload)
+```
+
+A dev sidecar wrapper (a shell script that execs the installed `wiki`) can
+stand in for the PyInstaller binary while iterating on the Rust shell — see
+`ui/src-tauri/README.md`.
+
+### Notes
+
+- **Dynamic port** — never hardcoded; the Rust shell passes `--port` and points
+  the WebView at it.
+- **Default brain** — `~/.wiki/brains/desktop`, auto-created on first launch by
+  `wiki serve --brain`.
+- **Graceful exit** — the sidecar is killed on app exit (also exposes
+  `POST /api/shutdown`).
+- For distribution to other machines, the **PyInstaller** sidecar
+  (`scripts/build_sidecar.sh`) is required — it bundles Python + all deps so no
+  local install is needed.
 
 ---
 

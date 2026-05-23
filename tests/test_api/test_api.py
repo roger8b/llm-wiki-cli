@@ -118,6 +118,13 @@ class TestBrainsEndpoint:
         assert isinstance(r.json(), list)
 
 
+class TestHealth:
+    def test_health_ok(self, client) -> None:
+        r = client.get("/api/health")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+
+
 class TestSpaRouting:
     """SPA client routes must not collide with API routes."""
 
