@@ -139,3 +139,19 @@ export interface CliStatus {
   version: string
   source: string
 }
+
+export type ProviderName = "anthropic" | "openai" | "google"
+
+export interface ProviderStatus {
+  base_url: string | null
+  model: string | null
+  has_key: boolean
+}
+
+export type ProvidersMap = Record<ProviderName, ProviderStatus>
+
+export interface ProviderPatch {
+  base_url?: string | null
+  model?: string | null
+  api_key?: string
+}

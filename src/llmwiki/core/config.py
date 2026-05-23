@@ -19,6 +19,7 @@ from . import paths as _paths_module
 from .paths import BrainPaths
 
 # Fields that live in ~/.wiki/config.yaml (persisted + editable via the API).
+# NOTE: API keys are NOT here — they live in the OS keychain (core.secrets).
 _CONFIG_KEYS = (
     "model",
     "fts_limit",
@@ -26,6 +27,7 @@ _CONFIG_KEYS = (
     "temperature",
     "request_timeout",
     "onboarded",
+    "providers",
 )
 
 # Default config written on first init.
@@ -36,7 +38,15 @@ _DEFAULTS: dict[str, object] = {
     "temperature": None,
     "request_timeout": 300,
     "onboarded": False,
+    "providers": {},
 }
+
+
+class ProviderConfig(BaseModel):
+    """Non-secret per-provider settings (the API key lives in the keychain)."""
+
+    base_url: str | None = None
+    model: str | None = None
 
 
 class WorkspaceConfig(BaseModel):
@@ -49,6 +59,8 @@ class WorkspaceConfig(BaseModel):
     request_timeout: int = 300  # seconds
     # True once the user has completed the first-run onboarding flow.
     onboarded: bool = False
+    # Per-provider settings keyed by provider name (openai|anthropic|google).
+    providers: dict[str, ProviderConfig] = {}
 
     @property
     def paths(self) -> BrainPaths:
@@ -107,7 +119,18 @@ def update_config(patch: dict[str, object]) -> None:
         if isinstance(loaded, dict):
             data = {**_DEFAULTS, **loaded}
     for key in _CONFIG_KEYS:
-        if key in patch:
+        if key not in patch:
+            continue
+        if key == "providers" and isinstance(patch[key], dict):
+            # deep-merge per-provider settings instead of replacing the map
+            current = dict(data.get("providers") or {})
+            for prov, settings in patch[key].items():
+                merged = dict(current.get(prov) or {})
+                if isinstance(settings, dict):
+                    merged.update(settings)
+                current[prov] = merged
+            data["providers"] = current
+        else:
             data[key] = patch[key]  # allow None (e.g. temperature) explicitly
     cfg_path.write_text(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),

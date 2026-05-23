@@ -418,6 +418,69 @@ def providers_ollama() -> dict[str, Any]:
     return setup_mod.ollama_status()
 
 
+_REMOTE_PROVIDERS = ("anthropic", "openai", "google")
+
+
+def _provider_status() -> dict[str, Any]:
+    """Per-provider config (base_url, model, has_key) — never the key itself."""
+    from ...core.secrets import has_api_key
+
+    cfg = get_config()
+    out: dict[str, Any] = {}
+    for prov in _REMOTE_PROVIDERS:
+        pc = cfg.providers.get(prov)
+        out[prov] = {
+            "base_url": pc.base_url if pc else None,
+            "model": pc.model if pc else None,
+            "has_key": has_api_key(prov),
+        }
+    return out
+
+
+@api.get("/providers")
+def providers_list() -> dict[str, Any]:
+    return _provider_status()
+
+
+@api.patch("/providers/{provider}")
+def providers_update(
+    provider: str,
+    base_url: str | None = Body(None, embed=True),
+    model: str | None = Body(None, embed=True),
+    api_key: str | None = Body(None, embed=True),
+) -> dict[str, Any]:
+    from ...core.config import update_config
+    from ...core.secrets import set_api_key
+
+    if provider not in _REMOTE_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
+    # api_key → keychain (never persisted to config.yaml)
+    if api_key:
+        try:
+            set_api_key(provider, api_key)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # base_url / model → config (merged)
+    settings: dict[str, Any] = {}
+    if base_url is not None:
+        settings["base_url"] = base_url or None
+    if model is not None:
+        settings["model"] = model or None
+    if settings:
+        update_config({"providers": {provider: settings}})
+    return _provider_status()[provider]
+
+
+@api.delete("/providers/{provider}/key")
+def providers_delete_key(provider: str) -> dict[str, Any]:
+    from ...core.secrets import delete_api_key
+
+    if provider not in _REMOTE_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
+    delete_api_key(provider)
+    return _provider_status()[provider]
+
+
 @api.post("/providers/ollama/pull")
 def providers_ollama_pull(model: str = Body(..., embed=True)) -> StreamingResponse:
     """Proxy `ollama pull` and stream progress to the client as SSE."""

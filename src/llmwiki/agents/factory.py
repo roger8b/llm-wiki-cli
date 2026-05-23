@@ -44,8 +44,11 @@ def _build_model(cfg: WorkspaceConfig) -> Any:
     returned as the model string (DeepAgents resolves them).
     """
     model_str = cfg.model
-    if not model_str.startswith("ollama:"):
-        return model_str
+    provider, _, name = model_str.partition(":")
+
+    if provider != "ollama":
+        built = _build_remote(provider, name, cfg)
+        return built if built is not None else model_str
 
     ollama_model = model_str[len("ollama:"):]  # e.g. "gemma4:31b-cloud"
     try:
@@ -71,6 +74,52 @@ def _build_model(cfg: WorkspaceConfig) -> Any:
     if cfg.temperature is not None:
         kwargs["temperature"] = cfg.temperature
     return _NoStreamOllama(**kwargs)
+
+
+def _build_remote(provider: str, name: str, cfg: WorkspaceConfig) -> Any:
+    """Build a hosted provider chat model with key (keychain) + base_url.
+
+    Returns None to signal "let DeepAgents resolve the string" when the
+    provider package isn't installed.
+    """
+    from ..core.secrets import get_api_key  # noqa: PLC0415
+
+    api_key = get_api_key(provider)
+    pcfg = cfg.providers.get(provider)
+    base_url = pcfg.base_url if pcfg else None
+    common: dict[str, Any] = {"model": name}
+    if cfg.temperature is not None:
+        common["temperature"] = cfg.temperature
+
+    try:
+        if provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic  # noqa: PLC0415
+
+            kw = dict(common, timeout=float(cfg.request_timeout))
+            if api_key:
+                kw["api_key"] = api_key
+            if base_url:
+                kw["base_url"] = base_url
+            return ChatAnthropic(**kw)
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI  # noqa: PLC0415
+
+            kw = dict(common, timeout=float(cfg.request_timeout))
+            if api_key:
+                kw["api_key"] = api_key
+            if base_url:
+                kw["base_url"] = base_url
+            return ChatOpenAI(**kw)
+        if provider == "google":
+            from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: PLC0415
+
+            kw = dict(common)
+            if api_key:
+                kw["google_api_key"] = api_key
+            return ChatGoogleGenerativeAI(**kw)
+    except ImportError:
+        return None
+    return None
 
 
 def _response_format(schema: type[BaseModel]) -> Any:

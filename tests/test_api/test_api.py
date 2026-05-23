@@ -145,6 +145,31 @@ class TestSetupEndpoints:
         assert r.json()["ok"] is False
 
 
+class TestProviders:
+    def test_list_shape(self, client) -> None:
+        r = client.get("/api/providers")
+        assert r.status_code == 200
+        body = r.json()
+        for prov in ("anthropic", "openai", "google"):
+            assert prov in body
+            assert set(body[prov]) >= {"base_url", "model", "has_key"}
+
+    def test_patch_base_url_and_model_no_key(self, client) -> None:
+        # base_url + model are non-secret → persisted to config (no keychain write)
+        r = client.patch(
+            "/api/providers/openai",
+            json={"base_url": "https://example.test/v1", "model": "gpt-4o"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["base_url"] == "https://example.test/v1"
+        assert body["model"] == "gpt-4o"
+
+    def test_patch_unknown_provider_400(self, client) -> None:
+        r = client.patch("/api/providers/bogus", json={"model": "x"})
+        assert r.status_code == 400
+
+
 class TestSpaRouting:
     """SPA client routes must not collide with API routes."""
 

@@ -12,6 +12,10 @@ import type {
   OnboardingStatus,
   PageDetail,
   PageMeta,
+  ProviderName,
+  ProviderPatch,
+  ProviderStatus,
+  ProvidersMap,
   QueryResult,
   SearchResult,
   Source,
@@ -181,6 +185,16 @@ export const api = {
       }
     }
   },
+
+  // ── remote providers (keys stored in the OS keychain) ──
+  getProviders: () => request<ProvidersMap>("/providers"),
+  updateProvider: (provider: ProviderName, patch: ProviderPatch) =>
+    request<ProviderStatus>(`/providers/${provider}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteProviderKey: (provider: ProviderName) =>
+    request<ProviderStatus>(`/providers/${provider}/key`, { method: "DELETE" }),
 
   // ── CLI tools ──
   cliStatus: () => request<CliStatus>("/cli"),

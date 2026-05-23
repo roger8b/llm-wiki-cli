@@ -60,12 +60,16 @@ def test_model(model: str) -> dict[str, Any]:
             "ok": False,
             "detail": f"Model '{name}' not pulled. Run: ollama pull {name}",
         }
-    key = _PROVIDER_KEY.get(provider)
-    if key is None:
+    if provider not in _PROVIDER_KEY:
         return {"ok": False, "detail": f"Unknown provider '{provider}'."}
-    if os.environ.get(key):
-        return {"ok": True, "detail": f"{key} is set."}
-    return {"ok": False, "detail": f"{key} is not set in the environment."}
+    from ...core.secrets import has_api_key  # noqa: PLC0415
+
+    if has_api_key(provider):
+        return {"ok": True, "detail": "API key is configured."}
+    return {
+        "ok": False,
+        "detail": f"No API key set for {provider}. Add it in Settings.",
+    }
 
 
 # ───────────────────────────────────────────────── CLI install

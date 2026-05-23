@@ -176,7 +176,27 @@ or search limit for all your brains.
 ```yaml
 model: ollama:llama3.1      # provider:model  (see examples below)
 fts_limit: 20               # max full-text search results
+num_ctx: 8192               # Ollama context window
+temperature: null           # null = provider default
+request_timeout: 300        # seconds
+providers:                  # per-provider base_url + model (NOT the key)
+  openai:
+    base_url: https://api.openai.com/v1
+    model: gpt-4o
 ```
+
+### Remote providers & secure keys
+
+Configure hosted providers (Anthropic, OpenAI, Google) from **Settings →
+Remote providers**: base URL, model, and API key. You can also point at any
+OpenAI/Anthropic-compatible endpoint via the base URL (proxies, Azure,
+self-hosted gateways).
+
+**API keys are never written to `config.yaml`.** They are stored in your OS
+keychain (macOS Keychain / Linux Secret Service / Windows Credential Manager)
+via the `keyring` library. Only the non-secret `base_url` and `model` land in
+the config file. Reading also falls back to the conventional env vars
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) if no key is stored.
 
 ### Model configuration examples
 
