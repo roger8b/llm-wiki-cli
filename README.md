@@ -80,7 +80,7 @@ Available extras:
 | `anthropic` | Claude (Anthropic) model support |
 | `openai` | OpenAI model support |
 | `google` | Gemini (Google) model support |
-| `api` | FastAPI review UI + REST API |
+| `api` | FastAPI web UI + REST API |
 | `mcp` | MCP server for agent integrations |
 | `pdf` | PDF source ingestion |
 
@@ -333,7 +333,7 @@ or updated pages. All writes are staged — not applied until you `apply`.
 
 | Command | Description |
 |---------|-------------|
-| `wiki serve` | Start FastAPI review UI on `http://localhost:8000` |
+| `wiki serve` | Start the web UI + REST API on `http://localhost:8000` |
 | `wiki mcp` | Start MCP server (stdio) for agent integrations |
 | `wiki jobs` | List background jobs (ingest / lint / query) |
 
@@ -381,29 +381,58 @@ these links; broken ones are reported by `wiki lint`.
 
 ---
 
-## API & Review UI
+## Web UI
 
-Start the server:
+A full React single-page app ships with the server. Start it and open the
+browser:
 
 ```bash
 wiki serve               # default: http://localhost:8000
 wiki serve --port 9000
 ```
 
-Endpoints:
+The UI is a local-first companion to the CLI with eight screens:
+
+| Screen | What it does |
+|--------|--------------|
+| **Review** | Change-request queue + diff viewer; apply/reject with `⌘↵` / `⌘⌫` |
+| **Wiki** | Browse pages in a tree; render Markdown with clickable `[[wikilinks]]` |
+| **Sources** | List sources, drag-and-drop upload or paste text, trigger ingest |
+| **Ask** | Grounded Q&A with sources; optionally save the answer as a page |
+| **Graph** | Force-directed knowledge graph; drag nodes, click to open a page |
+| **Lint** | Run structural / LLM lint and read findings by severity |
+| **Jobs** | Background-job status |
+| **Settings** | Edit `~/.wiki/config.yaml` (model picker + presets, FTS limit) |
+
+Press `⌘K` anywhere for the command palette (search pages, sources, CRs, or
+jump straight to Ask).
+
+The compiled SPA is embedded in the Python package and served from the same
+process as the API — no separate frontend server in production.
+
+### REST API
+
+All JSON endpoints live under the `/api` prefix so they never collide with
+client-side SPA routes. Non-API paths fall through to the SPA shell.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Review UI (diff viewer) |
-| `GET` | `/sources` | List sources |
-| `GET` | `/wiki/pages` | List wiki pages |
-| `POST` | `/query` | Q&A query |
-| `GET` | `/search?q=<query>` | Full-text search |
-| `GET` | `/change-requests` | List change requests |
-| `POST` | `/change-requests/{id}/apply` | Apply a CR |
-| `POST` | `/change-requests/{id}/reject` | Reject a CR |
-| `GET` | `/lint` | Run structural lint |
-| `GET` | `/graph` | Page graph (nodes + edges) |
+| `GET` | `/api/sources` | List sources |
+| `POST` | `/api/sources/upload` | Upload a file as a source (multipart) |
+| `POST` | `/api/sources/text` | Add a source from pasted text |
+| `POST` | `/api/sources/ingest` | Ingest a source → creates a CR |
+| `GET` | `/api/wiki/pages` | List wiki pages |
+| `GET` | `/api/wiki/pages/{path}` | Read a page (frontmatter + body) |
+| `POST` | `/api/query` | Grounded Q&A query |
+| `GET` | `/api/search?q=<query>` | Full-text search |
+| `GET` | `/api/change-requests` | List change requests |
+| `GET` | `/api/change-requests/{id}` | Full CR with diffs |
+| `POST` | `/api/change-requests/{id}/apply` | Apply a CR |
+| `POST` | `/api/change-requests/{id}/reject` | Reject a CR |
+| `POST` | `/api/lint` | Run lint (structural or `{semantic:true}`) |
+| `GET` | `/api/graph` | Page graph (nodes + edges) |
+| `GET`/`PATCH` | `/api/config` | Read / update global config |
+| `GET` | `/api/brains` | List known brains in `~/.wiki/brains/` |
 
 ---
 
@@ -465,6 +494,8 @@ python scripts/eval_ingestion.py --compare
 
 ## Development
 
+### Backend (Python)
+
 ```bash
 # Install dev dependencies
 pip install -e ".[agent,ollama,api,mcp,dev]"
@@ -479,6 +510,30 @@ python -m mypy src/llmwiki
 python -m ruff check src/ tests/
 ```
 
+### Frontend (React UI)
+
+The web UI lives in `ui/` (Vite + React + TypeScript + Tailwind v4 + shadcn/ui).
+
+```bash
+cd ui
+npm install
+
+# Dev server with hot reload (proxies /api → http://localhost:8000)
+npm run dev          # http://localhost:5173  — run `wiki serve` in another shell
+
+# Type-check + lint
+npm run build
+npx eslint .
+```
+
+`npm run build` compiles the SPA straight into
+`src/llmwiki/interfaces/api/dist/`, where FastAPI serves it. Rebuild after
+UI changes so `wiki serve` picks them up.
+
+Stack: **react-router** (routing) · **zustand** (state) ·
+**react-diff-viewer-continued** (diffs) · **react-markdown** + **rehype-highlight**
+(page rendering) · **lucide-react** (icons).
+
 ### Project structure
 
 ```
@@ -490,10 +545,19 @@ src/llmwiki/
 ├── agents/         # DeepAgents factory, backend, tools, prompts
 ├── interfaces/
 │   ├── cli/        # Typer CLI
-│   ├── api/        # FastAPI + review UI
+│   ├── api/        # FastAPI + SPA (dist/ holds the built UI)
 │   └── mcp/        # FastMCP server
 ├── search/         # hybrid search (FTS5 + pluggable embeddings)
 └── workers/        # background job runners
+
+ui/                 # React SPA source (Vite)
+├── src/
+│   ├── views/      # one file per screen (Review, Wiki, Sources, Ask…)
+│   ├── components/ # layout (shell, sidebar, command palette) + shared + ui (shadcn)
+│   ├── stores/     # zustand stores (crs, ingest, app)
+│   ├── lib/        # api client, diff/format helpers
+│   └── types/      # shared TypeScript types
+└── vite.config.ts  # dev proxy + build → ../src/llmwiki/interfaces/api/dist
 ```
 
 ---

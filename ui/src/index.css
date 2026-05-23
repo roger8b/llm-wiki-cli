@@ -1,0 +1,232 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Design tokens ported from the prototype (`wiki prototipo/css/tokens.css`).
+  Direction: human-approachable (light theme, teal accent). oklch colorspace.
+*/
+:root {
+  --radius: 0.625rem; /* 10px — prototype --radius-md */
+
+  /* Core surfaces */
+  --background: oklch(98% 0.004 240); /* --bg */
+  --foreground: oklch(20% 0.02 240); /* --fg */
+  --card: oklch(100% 0 0); /* --surface */
+  --card-foreground: oklch(20% 0.02 240);
+  --popover: oklch(100% 0 0);
+  --popover-foreground: oklch(20% 0.02 240);
+
+  /* Teal accent = primary */
+  --primary: oklch(56% 0.12 170); /* --accent */
+  --primary-foreground: oklch(100% 0 0);
+
+  /* Subtle gray surfaces */
+  --secondary: oklch(97% 0.006 240);
+  --secondary-foreground: oklch(20% 0.02 240);
+  --muted: oklch(96% 0.004 240);
+  --muted-foreground: oklch(50% 0.018 240); /* --muted (prototype text) */
+  --accent: oklch(97% 0.006 240); /* hover surface */
+  --accent-foreground: oklch(20% 0.02 240);
+
+  /* Destructive = reject red (#e74c3c) */
+  --destructive: oklch(60% 0.2 25);
+  --destructive-foreground: oklch(100% 0 0);
+
+  --border: oklch(90% 0.006 240); /* --border */
+  --input: oklch(90% 0.006 240);
+  --ring: oklch(56% 0.12 170); /* teal focus ring */
+
+  /* Domain semantic colors (prototype literals) */
+  --apply: oklch(58% 0.13 145); /* #3d9e4a apply green */
+  --apply-foreground: oklch(100% 0 0);
+  --pending: oklch(68% 0.14 55); /* #e8873a pending orange */
+  --rejected: oklch(60% 0.2 25); /* #e74c3c */
+
+  /* Diff viewer (dark surface even in light app) */
+  --diff-bg: #1e1e1e;
+  --diff-added: #7ec87a;
+  --diff-removed: #e06060;
+  --diff-context: #888888;
+
+  /* Typography (prototype fonts) */
+  --font-display: "Söhne", "Avenir Next", -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+    sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  /* Layout */
+  --topbar-h: 48px;
+  --sidebar-w: 200px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-apply: var(--apply);
+  --color-apply-foreground: var(--apply-foreground);
+  --color-pending: var(--pending);
+  --color-rejected: var(--rejected);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: var(--radius);
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Markdown reader (Ask + Wiki) */
+.prose-wiki {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--foreground);
+}
+.prose-wiki h1 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  margin: 0 0 12px;
+}
+.prose-wiki h2 {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  margin: 22px 0 8px;
+}
+.prose-wiki h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 18px 0 6px;
+}
+.prose-wiki p {
+  margin: 0 0 12px;
+}
+.prose-wiki ul,
+.prose-wiki ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+.prose-wiki li {
+  margin: 3px 0;
+}
+.prose-wiki a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.prose-wiki a:hover {
+  text-decoration: underline;
+}
+.prose-wiki code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.prose-wiki pre {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+.prose-wiki pre code {
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+}
+.prose-wiki blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 12px;
+  margin: 0 0 12px;
+  color: var(--muted-foreground);
+}
+.prose-wiki table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.prose-wiki th,
+.prose-wiki td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+.prose-wiki th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.prose-wiki .wikilink {
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 13px;
+  font: inherit;
+  cursor: pointer;
+}
+.prose-wiki .wikilink:hover {
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+/* Thin scrollbars (prototype) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}

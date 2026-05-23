@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llmwiki.core.config import load_config, write_default_config
+from llmwiki.core.config import load_config
 from llmwiki.core.misc import now_iso, sha256, today
 from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection

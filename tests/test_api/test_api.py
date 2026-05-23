@@ -26,47 +26,116 @@ class TestReadEndpoints:
     def test_list_pages_after_index(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)
         # popula índice via endpoint graph (que reindexa) ou search
-        client.get("/graph")
-        r = client.get("/wiki/pages")
+        client.get("/api/graph")
+        r = client.get("/api/wiki/pages")
         assert r.status_code == 200
         assert any(p["title"] == "RAG" for p in r.json())
 
     def test_get_page_content(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)
-        r = client.get("/wiki/pages/wiki/concepts/rag.md")
+        r = client.get("/api/wiki/pages/wiki/concepts/rag.md")
         assert r.status_code == 200
         assert r.json()["frontmatter"]["title"] == "RAG"
 
     def test_get_missing_page_404(self, client) -> None:
-        assert client.get("/wiki/pages/wiki/nope.md").status_code == 404
+        assert client.get("/api/wiki/pages/wiki/nope.md").status_code == 404
 
     def test_search(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)
-        client.get("/graph")  # reindexa (popula FTS)
-        r = client.get("/search", params={"q": "retrieval"})
+        client.get("/api/graph")  # reindexa (popula FTS)
+        r = client.get("/api/search", params={"q": "retrieval"})
         assert r.status_code == 200
         assert r.json()[0]["path"].endswith("rag.md")
 
     def test_lint_structural(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)
-        r = client.post("/lint", json={"semantic": False})
+        r = client.post("/api/lint", json={"semantic": False})
         assert r.status_code == 200
         assert "findings" in r.json()
 
     def test_review_ui_served(self, client) -> None:
+        # GET / serves the built SPA (index.html with #root) when dist/ exists,
+        # otherwise falls back to the legacy review.html. Accept either.
         r = client.get("/")
         assert r.status_code == 200
-        assert "Review Changes" in r.text
+        text = r.text.lower()
+        assert "<!doctype html" in text or "<html" in text
+        assert 'id="root"' in r.text or "Review Changes" in r.text
 
 
 class TestChangeRequestsEndpoints:
     def test_empty_list(self, client) -> None:
-        r = client.get("/change-requests")
+        r = client.get("/api/change-requests")
         assert r.status_code == 200
         assert r.json() == []
 
     def test_get_missing_cr_404(self, client) -> None:
-        assert client.get("/change-requests/CR-2026-9999").status_code == 404
+        assert client.get("/api/change-requests/CR-2026-9999").status_code == 404
+
+
+class TestConfigEndpoints:
+    def test_get_config(self, client) -> None:
+        r = client.get("/api/config")
+        assert r.status_code == 200
+        body = r.json()
+        assert "model" in body and "fts_limit" in body
+
+    def test_patch_config(self, client) -> None:
+        r = client.patch("/api/config", json={"model": "anthropic:claude-sonnet-4-5"})
+        assert r.status_code == 200
+        assert r.json()["model"] == "anthropic:claude-sonnet-4-5"
+        assert client.get("/api/config").json()["model"] == "anthropic:claude-sonnet-4-5"
+
+    def test_patch_config_partial(self, client) -> None:
+        client.patch("/api/config", json={"fts_limit": 42})
+        assert client.get("/api/config").json()["fts_limit"] == 42
+
+
+class TestSourceMutations:
+    def test_add_text_source(self, client) -> None:
+        r = client.post(
+            "/api/sources/text",
+            json={"title": "My Note", "content": "Some body text."},
+        )
+        assert r.status_code == 200
+        assert r.json()["path"].endswith("my-note.md")
+        paths = [s["path"] for s in client.get("/api/sources").json()]
+        assert any(p.endswith("my-note.md") for p in paths)
+
+    def test_upload_source(self, client) -> None:
+        r = client.post(
+            "/api/sources/upload",
+            files={"file": ("note.md", b"# Uploaded\nbody", "text/markdown")},
+        )
+        assert r.status_code == 200
+        assert r.json()["path"].endswith("note.md")
+
+
+class TestBrainsEndpoint:
+    def test_list_brains(self, client) -> None:
+        r = client.get("/api/brains")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+
+class TestSpaRouting:
+    """SPA client routes must not collide with API routes."""
+
+    def test_spa_route_does_not_return_json_list(self, client) -> None:
+        # /sources is both an API path (/api/sources) and an SPA client route.
+        # The bare /sources must NEVER return the JSON source list. When the SPA
+        # is built it returns index.html (200); without a build it 404s. Either
+        # is fine — what matters is it's not the API JSON.
+        r = client.get("/sources")
+        if r.status_code == 200:
+            assert "text/html" in r.headers["content-type"]
+        else:
+            assert r.status_code == 404
+
+    def test_api_sources_returns_json(self, client) -> None:
+        r = client.get("/api/sources")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
 
 
 def test_brain_not_found_returns_404(monkeypatch, tmp_path: Path) -> None:
@@ -74,4 +143,4 @@ def test_brain_not_found_returns_404(monkeypatch, tmp_path: Path) -> None:
     from llmwiki.interfaces.api.main import app
 
     c = TestClient(app)
-    assert c.get("/sources").status_code == 404
+    assert c.get("/api/sources").status_code == 404

@@ -29,8 +29,8 @@ def _prompt(name: str) -> str:
     )
 
 
-def _build_model(model_str: str) -> Any:
-    """Build the correct model object for the DeepAgent.
+def _build_model(cfg: WorkspaceConfig) -> Any:
+    """Build the correct model object for the DeepAgent from the config.
 
     Ollama models (local or cloud) are returned as a ChatOllama instance that
     forces ``stream=False`` at the HTTP level.  The langchain_ollama default is
@@ -39,8 +39,11 @@ def _build_model(model_str: str) -> Any:
     to always set ``stream=False`` so the proxy returns the full response in
     one JSON blob.
 
-    Other providers are returned as-is (DeepAgents resolves the string).
+    Tuning params (``num_ctx``, ``temperature``, ``request_timeout``) come from
+    the workspace config and apply to Ollama models. Other providers are
+    returned as the model string (DeepAgents resolves them).
     """
+    model_str = cfg.model
     if not model_str.startswith("ollama:"):
         return model_str
 
@@ -58,10 +61,16 @@ def _build_model(model_str: str) -> Any:
             params["stream"] = False
             return params
 
-    return _NoStreamOllama(
-        model=ollama_model,
-        client_kwargs={"timeout": 300.0},
-    )
+    kwargs: dict[str, Any] = {
+        "model": ollama_model,
+        # Ollama defaults num_ctx to 2048, which is too small once the agent
+        # reads wiki pages into context — answers get squeezed/truncated.
+        "num_ctx": cfg.num_ctx,
+        "client_kwargs": {"timeout": float(cfg.request_timeout)},
+    }
+    if cfg.temperature is not None:
+        kwargs["temperature"] = cfg.temperature
+    return _NoStreamOllama(**kwargs)
 
 
 def _response_format(schema: type[BaseModel]) -> Any:
@@ -99,14 +108,20 @@ def _structured[T: BaseModel](state: dict[str, Any], schema: type[T]) -> T:
 
 
 def _fallback[T: BaseModel](schema: type[T], text: str) -> T:
-    """Constrói um resultado mínimo quando não há structured_response."""
-    summary = text[:500] or "(sem resumo do agente)"
+    """Constrói um resultado mínimo quando não há structured_response.
+
+    Usa o texto completo da última mensagem do agente — nunca trunca a
+    ``answer`` (a resposta para o usuário). ``summary`` recebe um recorte
+    generoso apenas para não inflar cards de CR.
+    """
+    text = text or "(sem resposta do agente)"
     fields = schema.model_fields
     data: dict[str, Any] = {}
     if "summary" in fields:
-        data["summary"] = summary
+        # generous cap — only to keep CR summaries from being enormous
+        data["summary"] = text[:2000]
     if "answer" in fields:
-        data["answer"] = summary
+        data["answer"] = text  # full answer, never truncated
     try:
         return schema.model_validate(data)
     except Exception as exc:  # noqa: BLE001
@@ -125,7 +140,7 @@ def run_ingestion(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=_build_model(cfg.model),
+        model=_build_model(cfg),
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("ingestion.md"),
         backend=backend,
@@ -150,7 +165,7 @@ def run_query(
     from deepagents import create_deep_agent
 
     kwargs: dict[str, Any] = {
-        "model": _build_model(cfg.model),
+        "model": _build_model(cfg),
         "tools": [make_search_pages(cfg.paths)],
         "system_prompt": _prompt("query.md"),
         "response_format": _response_format(QueryResult),
@@ -169,7 +184,7 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=_build_model(cfg.model),
+        model=_build_model(cfg),
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("lint.md"),
         response_format=_response_format(LintReport),
@@ -189,7 +204,7 @@ def run_maintenance(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=_build_model(cfg.model),
+        model=_build_model(cfg),
         tools=[make_search_pages(cfg.paths)],
         system_prompt=_prompt("maintenance.md"),
         backend=backend,

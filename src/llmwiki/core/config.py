@@ -18,10 +18,16 @@ from pydantic import BaseModel
 from . import paths as _paths_module
 from .paths import BrainPaths
 
+# Fields that live in ~/.wiki/config.yaml (persisted + editable via the API).
+_CONFIG_KEYS = ("model", "fts_limit", "num_ctx", "temperature", "request_timeout")
+
 # Default config written on first init.
 _DEFAULTS: dict[str, object] = {
     "model": "ollama:llama3.1",
     "fts_limit": 20,
+    "num_ctx": 8192,
+    "temperature": None,
+    "request_timeout": 300,
 }
 
 
@@ -29,6 +35,10 @@ class WorkspaceConfig(BaseModel):
     brain_root: Path
     model: str = "ollama:llama3.1"
     fts_limit: int = 20
+    # LLM tuning (primarily for local Ollama models)
+    num_ctx: int = 8192  # context window in tokens
+    temperature: float | None = None  # None = provider default
+    request_timeout: int = 300  # seconds
 
     @property
     def paths(self) -> BrainPaths:
@@ -69,5 +79,27 @@ def write_default_config(paths: BrainPaths) -> None:  # noqa: ARG001
         return
     cfg_path.write_text(
         yaml.safe_dump(_DEFAULTS, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+
+def update_config(patch: dict[str, object]) -> None:
+    """Merge ``patch`` into ~/.wiki/config.yaml, preserving other keys.
+
+    Only known fields (``model``, ``fts_limit``) are persisted; unknown keys
+    are ignored to keep the file clean.
+    """
+    cfg_path = _config_file()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, object] = dict(_DEFAULTS)
+    if cfg_path.exists():
+        loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = {**_DEFAULTS, **loaded}
+    for key in _CONFIG_KEYS:
+        if key in patch:
+            data[key] = patch[key]  # allow None (e.g. temperature) explicitly
+    cfg_path.write_text(
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
