@@ -14,15 +14,17 @@ export function AppShell() {
   const needsOnboarding = useAppStore((s) => s.needsOnboarding)
   const setNeedsOnboarding = useAppStore((s) => s.setNeedsOnboarding)
   const fetchCrs = useCrStore((s) => s.fetch)
+  const fetchBrains = useAppStore((s) => s.fetchBrains)
 
-  // First-run check + CR fetch at startup.
+  // First-run check + CR fetch + brain sync at startup.
   useEffect(() => {
     api
       .getOnboarding()
       .then((o) => setNeedsOnboarding(o.needs_onboarding))
       .catch(() => setNeedsOnboarding(false))
     fetchCrs()
-  }, [fetchCrs, setNeedsOnboarding])
+    fetchBrains()
+  }, [fetchCrs, fetchBrains, setNeedsOnboarding])
 
   if (needsOnboarding) {
     return <OnboardingFlow onDone={() => setNeedsOnboarding(false)} />

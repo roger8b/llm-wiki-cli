@@ -110,12 +110,37 @@ class TestSourceMutations:
         assert r.status_code == 200
         assert r.json()["path"].endswith("note.md")
 
+    def test_list_sources_syncs_files_on_disk(self, client, brain) -> None:
+        # A file present in raw/ but never registered must show up via disk-sync.
+        f = brain.raw / "articles" / "orphan.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("# Orphan\nbody", encoding="utf-8")
+        paths = [s["path"] for s in client.get("/api/sources").json()]
+        assert any(p.endswith("orphan.md") for p in paths)
+
 
 class TestBrainsEndpoint:
     def test_list_brains(self, client) -> None:
         r = client.get("/api/brains")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+
+    def test_create_new_brain_scaffolds_and_registers(self, client, tmp_path) -> None:
+        target = tmp_path / "fresh-brain"
+        r = client.post(
+            "/api/brains/create",
+            json={"name": "Fresh", "path": str(target), "icon": "book", "activate": True},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["name"] == "Fresh" and body["icon"] == "book"
+        # scaffolded on disk
+        assert (target / ".llmwiki").exists()
+        assert (target / "wiki").is_dir()
+        # appears in the registry and is active
+        names = [b["name"] for b in client.get("/api/brains").json()]
+        assert "Fresh" in names
+        assert client.get("/api/brains/active").json()["name"] == "Fresh"
 
 
 class TestHealth:

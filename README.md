@@ -153,16 +153,18 @@ my-brain/
 
 ```
 ~/.wiki/
-├── config.yaml              # global config — model, fts_limit
+├── config.yaml              # global config — model, brains registry
+│                           #   activeBrainId: uuid
+│                           #   brains: [{id, name, path, icon, createdAt}, ...]
 └── brains/
-    └── my-brain/
+    └── <uuid>/              # per-brain data, keyed by UUID (not dirname)
         ├── metadata.db      # SQLite: pages, sources, jobs, change requests
-        └── change_requests/ # staged diffs (JSON) — applied or rejected
+        └── change_requests/  # staged diffs (JSON) — applied or rejected
 ```
 
-Config and the database live **outside** the brain repo so they are never
-accidentally committed or pushed. All brains on the same machine share a
-single `config.yaml`; the database is isolated per brain by directory name.
+Config lives **outside** the brain repo so it is never accidentally committed
+or pushed. All brains share a single `config.yaml`; the database is isolated
+per brain by UUID.
 
 ---
 
@@ -179,10 +181,19 @@ fts_limit: 20               # max full-text search results
 num_ctx: 8192               # Ollama context window
 temperature: null           # null = provider default
 request_timeout: 300        # seconds
+onboarded: true             # completed first-run setup
 providers:                  # per-provider base_url + model (NOT the key)
   openai:
     base_url: https://api.openai.com/v1
     model: gpt-4o
+# ── brain registry ────────────────────────────────────────────────────────
+activeBrainId: uuid         # ID of the currently active brain
+brains:                     # registered brains (created via Settings UI)
+  - id: uuid
+    name: my-wiki
+    path: /Users/roger/wiki/my-wiki
+    icon: brain              # Lucide icon name (brain, book, code, briefcase, flask, lightbulb, rocket, folder)
+    createdAt: '2026-05-23T10:00:00Z'
 ```
 
 ### Remote providers & secure keys
@@ -300,6 +311,8 @@ Install extra: `pip install "llm-wiki[google]"`
 | `wiki init <dir>` | Create a new brain at `<dir>` |
 | `wiki index` | Rebuild FTS index + regenerate `wiki/index.md` |
 | `wiki log` | Print `wiki/log.md` (applied change history) |
+
+Brains are managed via the **Settings UI** (`wiki serve` → Settings → Brains) or the REST API (`/api/brains`). The active brain is stored in `config.yaml`.
 
 ### Sources
 
@@ -452,7 +465,14 @@ client-side SPA routes. Non-API paths fall through to the SPA shell.
 | `POST` | `/api/lint` | Run lint (structural or `{semantic:true}`) |
 | `GET` | `/api/graph` | Page graph (nodes + edges) |
 | `GET`/`PATCH` | `/api/config` | Read / update global config |
-| `GET` | `/api/brains` | List known brains in `~/.wiki/brains/` |
+| `GET` | `/api/brains` | List registered brains |
+| `POST` | `/api/brains` | Register a new brain |
+| `GET` | `/api/brains/{id}` | Get a brain by ID |
+| `PATCH` | `/api/brains/{id}` | Update brain name / path / icon |
+| `DELETE` | `/api/brains/{id}` | Remove a brain |
+| `GET` | `/api/brains/active` | Get the active brain |
+| `POST` | `/api/brains/active` | Set active brain (`{id}` or `{path}`) |
+| `POST` | `/api/brains/{id}/activate` | Activate a specific brain |
 | `GET` | `/api/health` | Readiness probe (no brain required) |
 | `POST` | `/api/shutdown` | Graceful stop (used by the desktop shell) |
 
@@ -508,8 +528,8 @@ stand in for the PyInstaller binary while iterating on the Rust shell — see
 
 - **Dynamic port** — never hardcoded; the Rust shell passes `--port` and points
   the WebView at it.
-- **Default brain** — `~/.wiki/brains/desktop`, auto-created on first launch by
-  `wiki serve --brain`.
+- **Default brain** — auto-created at `wiki serve --brain` on first launch;
+  brain data lives at `~/.wiki/brains/<uuid>/`.
 - **Graceful exit** — the sidecar is killed on app exit (also exposes
   `POST /api/shutdown`).
 - For distribution to other machines, the **PyInstaller** sidecar

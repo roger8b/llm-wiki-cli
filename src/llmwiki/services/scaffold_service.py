@@ -6,6 +6,7 @@ import subprocess
 from importlib import resources
 from pathlib import Path
 
+from ..core import brains as brains_registry
 from ..core.config import write_default_config
 from ..core.errors import BrainExistsError
 from ..core.misc import today
@@ -62,9 +63,6 @@ def init_brain(root: Path, *, git: bool = True, force: bool = False) -> BrainPat
     (paths.schemas / "page_templates").mkdir(parents=True, exist_ok=True)
     # .llmwiki/ is a git-tracked marker directory (stays empty in the brain repo)
     paths.dot.mkdir(parents=True, exist_ok=True)
-    # global data dirs (never committed): ~/.wiki/brains/<name>/
-    paths.global_dot.mkdir(parents=True, exist_ok=True)
-    paths.change_requests.mkdir(parents=True, exist_ok=True)
 
     for name, rel in _TEMPLATE_FILES.items():
         _copy_template(name, root / rel)
@@ -80,8 +78,17 @@ def init_brain(root: Path, *, git: bool = True, force: bool = False) -> BrainPat
             f"# Log da Wiki\n\n- {today()}: brain inicializado.\n", encoding="utf-8"
         )
 
+    # Seed the global config defaults (model, fts_limit…) before registering,
+    # so config.yaml carries them alongside the brain registry entry.
     write_default_config(paths)
-    # Cria o banco (schema aplicado na conexão).
+
+    # Register in the brain registry (single source of truth). This assigns a
+    # UUID and creates the per-brain global data dir (~/.wiki/brains/<id>/).
+    # The .llmwiki marker already exists, so validation passes.
+    brain = brains_registry.register_or_get(root, name=root.name, activate=True)
+    paths = BrainPaths(root=root, brain_id=brain.id)
+
+    # Create the SQLite db in the brain's global dir (schema applied on connect).
     get_connection(paths.db_path).close()
 
     if git:

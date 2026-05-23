@@ -21,8 +21,8 @@ export function BrainSwitcher() {
   const brainName = useAppStore((s) => s.brainName)
   const brains = useAppStore((s) => s.brains)
   const activeBrainId = useAppStore((s) => s.activeBrainId)
-  const setBrainName = useAppStore((s) => s.setBrainName)
-  const setActiveBrainId = useAppStore((s) => s.setActiveBrainId)
+  const activateBrain = useAppStore((s) => s.activateBrain)
+  const [switching, setSwitching] = useState(false)
 
   // Close on outside click
   useEffect(() => {
@@ -35,10 +35,18 @@ export function BrainSwitcher() {
     return () => document.removeEventListener("mousedown", handler)
   }, [])
 
-  const handleSelect = (brain: RegisteredBrain) => {
+  const handleSelect = async (brain: RegisteredBrain) => {
     setOpen(false)
-    setActiveBrainId(brain.id)
-    setBrainName(brain.name)
+    if (brain.id === activeBrainId || switching) return
+    setSwitching(true)
+    try {
+      // Switch on the backend (source of truth), then hard-reload so every
+      // view refetches against the new active brain.
+      await activateBrain(brain.id)
+      window.location.reload()
+    } catch {
+      setSwitching(false)
+    }
   }
 
   // Find active brain
@@ -70,22 +78,30 @@ export function BrainSwitcher() {
             </div>
           ) : (
             <ul className="space-y-0.5">
-              {brains.map((brain) => (
-                <li key={brain.id}>
-                  <button
-                    className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm hover:bg-accent"
-                    onClick={() => handleSelect(brain)}
-                  >
-                    <span className="text-muted-foreground">
-                      {ICON_MAP[brain.icon ?? "brain"]}
-                    </span>
-                    <span className="flex-1 text-left">{brain.name}</span>
-                    {brain.id === activeBrainId && (
-                      <Check className="size-3 text-primary" />
-                    )}
-                  </button>
-                </li>
-              ))}
+              {brains.map((brain) => {
+                const missing = brain.valid === false
+                return (
+                  <li key={brain.id}>
+                    <button
+                      className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+                      onClick={() => handleSelect(brain)}
+                      disabled={missing}
+                      title={missing ? "Folder missing" : undefined}
+                    >
+                      <span className="text-muted-foreground">
+                        {ICON_MAP[brain.icon ?? "brain"]}
+                      </span>
+                      <span className="flex-1 text-left">{brain.name}</span>
+                      {missing && (
+                        <span className="text-[10px] text-rejected">missing</span>
+                      )}
+                      {brain.id === activeBrainId && (
+                        <Check className="size-3 text-primary" />
+                      )}
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>

@@ -67,3 +67,28 @@ def add_source(file: Path, paths: BrainPaths, repo: SourceRepo) -> AddResult:
     )
     source = repo.upsert(source)
     return AddResult(source, copied=copied, already_present=False)
+
+
+def sync_sources(paths: BrainPaths, repo: SourceRepo) -> int:
+    """Register any file in ``raw/`` that isn't yet in the sources table.
+
+    ``raw/`` is the source of truth for sources, so this makes the listing
+    reflect what's on disk regardless of db history (e.g. after a brain was
+    registered or its db was reset). Returns the number newly registered.
+    """
+    raw = paths.raw
+    if not raw.is_dir():
+        return 0
+    # Skip files already represented in the db (by relative path) so repeat
+    # calls don't re-hash every file — only genuinely new files are processed.
+    known = {s.path for s in repo.list()}
+    added = 0
+    for f in sorted(raw.rglob("*")):
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        if paths.relative(f) in known:
+            continue
+        result = add_source(f, paths, repo)
+        if not result.already_present:
+            added += 1
+    return added

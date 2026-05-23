@@ -76,6 +76,16 @@ def _config_file() -> Path:
     return _paths_module.WIKI_HOME / "config.yaml"
 
 
+def _read_global_config() -> dict[str, object]:
+    """Raw global config dict (no brain required). Empty if absent/invalid."""
+    cfg_path = _config_file()
+    if cfg_path.exists():
+        loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            return loaded
+    return {}
+
+
 def load_config(paths: BrainPaths) -> WorkspaceConfig:
     """Load global config; fall back to defaults for missing fields."""
     cfg_path = _config_file()

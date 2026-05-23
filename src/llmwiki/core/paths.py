@@ -15,17 +15,21 @@ Inside the brain directory (git-tracked content):
 
 Global data directory (never committed):
   ~/.wiki/config.yaml           — global default config (model, fts_limit)
-  ~/.wiki/brains/<name>/        — per-brain metadata, indexed by root dirname
+  ~/.wiki/brains/<id>/         — per-brain metadata, indexed by brain UUID
     metadata.db                 — SQLite knowledge index
     change_requests/            — staged diffs waiting for apply/reject
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .errors import BrainNotFoundError, PathOutsideBrainError
+
+if TYPE_CHECKING:
+    from .brains import BrainInfo
 
 # Markers that identify the root of a brain.
 _MARKERS = (".llmwiki", "wiki")
@@ -39,6 +43,7 @@ class BrainPaths:
     """Canonical paths derived from the brain root."""
 
     root: Path
+    brain_id: str | None = field(default=None, kw_only=True)
 
     @property
     def raw(self) -> Path:
@@ -63,7 +68,10 @@ class BrainPaths:
 
     @property
     def global_dot(self) -> Path:
-        """Per-brain data dir inside the global home (~/.wiki/brains/<name>/)."""
+        """Per-brain data dir inside the global home (~/.wiki/brains/<id>/)."""
+        if self.brain_id:
+            return WIKI_HOME / "brains" / self.brain_id
+        # Fallback: use dirname (backward compat for old structure)
         return WIKI_HOME / "brains" / self.root.resolve().name
 
     @property
@@ -100,13 +108,35 @@ def find_brain_root(start: Path | None = None) -> Path | None:
 
 
 def load_brain(start: Path | None = None) -> BrainPaths:
-    """Descobre a raiz e devolve ``BrainPaths`` ou levanta ``BrainNotFoundError``."""
+    """Descobre a raiz e devolve ``BrainPaths`` ou levanta ``BrainNotFoundError``.
+
+    Sincroniza com a registry para resolver o ``brain_id`` (e, portanto, o
+    diretório de dados correto em ~/.wiki/brains/<id>/). Brains descobertos via
+    cwd que ainda não estão registrados são registrados (sem trocar o ativo).
+    """
     root = find_brain_root(start)
     if root is None:
         raise BrainNotFoundError(
-            "Nenhum brain encontrado. Rode 'llmwiki init' primeiro."
+            "Nenhum brain encontrado. Rode 'wiki init' primeiro."
         )
-    return BrainPaths(root=root)
+    from . import brains as _brains  # lazy: evita ciclo de import
+
+    brain = _brains.register_or_get(root, activate=False)
+    return BrainPaths(root=root, brain_id=brain.id)
+
+
+def load_brain_for_info(brain: BrainInfo) -> BrainPaths:
+    """Create BrainPaths from a BrainInfo object."""
+    from .brains import get_brain_global_dir, migrate_legacy_data
+
+    # Verify the brain's global dir exists or create it
+    global_dir = get_brain_global_dir(brain.id)
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "change_requests").mkdir(parents=True, exist_ok=True)
+    # One-time migration: pull data from the old dirname-based dir if the UUID
+    # dir is still empty (pre-registry brains had their db orphaned there).
+    migrate_legacy_data(brain.id, brain.path)
+    return BrainPaths(root=Path(brain.path), brain_id=brain.id)
 
 
 def resolve_input(user_input: str, brain_root: Path) -> Path:

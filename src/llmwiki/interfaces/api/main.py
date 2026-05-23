@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ...core.errors import BrainNotFoundError, WikiError
-from ...core.paths import WIKI_HOME, BrainPaths
+from ...core.paths import BrainPaths
 from ...db.repo import PageFtsRepo, PageRepo, SourceRepo
 from ...services import (
     change_request_service,
@@ -82,10 +82,16 @@ def _provider_error(exc: Exception) -> str:
 # ---------------------------------------------------------------- sources
 @api.get("/sources")
 def list_sources() -> list[dict[str, Any]]:
+    from ...sources.manager import sync_sources
+
     paths = _ctx()
     conn = open_conn(paths)
     try:
-        return [s.model_dump(mode="json") for s in SourceRepo(conn).list()]
+        repo = SourceRepo(conn)
+        # raw/ is the source of truth — register any files missing from the db
+        # (keeps the listing correct after brain switches / db resets).
+        sync_sources(paths, repo)
+        return [s.model_dump(mode="json") for s in repo.list()]
     finally:
         conn.close()
 
@@ -371,43 +377,217 @@ def shutdown() -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ brains
-@api.get("/brains")
-def list_brains() -> list[dict[str, Any]]:
-    """List known brains (directories under ~/.wiki/brains/)."""
-    brains_dir = WIKI_HOME / "brains"
-    if not brains_dir.is_dir():
-        return []
+
+
+def _brains_payload() -> list[dict[str, Any]]:
+    """Build the brain list payload from the registry."""
+    from ...core.brains import get_brain_db_path, list_brains
+
+    brains = list_brains()
     out: list[dict[str, Any]] = []
-    for entry in sorted(brains_dir.iterdir()):
-        if entry.is_dir():
-            db = entry / "metadata.db"
-            out.append(
-                {
-                    "name": entry.name,
-                    "db_size": db.stat().st_size if db.exists() else 0,
-                }
-            )
+    for b in brains:
+        db_path = get_brain_db_path(b.id)
+        root = Path(b.path)
+        valid = (root / ".llmwiki").exists() or (root / "wiki").exists()
+        out.append(
+            {
+                "id": b.id,
+                "name": b.name,
+                "path": b.path,
+                "icon": b.icon,
+                "db_size": db_path.stat().st_size if db_path.exists() else 0,
+                "createdAt": b.createdAt,
+                "valid": valid,  # False = the brain's folder is missing/moved
+            }
+        )
     return out
+
+
+@api.get("/brains")
+def list_brains_endpoint() -> list[dict[str, Any]]:
+    """"List all registered brains from the brain registry."""
+    return _brains_payload()
+
+
+
+@api.post("/brains")
+def create_brain(
+    name: str = Body(...),
+    path: str = Body(...),
+    icon: str = Body("brain"),
+    activate: bool = Body(False),
+) -> dict[str, Any]:
+    """Register an EXISTING brain directory (must already contain a marker)."""
+    from ...core.brains import BrainNotValidError, add_brain
+
+    try:
+        brain = add_brain(name=name, path=path, icon=icon, activate=activate)
+    except BrainNotValidError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return brain.to_dict()
+
+
+@api.post("/brains/create")
+def create_and_init_brain(
+    name: str = Body(...),
+    path: str = Body(...),
+    icon: str = Body("brain"),
+    activate: bool = Body(True),
+) -> dict[str, Any]:
+    """Create a NEW brain: scaffold the directory tree, then register it.
+
+    If the path already contains a brain, it is registered as-is (no scaffold).
+    """
+    from ...core import brains as reg
+    from ...services import scaffold_service
+
+    root = Path(path).expanduser().resolve()
+    try:
+        if (root / ".llmwiki").exists():
+            brain = reg.register_or_get(root, name=name, activate=activate)
+        else:
+            paths = scaffold_service.init_brain(root, git=False)
+            brain = reg.get_brain(paths.brain_id or "")
+        if brain is None:
+            raise HTTPException(status_code=500, detail="Brain registration failed.")
+        updates: dict[str, str] = {}
+        if name and brain.name != name:
+            updates["name"] = name
+        if icon and brain.icon != icon:
+            updates["icon"] = icon
+        if updates:
+            brain = reg.update_brain(brain.id, updates)
+        if activate:
+            reg.set_active_brain(brain.id)
+    except WikiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Cannot create at {root}: {exc}") from exc
+    return brain.to_dict()
+
+
+
+@api.get("/brains/active")
+def get_active_brain_endpoint() -> dict[str, Any] | None:
+    """Get the currently active brain."""
+    from ...core.brains import get_active_brain
+
+    brain = get_active_brain()
+    return brain.to_dict() if brain else None
+
+
+@api.post("/brains/active")
+def set_active_brain_endpoint(body: dict[str, str]) -> dict[str, Any]:
+    """Set the active brain by ID or path.
+
+    Accepts { "id": "uuid" } or { "path": "/absolute/path" }.
+    """
+    from ...core.brains import add_brain, list_brains, set_active_brain
+
+    if "id" in body:
+        brain = set_active_brain(body["id"])
+    elif "path" in body:
+        path_brain = next(
+            (b for b in list_brains() if b.path == body["path"]), None
+        )
+        if path_brain:
+            brain = set_active_brain(path_brain.id)
+        else:
+            name = Path(body["path"]).name
+            brain = add_brain(name=name, path=body["path"], activate=True)
+    else:
+        raise HTTPException(status_code=400, detail="Provide 'id' or 'path'")
+    return brain.to_dict()
+
+
+@api.patch("/brains/{brain_id}")
+def update_brain_endpoint(
+    brain_id: str,
+    name: str | None = Body(None),
+    path: str | None = Body(None),
+    icon: str | None = Body(None),
+) -> dict[str, Any]:
+    """"Update a brain's name, path, or icon."""
+    from ...core.brains import update_brain
+
+    updates = {}
+    if name is not None:
+        updates["name"] = name
+    if path is not None:
+        updates["path"] = path
+    if icon is not None:
+        updates["icon"] = icon
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+    brain = update_brain(brain_id, updates)
+    return brain.to_dict()
+
+
+@api.delete("/brains/{brain_id}")
+def delete_brain_endpoint(brain_id: str) -> dict[str, Any]:
+    """"Delete a brain by ID."""
+    from ...core.brains import get_active_brain, list_brains, remove_brain
+
+    # Cannot delete if it's the only brain
+    brains = list_brains()
+    if len(brains) <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete the last brain. Register another one first.",
+        )
+    brain = next((b for b in brains if b.id == brain_id), None)
+    remove_brain(brain_id)
+    # If deleted brain was active, get new active
+    active = get_active_brain()
+    return {
+        "deleted": brain_id,
+        "deletedName": brain.name if brain else None,
+        "newActiveId": active.id if active else None,
+    }
+
+
+@api.post("/brains/{brain_id}/activate")
+def activate_brain_endpoint(brain_id: str) -> dict[str, Any]:
+    """"Activate a specific brain by ID."""
+    from ...core.brains import set_active_brain
+
+    brain = set_active_brain(brain_id)
+    return brain.to_dict()
+
+
+@api.get("/brains/{brain_id}")
+def get_brain_endpoint(brain_id: str) -> dict[str, Any]:
+    """"Get a specific brain by ID."""
+    from ...core.brains import get_brain
+
+    brain = get_brain(brain_id)
+    if not brain:
+        raise HTTPException(status_code=404, detail="Brain not found")
+    return brain.to_dict()
 
 
 # --------------------------------------------------------- setup / onboarding
 @api.get("/onboarding")
 def onboarding_status() -> dict[str, Any]:
-    """First-run status — drives whether the UI shows the onboarding flow."""
+    """First-run status — drives whether the UI shows the onboarding flow.
+
+    Does not require an active brain; reads the global config directly so it
+    works before any brain is registered.
+    """
+    from ...core.brains import get_active_brain, list_brains
+    from ...core.config import _DEFAULTS, _read_global_config
     from . import setup as setup_mod
 
-    cfg = get_config()
-    brains_dir = WIKI_HOME / "brains"
-    n_brains = (
-        len([d for d in brains_dir.iterdir() if d.is_dir()])
-        if brains_dir.is_dir()
-        else 0
-    )
+    data = _read_global_config()
+    onboarded = bool(data.get("onboarded", False))
+    model = data.get("model") or _DEFAULTS["model"]
+    active = get_active_brain()
     return {
-        "needs_onboarding": not cfg.onboarded,
-        "model": cfg.model,
+        "needs_onboarding": not onboarded,
+        "model": model,
         "ollama": setup_mod.ollama_status(),
-        "brains": n_brains,
+        "brains": len(list_brains()),
+        "active_brain": active.to_dict() if active else None,
     }
 
 

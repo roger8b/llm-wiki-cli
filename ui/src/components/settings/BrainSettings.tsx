@@ -23,6 +23,7 @@ import type { BrainConfig, BrainIcon, RegisteredBrain } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { api } from "@/lib/api"
 
 const BRAIN_ICONS: { value: BrainIcon; icon: React.ReactNode; label: string }[] = [
   { value: "brain", icon: <Brain className="size-4" />, label: "Brain" },
@@ -41,16 +42,27 @@ function getIconComponent(icon: BrainIcon) {
 
 interface BrainFormProps {
   initial?: Partial<BrainConfig>
-  onSubmit: (data: BrainConfig) => void
+  onSubmit: (data: BrainConfig, create: boolean) => void
   onCancel: () => void
   submitLabel?: string
   loading?: boolean
+  /** Show the Create-new / Register-existing toggle (only when adding). */
+  allowCreate?: boolean
 }
 
-function BrainForm({ initial, onSubmit, onCancel, submitLabel = "Add", loading }: BrainFormProps) {
+function BrainForm({
+  initial,
+  onSubmit,
+  onCancel,
+  submitLabel = "Add",
+  loading,
+  allowCreate,
+}: BrainFormProps) {
   const [name, setName] = useState(initial?.name ?? "")
   const [path, setPath] = useState(initial?.path ?? "")
   const [icon, setIcon] = useState<BrainIcon>(initial?.icon ?? "brain")
+  // true = create a new folder (scaffold); false = register an existing one.
+  const [create, setCreate] = useState(true)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -62,11 +74,35 @@ function BrainForm({ initial, onSubmit, onCancel, submitLabel = "Add", loading }
       toast.error("Brain path is required")
       return
     }
-    onSubmit({ name: name.trim(), path: path.trim(), icon })
+    onSubmit({ name: name.trim(), path: path.trim(), icon }, allowCreate ? create : false)
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3 rounded-md border bg-muted/30 p-3">
+      {allowCreate && (
+        <div className="inline-flex rounded-md border p-0.5">
+          <button
+            type="button"
+            onClick={() => setCreate(true)}
+            className={cn(
+              "rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+              create ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+            )}
+          >
+            Create new
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreate(false)}
+            className={cn(
+              "rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+              !create ? "bg-primary text-primary-foreground" : "text-muted-foreground",
+            )}
+          >
+            Register existing
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label className="text-[11px]">Name</Label>
@@ -137,25 +173,31 @@ interface BrainItemProps {
   onActivate: () => void
   onEdit: () => void
   onDelete: () => void
+  loading?: boolean
 }
 
-function BrainItem({ brain, isActive, onActivate, onEdit, onDelete }: BrainItemProps) {
+function BrainItem({ brain, isActive, onActivate, onEdit, onDelete, loading }: BrainItemProps) {
   const iconComponent = getIconComponent(brain.icon ?? "brain")
+  const missing = brain.valid === false
 
   return (
     <div
       className={cn(
         "group flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors",
         isActive ? "border-primary bg-primary/5" : "border-transparent hover:bg-muted/50",
+        missing && "opacity-60",
       )}
     >
       <button
         onClick={onActivate}
+        disabled={loading || missing}
+        title={missing ? "Folder missing — cannot activate" : "Activate"}
         className={cn(
           "flex size-5 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-bold transition-colors",
           isActive
             ? "border-primary bg-primary text-primary-foreground"
             : "border-muted-foreground/30 text-transparent hover:border-muted-foreground/50",
+          missing && "cursor-not-allowed",
         )}
       >
         {isActive && "✓"}
@@ -167,11 +209,18 @@ function BrainItem({ brain, isActive, onActivate, onEdit, onDelete }: BrainItemP
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">{brain.name}</div>
+        <div className="flex items-center gap-1.5 truncate text-[13px] font-medium">
+          {brain.name}
+          {missing && (
+            <span className="flex items-center gap-0.5 rounded bg-rejected/10 px-1.5 py-px text-[10px] font-normal text-rejected">
+              <AlertTriangle className="size-3" /> missing
+            </span>
+          )}
+        </div>
         <div className="truncate font-mono text-[11px] text-muted-foreground">{brain.path}</div>
       </div>
       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <Button variant="ghost" size="icon" className="size-7" onClick={onEdit}>
+        <Button variant="ghost" size="icon" className="size-7" onClick={onEdit} disabled={loading}>
           <Pencil className="size-3.5" />
         </Button>
         <Button
@@ -179,6 +228,7 @@ function BrainItem({ brain, isActive, onActivate, onEdit, onDelete }: BrainItemP
           size="icon"
           className="size-7 text-rejected hover:text-rejected"
           onClick={onDelete}
+          disabled={loading}
         >
           <Trash2 className="size-3.5" />
         </Button>
@@ -190,11 +240,7 @@ function BrainItem({ brain, isActive, onActivate, onEdit, onDelete }: BrainItemP
 export function BrainSettings() {
   const brains = useAppStore((s) => s.brains)
   const activeBrainId = useAppStore((s) => s.activeBrainId)
-  const addBrain = useAppStore((s) => s.addBrain)
-  const updateBrain = useAppStore((s) => s.updateBrain)
-  const removeBrain = useAppStore((s) => s.removeBrain)
-  const setActiveBrainId = useAppStore((s) => s.setActiveBrainId)
-  const setBrainName = useAppStore((s) => s.setBrainName)
+  const fetchBrains = useAppStore((s) => s.fetchBrains)
 
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -203,54 +249,86 @@ export function BrainSettings() {
 
   const activeBrain = brains.find((b) => b.id === activeBrainId)
 
-  function handleAdd(data: BrainConfig) {
-    const id = crypto.randomUUID()
-    const brain: RegisteredBrain = {
-      id,
-      name: data.name,
-      path: data.path,
-      icon: data.icon ?? "brain",
-      createdAt: new Date().toISOString(),
+  async function handleAdd(data: BrainConfig, create: boolean) {
+    setLoading(true)
+    try {
+      const payload = {
+        name: data.name,
+        path: data.path,
+        icon: data.icon ?? "brain",
+        activate: brains.length === 0, // auto-activate if first brain
+      }
+      if (create) {
+        await api.initBrain(payload)
+      } else {
+        await api.createBrain(payload)
+      }
+      await fetchBrains()
+      setAdding(false)
+      toast.success(create ? `Brain "${data.name}" created` : `Brain "${data.name}" added`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setLoading(false)
     }
-    addBrain(brain)
-    if (brains.length === 0) {
-      setActiveBrainId(id)
-      setBrainName(data.name)
-    }
-    setAdding(false)
-    toast.success(`Brain "${data.name}" added`)
   }
 
-  function handleEdit(id: string, data: BrainConfig) {
+  async function handleEdit(id: string, data: BrainConfig) {
     setLoading(true)
-    setTimeout(() => {
-      updateBrain(id, data)
+    try {
+      await api.updateBrain(id, {
+        name: data.name,
+        path: data.path,
+        icon: data.icon,
+      })
+      // Sync state from backend
+      await fetchBrains()
       setEditingId(null)
-      setLoading(false)
       toast.success(`Brain "${data.name}" updated`)
-    }, 150)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   function handleDelete(id: string) {
     setDeletingId(id)
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deletingId) return
-    const brain = brains.find((b) => b.id === deletingId)
-    removeBrain(deletingId)
-    setDeletingId(null)
-    toast.info(`Brain "${brain?.name}" removed`)
+    const brainName = brains.find((b) => b.id === deletingId)?.name ?? ""
+    setLoading(true)
+    try {
+      await api.deleteBrain(deletingId)
+      // Sync state from backend
+      await fetchBrains()
+      setDeletingId(null)
+      toast.info(`Brain "${brainName}" removed`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   function cancelDelete() {
     setDeletingId(null)
   }
 
-  function handleActivate(brain: RegisteredBrain) {
-    setActiveBrainId(brain.id)
-    setBrainName(brain.name)
-    toast.success(`Switched to brain "${brain.name}"`)
+  async function handleActivate(brain: RegisteredBrain) {
+    setLoading(true)
+    try {
+      await api.setActiveBrain(brain.id)
+      // Sync state from backend
+      await fetchBrains()
+      toast.success(`Switched to brain "${brain.name}"`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -286,6 +364,8 @@ export function BrainSettings() {
           onSubmit={handleAdd}
           onCancel={() => setAdding(false)}
           submitLabel="Add"
+          loading={loading}
+          allowCreate
         />
       )}
 
@@ -300,7 +380,10 @@ export function BrainSettings() {
             <Button variant="ghost" size="sm" onClick={cancelDelete}>
               Cancel
             </Button>
-            <Button variant="destructive" size="sm" onClick={confirmDelete}>
+            <Button variant="destructive" size="sm" onClick={confirmDelete} disabled={loading}>
+              {loading ? (
+                <span className="mr-1 size-3.5 animate-spin rounded-full border border-current border-t-transparent" />
+              ) : null}
               Delete
             </Button>
           </div>
@@ -336,6 +419,7 @@ export function BrainSettings() {
                 onActivate={() => handleActivate(brain)}
                 onEdit={() => setEditingId(brain.id)}
                 onDelete={() => handleDelete(brain.id)}
+                loading={loading}
               />
             ),
           )}
@@ -346,7 +430,7 @@ export function BrainSettings() {
       {brains.length > 0 && (
         <p className="mt-3 text-[11px] text-muted-foreground">
           <FolderOpen className="mr-1 inline size-3" />
-          Persisted in browser storage.
+          Persisted in config.yaml via API.
         </p>
       )}
     </div>

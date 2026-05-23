@@ -451,34 +451,47 @@ def serve(
     port: int = typer.Option(8000, help="Porta."),
     brain: str | None = typer.Option(
         None,
-        help="Caminho do brain a servir. Se não existir, é criado. "
-        "Default: descobre a partir do cwd.",
+        help="Brain a servir (pin). Criado se não existir. "
+        "Sem isto, usa o brain ativo da registry; se não houver, a UI mostra "
+        "o onboarding e o usuário registra um.",
     ),
 ) -> None:
-    """Sobe a API + UI de review (requer o extra 'api').
+    """Sobe a API + UI (requer o extra 'api').
 
-    Quando ``--brain`` é passado (uso típico do app desktop), o brain é
-    criado automaticamente se ainda não existir, para o servidor sempre subir.
+    - ``--brain X`` fixa o brain X nesta sessão (cria + registra se preciso).
+    - Sem ``--brain``: o servidor sobe de qualquer forma; o brain ativo vem da
+      registry. Se nenhum brain estiver registrado, a UI trata como first-run.
     """
     import os
+
+    from ...core import brains as brains_registry
 
     if brain is not None:
         root = Path(brain).expanduser().resolve()
         if not (root / ".llmwiki").exists():
             from ...services import scaffold_service
 
-            scaffold_service.init_brain(root, git=False)
+            scaffold_service.init_brain(root, git=False)  # registra
             console.print(f"[green]Brain criado em[/green] {root}")
-        paths = BrainPaths(root=root)
+        else:
+            brains_registry.register_or_get(root, activate=True)
+        os.environ["WIKI_BRAIN"] = str(root)  # pin desta sessão
+        console.print(f"[green]Brain[/green] {root}")
     else:
-        paths = _brain()
-    os.environ["WIKI_BRAIN"] = str(paths.root)
+        active = brains_registry.get_active_brain()
+        if active:
+            console.print(f"[green]Brain ativo[/green] {active.path}")
+        else:
+            console.print(
+                "[yellow]Nenhum brain registrado — a UI abrirá o onboarding.[/yellow]"
+            )
+
     try:
         import uvicorn
     except ImportError:
         _fail("FastAPI/uvicorn não instalados. Rode: pip install -e '.[api]'")
         return
-    console.print(f"[green]API em[/green] http://{host}:{port}  (brain: {paths.root})")
+    console.print(f"[green]API em[/green] http://{host}:{port}")
     uvicorn.run("llmwiki.interfaces.api.main:app", host=host, port=port)
 
 

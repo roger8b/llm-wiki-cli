@@ -17,6 +17,7 @@ import type {
   ProviderStatus,
   ProvidersMap,
   QueryResult,
+  RegisteredBrain,
   SearchResult,
   Source,
   WorkspaceConfig,
@@ -137,7 +138,50 @@ export const api = {
     request<SearchResult[]>(`/search?q=${encodeURIComponent(q)}`),
   graph: () => request<Graph>("/graph"),
 
-  // ── config (added in Fase 1) ──
+  // ── brains ──
+  listBrains: () => request<RegisteredBrain[]>("/brains"),
+  getActiveBrain: () => request<RegisteredBrain | null>("/brains/active"),
+  /** Register an EXISTING brain directory. */
+  createBrain: (payload: {
+    name: string
+    path: string
+    icon: string
+    activate?: boolean
+  }) =>
+    request<RegisteredBrain>("/brains", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  /** Create a NEW brain (scaffold the folder) then register it. */
+  initBrain: (payload: {
+    name: string
+    path: string
+    icon: string
+    activate?: boolean
+  }) =>
+    request<RegisteredBrain>("/brains/create", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateBrain: (
+    id: string,
+    payload: Partial<Pick<RegisteredBrain, "name" | "path" | "icon">>,
+  ) =>
+    request<RegisteredBrain>(`/brains/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteBrain: (id: string) =>
+    request<{ deleted: string; newActiveId: string | null }>(`/brains/${id}`, {
+      method: "DELETE",
+    }),
+  setActiveBrain: (id: string) =>
+    request<RegisteredBrain>("/brains/active", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    }),
+
+  // ── config ──
   getConfig: () => request<WorkspaceConfig>("/config"),
   patchConfig: (patch: Partial<WorkspaceConfig>) =>
     request<WorkspaceConfig>("/config", {

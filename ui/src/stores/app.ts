@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { api } from "@/lib/api"
 import type { BrainConfig, RegisteredBrain } from "@/types"
 
 interface AppState {
@@ -30,12 +30,14 @@ interface AppState {
   addBrain: (brain: RegisteredBrain) => void
   updateBrain: (id: string, updates: Partial<BrainConfig>) => void
   removeBrain: (id: string) => void
+  /** Sync brains + active from backend API. */
+  fetchBrains: () => Promise<void>
+  /** Switch the active brain on the backend, then locally. */
+  activateBrain: (id: string) => Promise<void>
 }
 
-export const useAppStore = create<AppState>()(
-  persist(
-    (set) => ({
-      pendingCount: 0,
+export const useAppStore = create<AppState>()((set) => ({
+  pendingCount: 0,
       activeJobs: 0,
       brainName: "",
       cmdkOpen: false,
@@ -69,15 +71,29 @@ export const useAppStore = create<AppState>()(
             brainName: newActiveBrain?.name ?? s.brainName,
           }
         }),
-    }),
-    {
-      name: "llm-wiki-brains",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        brains: state.brains,
-        activeBrainId: state.activeBrainId,
-        brainName: state.brainName,
-      }),
-    },
-  ),
-)
+      fetchBrains: async () => {
+        set({ brainLoading: true })
+        try {
+          // Backend is the source of truth for which brain is active.
+          const [brains, backendActive] = await Promise.all([
+            api.listBrains(),
+            api.getActiveBrain().catch(() => null),
+          ])
+          const active =
+            brains.find((b) => b.id === backendActive?.id) ?? brains[0] ?? null
+          set({
+            brains,
+            activeBrainId: active?.id ?? null,
+            brainName: active?.name ?? "",
+            brainLoading: false,
+          })
+        } catch {
+          set({ brainLoading: false })
+        }
+      },
+      activateBrain: async (id) => {
+        await api.setActiveBrain(id)
+        const b = useAppStore.getState().brains.find((x) => x.id === id)
+        set({ activeBrainId: id, brainName: b?.name ?? "" })
+      },
+}))

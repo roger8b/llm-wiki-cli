@@ -177,6 +177,9 @@ export interface BrainConfig {
 export interface RegisteredBrain extends BrainConfig {
   id: string
   createdAt: string
+  /** False when the brain's folder is missing/moved on disk. */
+  valid?: boolean
+  db_size?: number
 }
 
 export interface BrainSettings {
