@@ -40,6 +40,15 @@ class TestReadEndpoints:
     def test_get_missing_page_404(self, client) -> None:
         assert client.get("/api/wiki/pages/wiki/nope.md").status_code == 404
 
+    def test_get_page_rejects_path_traversal(self, client, brain: BrainPaths) -> None:
+        # URL-encoded "../" reaches the handler raw (clients normalise plain
+        # "../"). The guard must reject it so we never read outside the brain.
+        secret = brain.root.parent / "secret.txt"
+        secret.write_text("TOPSECRET")
+        r = client.get("/api/wiki/pages/%2e%2e/secret.txt")
+        assert r.status_code == 404
+        assert "TOPSECRET" not in r.text
+
     def test_search(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)
         client.get("/api/graph")  # reindexa (popula FTS)

@@ -168,11 +168,20 @@ def list_pages() -> list[dict[str, Any]]:
 
 @api.get("/wiki/pages/{page_path:path}")
 def get_page(page_path: str) -> dict[str, Any]:
+    from ...core import frontmatter
+    from ...core.errors import PathOutsideBrainError
+    from ...core.paths import resolve_input
+
     paths = _ctx()
-    target = paths.root / page_path
+    # Guard against path traversal: resolve_input rejects anything that
+    # escapes the brain root (e.g. "../../etc/passwd"). Treat as 404 so we
+    # never reveal whether an out-of-brain file exists.
+    try:
+        target = resolve_input(page_path, paths.root)
+    except PathOutsideBrainError as exc:
+        raise HTTPException(status_code=404, detail="Página não encontrada.") from exc
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Página não encontrada.")
-    from ...core import frontmatter
 
     meta, body = frontmatter.parse(target.read_text(encoding="utf-8"))
     return {"path": page_path, "frontmatter": meta, "body": body}
