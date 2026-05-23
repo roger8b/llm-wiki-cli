@@ -9,10 +9,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PYTHON_VERSION: "3.12"
-  NODE_VERSION: "22"
-
 jobs:
   lint:
     name: Lint & type-check (Python)
@@ -21,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.12"
           cache: pip
       - name: Install dev deps
         run: pip install -e ".[agent,ollama,api,mcp,dev]"
@@ -34,13 +30,13 @@ jobs:
         run: mypy src/llmwiki
 
   test:
-    name: Tests (Python ${{ env.PYTHON_VERSION }})
+    name: Tests (Python 3.12)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.12"
           cache: pip
       - name: Install deps
         run: pip install -e ".[agent,ollama,api,mcp,dev]"
@@ -54,7 +50,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Install (clean, lockfile-faithful)
