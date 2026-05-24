@@ -41,7 +41,7 @@ jobs:
       - name: Install deps
         run: pip install -e ".[agent,ollama,api,mcp,dev]"
       - name: Pytest (with coverage)
-        run: pytest
+        run: pytest --cov=src/llmwiki --cov-report=term-missing
 
   build-python-pkg:
     name: Build Python Package (CLI & Server)
