@@ -21,6 +21,10 @@ class JobWorker(threading.Thread):
 
     def run(self) -> None:
         logger.info("Background job worker started.")
+        # Track which DBs already had their schema applied, so the idle poll loop
+        # opens lightweight connections instead of re-running schema.sql (and the
+        # FTS5 virtual-table creation) every second.
+        initialized: set[Path] = set()
         while not self._stop_event.is_set():
             try:
                 # 1. Load active brain
@@ -31,8 +35,11 @@ class JobWorker(threading.Thread):
                     time.sleep(2)
                     continue
 
-                # 2. Open DB connection
-                conn = get_connection(paths.db_path)
+                # 2. Open DB connection (apply schema once per DB path)
+                needs_schema = paths.db_path not in initialized
+                conn = get_connection(paths.db_path, apply_schema=needs_schema)
+                if needs_schema:
+                    initialized.add(paths.db_path)
                 try:
                     # Find first queued job
                     cur = conn.execute(
