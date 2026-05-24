@@ -39,12 +39,38 @@ export function AskView() {
     setLoading(true)
     setResult(null)
     try {
-      const res = await api.ask(query, save)
-      setResult(res)
-      setHistory((h) => [{ question: query, at: Date.now() }, ...h].slice(0, 20))
-      if (res.change_request_id) {
-        await refetchCrs()
-        toast.success(`Saved as ${res.change_request_id}`)
+      const startRes = await api.ask(query, save)
+      if (startRes && typeof startRes === "object" && "job_id" in startRes) {
+        const jobId = (startRes as any).job_id
+        while (true) {
+          const job = await api.getJob(jobId)
+          if (job.status === "done") {
+            if (job.result) {
+              const res = JSON.parse(job.result) as QueryResult
+              setResult(res)
+              setHistory((h) => [{ question: query, at: Date.now() }, ...h].slice(0, 20))
+              if (res.change_request_id) {
+                await refetchCrs()
+                toast.success(`Saved as ${res.change_request_id}`)
+              }
+            } else {
+              toast.error("No result returned from job")
+            }
+            break
+          } else if (job.status === "error") {
+            toast.error(job.error || "Ask job failed")
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+      } else {
+        const res = startRes as unknown as QueryResult
+        setResult(res)
+        setHistory((h) => [{ question: query, at: Date.now() }, ...h].slice(0, 20))
+        if (res.change_request_id) {
+          await refetchCrs()
+          toast.success(`Saved as ${res.change_request_id}`)
+        }
       }
     } catch (e) {
       toast.error((e as Error).message)

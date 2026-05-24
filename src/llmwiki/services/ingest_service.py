@@ -43,6 +43,7 @@ def ingest(
     cfg: WorkspaceConfig,
     *,
     runner: Runner | None = None,
+    job_id: int | None = None,
 ) -> ChangeRequest:
     """Lê uma fonte, roda o agente de ingestão e cria um change request."""
     from ..sources.extractors import extract_text
@@ -53,7 +54,8 @@ def ingest(
     text = extract_text(source_file)
 
     job_repo = JobRepo(conn)
-    job_id = job_repo.create("ingest", json.dumps({"source": rel}))
+    if job_id is None:
+        job_id = job_repo.create("ingest", json.dumps({"source": rel}), status="running")
     try:
         backend = ChangeRequestBackend(paths.root)
         result = runner(cfg, backend, source_path=rel, source_text=text)

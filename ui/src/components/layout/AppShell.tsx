@@ -8,6 +8,7 @@ import { OnboardingFlow } from "@/views/OnboardingFlow"
 import { api } from "@/lib/api"
 import { useAppStore } from "@/stores/app"
 import { useCrStore } from "@/stores/crs"
+import { useJobStore } from "@/stores/jobs"
 
 export function AppShell() {
   const setCmdkOpen = useAppStore((s) => s.setCmdkOpen)
@@ -15,8 +16,9 @@ export function AppShell() {
   const setNeedsOnboarding = useAppStore((s) => s.setNeedsOnboarding)
   const fetchCrs = useCrStore((s) => s.fetch)
   const fetchBrains = useAppStore((s) => s.fetchBrains)
+  const fetchJobs = useJobStore((s) => s.fetch)
 
-  // First-run check + CR fetch + brain sync at startup.
+  // First-run check + CR fetch + brain sync + job polling at startup.
   useEffect(() => {
     api
       .getOnboarding()
@@ -24,7 +26,14 @@ export function AppShell() {
       .catch(() => setNeedsOnboarding(false))
     fetchCrs()
     fetchBrains()
-  }, [fetchCrs, fetchBrains, setNeedsOnboarding])
+    
+    fetchJobs()
+    const timer = setInterval(() => {
+      fetchJobs()
+    }, 4000)
+    
+    return () => clearInterval(timer)
+  }, [fetchCrs, fetchBrains, setNeedsOnboarding, fetchJobs])
 
   if (needsOnboarding) {
     return <OnboardingFlow onDone={() => setNeedsOnboarding(false)} />
