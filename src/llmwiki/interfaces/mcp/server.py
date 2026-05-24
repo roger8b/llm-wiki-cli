@@ -1,8 +1,8 @@
-"""MCP server — expõe a wiki para agentes externos (Claude Code etc.).
+"""MCP server — exposes the wiki to external agents (Claude Code etc.).
 
-A lógica fica em funções ``_*`` testáveis; os tools MCP são wrappers finos.
-A raiz do brain vem de ``WIKI_BRAIN`` ou da descoberta a partir do cwd.
-Rodar: ``python -m llmwiki.interfaces.mcp.server`` (transporte stdio).
+The logic resides in testable ``_*`` functions; the MCP tools are thin wrappers.
+The brain root comes from ``WIKI_BRAIN`` or discovery from the cwd.
+Run: ``python -m llmwiki.interfaces.mcp.server`` (stdio transport).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def _search(query: str) -> str:
     finally:
         conn.close()
     if not hits:
-        return "Nenhuma página encontrada."
+        return "No pages found."
     return "\n".join(f"{h.path} — {h.title}" for h in hits)
 
 
@@ -31,7 +31,7 @@ def _get_page(path: str) -> str:
     paths = get_paths()
     target = paths.root / path
     if not target.is_file():
-        return f"Página não encontrada: {path}"
+        return f"Page not found: {path}"
     return target.read_text(encoding="utf-8")
 
 
@@ -39,7 +39,7 @@ def _lint() -> str:
     paths = get_paths()
     findings = lint_service.lint_structural(paths)
     if not findings:
-        return "Lint OK — nenhum problema estrutural."
+        return "Lint OK — no structural issues."
     return "\n".join(f"[{f.severity.value}] {f.kind}: {f.message}" for f in findings)
 
 
@@ -54,7 +54,7 @@ def _ask(question: str) -> str:
     finally:
         conn.close()
     refs = "\n".join(f"- {c.page or c.source}" for c in result.citations)
-    return f"{result.answer}\n\nFontes:\n{refs}" if refs else result.answer
+    return f"{result.answer}\n\nSources:\n{refs}" if refs else result.answer
 
 
 def _ingest(path: str) -> str:
@@ -65,13 +65,13 @@ def _ingest(path: str) -> str:
     cfg = get_config()
     target = resolve_input(path, paths.root)
     if not target.is_file():
-        return f"Arquivo não encontrado: {path}"
+        return f"File not found: {path}"
     conn = get_connection(paths.db_path)
     try:
         cr = ingest_service.ingest(target, paths, conn, cfg)
     finally:
         conn.close()
-    return f"Change request {cr.id} criado ({cr.files_changed} arquivos). Revise antes de aplicar."
+    return f"Change request {cr.id} created ({cr.files_changed} files). Review before applying."
 
 
 def _list_pending() -> str:
@@ -82,8 +82,8 @@ def _list_pending() -> str:
     finally:
         conn.close()
     if not crs:
-        return "Nenhum change request pendente."
-    return "\n".join(f"{cr.id}: {cr.files_changed} arquivos — {cr.summary or ''}" for cr in crs)
+        return "No pending change requests."
+    return "\n".join(f"{cr.id}: {cr.files_changed} files — {cr.summary or ''}" for cr in crs)
 
 
 def _apply(cr_id: str) -> str:
@@ -95,7 +95,7 @@ def _apply(cr_id: str) -> str:
         return f"Erro: {exc}"
     finally:
         conn.close()
-    return f"Change request {cr.id} aplicado (status={cr.status})."
+    return f"Change request {cr.id} applied (status={cr.status})."
 
 
 def _reject(cr_id: str) -> str:
@@ -107,7 +107,7 @@ def _reject(cr_id: str) -> str:
         return f"Erro: {exc}"
     finally:
         conn.close()
-    return f"Change request {cr_id} rejeitado."
+    return f"Change request {cr_id} rejected."
 
 
 def _list_pages() -> str:
@@ -120,7 +120,7 @@ def _list_pages() -> str:
     finally:
         conn.close()
     if not pages:
-        return "Nenhuma página."
+        return "No pages."
     return "\n".join(f"{p.path} — {p.title} ({p.type.value})" for p in pages)
 
 
@@ -137,7 +137,7 @@ def _list_sources() -> str:
     finally:
         conn.close()
     if not sources:
-        return "Nenhuma fonte."
+        return "No sources."
     return "\n".join(f"{s.path} [{s.status.value}]" for s in sources)
 
 
@@ -148,18 +148,18 @@ def _maintain() -> str:
     cfg = get_config()
     findings = lint_service.lint_structural(paths)
     if not findings:
-        return "Nada a corrigir — lint limpo."
+        return "Nothing to correct — clean lint."
     conn = get_connection(paths.db_path)
     try:
         cr = maintenance_service.maintain(findings, paths, conn, cfg)
     finally:
         conn.close()
     if cr is None:
-        return "Nenhuma correção proposta."
-    return f"Change request {cr.id} criado com correções. Revise antes de aplicar."
+        return "No corrections proposed."
+    return f"Change request {cr.id} created with corrections. Review before applying."
 
 
-# ── brain registry (compartilhada com app/CLI) ──
+# ── brain registry (shared with app/CLI) ──
 def _list_brains() -> str:
     from pathlib import Path
 
@@ -171,14 +171,14 @@ def _list_brains() -> str:
         mark = "✓" if active and b.id == active.id else " "
         valid = "" if reg.is_brain_dir(Path(b.path)) else " [missing]"
         out.append(f"{mark} {b.name} — {b.path}{valid} ({b.id[:8]})")
-    return "\n".join(out) if out else "Nenhum brain registrado."
+    return "\n".join(out) if out else "No brains registered."
 
 
 def _current_brain() -> str:
     from ...core import brains as reg
 
     active = reg.get_active_brain()
-    return f"{active.name} — {active.path}" if active else "Nenhum brain ativo."
+    return f"{active.name} — {active.path}" if active else "No active brain."
 
 
 def _use_brain(ref: str) -> str:
@@ -190,85 +190,85 @@ def _use_brain(ref: str) -> str:
     if target is None:
         target = next((b for b in reg.list_brains() if b.name == ref), None)
     if target is None:
-        return f"Brain não encontrado: {ref}"
+        return f"Brain not found: {ref}"
     reg.set_active_brain(target.id)
-    return f"Brain ativo agora: {target.name} — {target.path}"
+    return f"Active brain now: {target.name} — {target.path}"
 
 
 def build_server() -> Any:
-    """Constrói o FastMCP com os tools. Retorno é Any (FastMCP vem do extra opcional)."""
+    """Builds the FastMCP with tools. Return is Any (FastMCP comes from optional extra)."""
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP("llm-wiki")
 
     @mcp.tool()
     def wiki_search(query: str) -> str:
-        """Busca páginas da wiki por palavra-chave."""
+        """Search wiki pages by keyword."""
         return _search(query)
 
     @mcp.tool()
     def wiki_get_page(path: str) -> str:
-        """Retorna o conteúdo Markdown de uma página da wiki."""
+        """Returns the Markdown content of a wiki page."""
         return _get_page(path)
 
     @mcp.tool()
     def wiki_lint() -> str:
-        """Audita a saúde estrutural da wiki (links quebrados, órfãs, frontmatter)."""
+        """Audits the structural health of the wiki (broken links, orphans, frontmatter)."""
         return _lint()
 
     @mcp.tool()
     def wiki_ask(question: str) -> str:
-        """Responde uma pergunta usando a wiki como fonte primária (com citações)."""
+        """Answers a question using the wiki as the primary source (with citations)."""
         return _ask(question)
 
     @mcp.tool()
     def wiki_ingest(path: str) -> str:
-        """Ingere uma fonte e cria um change request (não escreve a wiki direto)."""
+        """Ingests a source and creates a change request (does not write directly to the wiki)."""
         return _ingest(path)
 
     @mcp.tool()
     def wiki_pending_changes() -> str:
-        """Lista os change requests pendentes de revisão."""
+        """Lists change requests pending review."""
         return _list_pending()
 
     @mcp.tool()
     def wiki_apply(cr_id: str) -> str:
-        """Aplica um change request (escreve os arquivos + reindexa)."""
+        """Applies a change request (writes files + reindexes)."""
         return _apply(cr_id)
 
     @mcp.tool()
     def wiki_reject(cr_id: str) -> str:
-        """Rejeita um change request pendente."""
+        """Rejects a pending change request."""
         return _reject(cr_id)
 
     @mcp.tool()
     def wiki_list_pages() -> str:
-        """Lista as páginas da wiki do brain ativo."""
+        """Lists the wiki pages of the active brain."""
         return _list_pages()
 
     @mcp.tool()
     def wiki_list_sources() -> str:
-        """Lista as fontes (raw/) do brain ativo."""
+        """Lists the sources (raw/) of the active brain."""
         return _list_sources()
 
     @mcp.tool()
     def wiki_maintain() -> str:
-        """Roda o lint e propõe correções como um change request."""
+        """Runs lint and proposes corrections as a change request."""
         return _maintain()
 
     @mcp.tool()
     def wiki_list_brains() -> str:
-        """Lista os brains registrados (✓ = ativo)."""
+        """Lists registered brains (✓ = active)."""
         return _list_brains()
 
     @mcp.tool()
     def wiki_current_brain() -> str:
-        """Mostra o brain ativo (compartilhado com app e CLI)."""
+        """Shows the active brain (shared with app and CLI)."""
         return _current_brain()
 
     @mcp.tool()
     def wiki_use_brain(ref: str) -> str:
-        """Troca o brain ativo (por nome, id ou path) — afeta app, CLI e MCP."""
+        """Changes the active brain (by name, ID, or path) — affects app, CLI, and MCP."""
         return _use_brain(ref)
 
     return mcp

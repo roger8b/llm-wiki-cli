@@ -1,4 +1,4 @@
-"""Extrator de Markdown/texto puro: lê o arquivo como utf-8."""
+"""Markdown/plain text extractor: reads the file as utf-8."""
 
 from __future__ import annotations
 

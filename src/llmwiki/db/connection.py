@@ -1,4 +1,4 @@
-"""Abertura e inicialização da conexão SQLite."""
+"""Opening and initializing the SQLite connection."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ def _load_schema() -> str:
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
-    """Abre a conexão, aplica o schema (idempotente) e ativa foreign keys.
+    """Opens the connection, applies the schema (idempotently), and enables foreign keys.
 
-    ``pages_fts`` (FTS5) é exigida; se o SQLite local não tiver FTS5, o erro
-    é propagado de forma explícita.
+    ``pages_fts`` (FTS5) is required; if the local SQLite does not support FTS5, the error
+    is explicitly propagated.
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -26,8 +26,8 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
     except sqlite3.OperationalError as exc:
         if "fts5" in str(exc).lower():
             raise RuntimeError(
-                "Seu SQLite não tem suporte a FTS5, exigido pela busca. "
-                "Instale um Python com SQLite+FTS5."
+                "Your SQLite does not support FTS5, which is required for search. "
+                "Please install a Python version with SQLite+FTS5."
             ) from exc
         raise
     conn.commit()

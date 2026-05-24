@@ -1,10 +1,10 @@
-"""Lint estrutural (determinístico, sem LLM).
+"""Structural lint (deterministic, without LLM).
 
-Checagens:
-- frontmatter ausente/ inválido
-- tipo de página inválido
-- link quebrado ([[X]] sem página correspondente)
-- página órfã (sem nenhum link de entrada)
+Checks:
+- missing or invalid frontmatter
+- invalid page type
+- broken link ([[X]] with no corresponding page)
+- orphan page (no incoming links)
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def _iter_wiki_files(wiki_dir: Path) -> list[Path]:
 
 
 def _resolve_wikilink(target: str, known_titles: dict[str, str]) -> str | None:
-    """Resolve um alvo de [[link]] para um path de página, por título (slug)."""
+    """Resolves a [[link]] target to a page path, by title (slug)."""
     return known_titles.get(markdown.slugify(target))
 
 
@@ -40,7 +40,7 @@ def lint_structural(
     files = _iter_wiki_files(paths.wiki)
     findings: list[LintFinding] = []
 
-    # Mapa slug(título)->path e slug(nome-arquivo)->path para resolver links.
+    # Maps slug(title)->path and slug(filename)->path to resolve links.
     title_to_path: dict[str, str] = {}
     bodies: dict[str, str] = {}
     incoming: dict[str, int] = {}
@@ -67,7 +67,7 @@ def lint_structural(
                 LintFinding(
                     kind="missing_frontmatter",
                     severity=Severity.warn,
-                    message=f"{rel}: sem frontmatter YAML.",
+                    message=f"{rel}: missing YAML frontmatter.",
                     pages=[rel],
                 )
             )
@@ -78,7 +78,7 @@ def lint_structural(
                 LintFinding(
                     kind="invalid_page_type",
                     severity=Severity.warn,
-                    message=f"{rel}: tipo '{ptype}' não é válido.",
+                    message=f"{rel}: type '{ptype}' is invalid.",
                     pages=[rel],
                 )
             )
@@ -88,7 +88,7 @@ def lint_structural(
         title_to_path[markdown.slugify(file.stem)] = rel
         bodies[rel] = text
 
-    # Links: quebrados + contagem de entrada.
+    # Links: broken links + incoming count.
     for rel, text in bodies.items():
         for target in markdown.extract_wikilinks(text):
             dest = _resolve_wikilink(target, title_to_path)
@@ -97,21 +97,21 @@ def lint_structural(
                     LintFinding(
                         kind="broken_link",
                         severity=Severity.error,
-                        message=f"{rel}: link [[{target}]] não resolve para nenhuma página.",
+                        message=f"{rel}: link [[{target}]] does not resolve to any page.",
                         pages=[rel],
                     )
                 )
             elif dest != rel:
                 incoming[dest] = incoming.get(dest, 0) + 1
 
-    # Órfãs: sem links de entrada.
+    # Orphans: no incoming links.
     for rel, count in sorted(incoming.items()):
         if count == 0:
             findings.append(
                 LintFinding(
                     kind="orphan_page",
                     severity=Severity.warn,
-                    message=f"{rel}: página órfã (nenhum link de entrada).",
+                    message=f"{rel}: orphan page (no incoming links).",
                     pages=[rel],
                 )
             )
@@ -119,7 +119,7 @@ def lint_structural(
     return findings
 
 
-# runner(cfg) -> list[LintFinding] (camada semântica via LLM)
+# runner(cfg) -> list[LintFinding] (semantic layer via LLM)
 SemanticRunner = Callable[[WorkspaceConfig], list[LintFinding]]
 
 
@@ -144,7 +144,7 @@ def lint_all(
     semantic: bool = True,
     semantic_runner: SemanticRunner | None = None,
 ) -> list[LintFinding]:
-    """Combina lint estrutural (determinístico) e semântico (LLM)."""
+    """Combines structural lint (deterministic) and semantic lint (LLM)."""
     findings = lint_structural(paths)
     if semantic:
         runner = semantic_runner or _default_semantic_runner

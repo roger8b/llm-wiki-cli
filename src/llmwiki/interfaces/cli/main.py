@@ -1,8 +1,8 @@
-"""CLI Typer do llm-wiki (Fase 0).
+"""Typer CLI for llm-wiki.
 
-Comandos: init, source add/list, page create/open, index, search, lint, log.
-As interfaces são cascas finas: capturam erros de domínio e traduzem em mensagens
-+ código de saída 1. Nunca deixam stacktrace vazar.
+Commands: init, source add/list, page create/open, index, search, lint, log.
+Interfaces are thin wrappers: they catch domain errors and translate them into messages
++ exit code 1. They never leak stacktraces.
 """
 
 from __future__ import annotations
@@ -35,10 +35,10 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-source_app = typer.Typer(help="Gerencia fontes brutas em raw/.", no_args_is_help=True)
-page_app = typer.Typer(help="Gerencia páginas da wiki.", no_args_is_help=True)
+source_app = typer.Typer(help="Manage raw sources in raw/.", no_args_is_help=True)
+page_app = typer.Typer(help="Manage wiki pages.", no_args_is_help=True)
 brain_app = typer.Typer(
-    help="Gerencia brains (registry compartilhada com app/MCP).",
+    help="Manage brains (registry shared with app/MCP).",
     no_args_is_help=True,
 )
 app.add_typer(source_app, name="source")
@@ -60,7 +60,7 @@ def _brain() -> BrainPaths:
         return load_active_brain()
     except WikiError as exc:
         _fail(str(exc))
-        raise  # inalcançável; satisfaz o type checker
+        raise  # unreachable; satisfies the type checker
 
 
 def _activate_brain_path(path: str) -> None:
@@ -92,17 +92,17 @@ def _resolve_brain_ref(ref: str):
 # ───────────────────────────────── brain registry commands
 @brain_app.command("list")
 def brain_list() -> None:
-    """Lista os brains registrados (✓ = ativo, ⚠ = pasta ausente)."""
+    """List registered brains (✓ = active, ⚠ = folder missing)."""
     from ...core import brains as reg
 
     brains = reg.list_brains()
     if not brains:
-        console.print("Nenhum brain registrado. Use 'wiki brain create <path>'.")
+        console.print("No brains registered. Use 'wiki brain create <path>'.")
         return
     active = reg.get_active_brain()
     table = Table(show_header=True, header_style="bold")
     table.add_column("")
-    table.add_column("Nome")
+    table.add_column("Name")
     table.add_column("Path")
     table.add_column("ID")
     for b in brains:
@@ -115,35 +115,35 @@ def brain_list() -> None:
 
 @brain_app.command("current")
 def brain_current() -> None:
-    """Mostra o brain ativo."""
+    """Show the active brain."""
     from ...core import brains as reg
 
     active = reg.get_active_brain()
     if not active:
-        console.print("Nenhum brain ativo.")
+        console.print("No active brain.")
         return
     console.print(f"[green]{active.name}[/green]  {active.path}  ({active.id[:8]})")
 
 
 @brain_app.command("use")
-def brain_use(ref: str = typer.Argument(..., help="Nome, id ou path do brain.")) -> None:
-    """Define o brain ativo (compartilhado com app/MCP)."""
+def brain_use(ref: str = typer.Argument(..., help="Brain name, ID, or path.")) -> None:
+    """Set the active brain (shared with app/MCP)."""
     from ...core import brains as reg
 
     b = _resolve_brain_ref(ref)
     if not b:
-        _fail(f"Brain não encontrado: {ref}")
+        _fail(f"Brain not found: {ref}")
         return
     reg.set_active_brain(b.id)
-    console.print(f"[green]Ativo:[/green] {b.name}  {b.path}")
+    console.print(f"[green]Active:[/green] {b.name}  {b.path}")
 
 
 @brain_app.command("add")
 def brain_add(
-    path: str = typer.Argument(..., help="Path de um brain existente."),
-    name: str | None = typer.Option(None, help="Nome (default: nome da pasta)."),
+    path: str = typer.Argument(..., help="Path to an existing brain."),
+    name: str | None = typer.Option(None, help="Name (default: folder name)."),
 ) -> None:
-    """Registra um brain já existente (não cria estrutura)."""
+    """Register an existing brain (does not create the directory structure)."""
     from ...core import brains as reg
 
     try:
@@ -152,7 +152,7 @@ def brain_add(
     except WikiError as exc:
         _fail(str(exc))
         return
-    console.print(f"[green]Registrado + ativo:[/green] {b.name}  {b.path}")
+    console.print(f"[green]Registered + active:[/green] {b.name}  {b.path}")
 
 
 def _create_brain(path: str, name: str | None, *, git: bool, force: bool) -> None:
@@ -173,64 +173,64 @@ def _create_brain(path: str, name: str | None, *, git: bool, force: bool) -> Non
     if b and name and b.name != name:
         reg.update_brain(b.id, {"name": name})
         b = reg.get_brain(b.id)
-    console.print(f"[green]Criado + ativo:[/green] {b.name if b else paths.root}  {paths.root}")
+    console.print(f"[green]Created + active:[/green] {b.name if b else paths.root}  {paths.root}")
 
 
 @brain_app.command("create")
 def brain_create(
-    path: str = typer.Argument(..., help="Path do novo brain a criar."),
-    name: str | None = typer.Option(None, help="Nome (default: nome da pasta)."),
-    no_git: bool = typer.Option(False, "--no-git", help="Não roda git init."),
-    force: bool = typer.Option(False, "--force", help="Sobrescreve brain existente."),
+    path: str = typer.Argument(..., help="Path of the new brain to create."),
+    name: str | None = typer.Option(None, help="Name (default: folder name)."),
+    no_git: bool = typer.Option(False, "--no-git", help="Do not run git init."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing brain."),
 ) -> None:
-    """Cria (scaffold) um novo brain, registra e ativa."""
+    """Create (scaffold) a new brain, register, and activate it."""
     _create_brain(path, name, git=not no_git, force=force)
 
 
 @brain_app.command("rm")
-def brain_rm(ref: str = typer.Argument(..., help="Nome, id ou path.")) -> None:
-    """Remove um brain da registry (não apaga os arquivos do brain)."""
+def brain_rm(ref: str = typer.Argument(..., help="Name, ID, or path.")) -> None:
+    """Remove a brain from the registry (does not delete the brain files)."""
     from ...core import brains as reg
 
     b = _resolve_brain_ref(ref)
     if not b:
-        _fail(f"Brain não encontrado: {ref}")
+        _fail(f"Brain not found: {ref}")
         return
     try:
         reg.remove_brain(b.id)
     except WikiError as exc:
         _fail(str(exc))
         return
-    console.print(f"[yellow]Removido da registry:[/yellow] {b.name}")
+    console.print(f"[yellow]Removed from registry:[/yellow] {b.name}")
 
 
 @app.command()
 def version() -> None:
-    """Mostra a versão."""
+    """Show the version."""
     console.print(f"llm-wiki {__version__}")
 
 
 @app.command()
 def init(
-    path: str = typer.Argument("brain", help="Diretório do brain a criar."),
-    name: str | None = typer.Option(None, help="Nome (default: nome da pasta)."),
-    no_git: bool = typer.Option(False, "--no-git", help="Não roda git init."),
-    force: bool = typer.Option(False, "--force", help="Sobrescreve brain existente."),
+    path: str = typer.Argument("brain", help="Directory of the brain to create."),
+    name: str | None = typer.Option(None, help="Name (default: folder name)."),
+    no_git: bool = typer.Option(False, "--no-git", help="Do not run git init."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing brain."),
 ) -> None:
-    """[DEPRECATED] Alias de 'wiki brain create'. Use 'wiki brain create'."""
+    """[DEPRECATED] Alias of 'wiki brain create'. Use 'wiki brain create'."""
     console.print(
-        "[yellow]'wiki init' está depreciado — use 'wiki brain create'.[/yellow]"
+        "[yellow]'wiki init' is deprecated — use 'wiki brain create'.[/yellow]"
     )
     _create_brain(path, name, git=not no_git, force=force)
 
 
 @source_app.command("add")
-def source_add(file: str = typer.Argument(..., help="Arquivo de fonte.")) -> None:
-    """Registra um arquivo bruto em raw/."""
+def source_add(file: str = typer.Argument(..., help="Source file.")) -> None:
+    """Register a raw file in raw/."""
     paths = _brain()
     src = Path(file).resolve()
     if not src.is_file():
-        _fail(f"Arquivo não encontrado: {file}")
+        _fail(f"File not found: {file}")
     conn = get_connection(paths.db_path)
     try:
         result = add_source(src, paths, SourceRepo(conn))
@@ -238,18 +238,18 @@ def source_add(file: str = typer.Argument(..., help="Arquivo de fonte.")) -> Non
         conn.close()
     if result.already_present:
         console.print(
-            f"[yellow]Fonte já registrada[/yellow] (hash igual): {result.source.path}"
+            f"[yellow]Source already registered[/yellow] (matching hash): {result.source.path}"
         )
     else:
         console.print(
-            f"[green]Fonte registrada:[/green] {result.source.path} "
+            f"[green]Source registered:[/green] {result.source.path} "
             f"({result.source.status.value})"
         )
 
 
 @source_app.command("list")
 def source_list() -> None:
-    """Lista as fontes registradas."""
+    """List registered sources."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
@@ -257,9 +257,9 @@ def source_list() -> None:
     finally:
         conn.close()
     if not sources:
-        console.print("[dim]Nenhuma fonte registrada.[/dim]")
+        console.print("[dim]No sources registered.[/dim]")
         return
-    table = Table("Path", "Tipo", "Status", "Título")
+    table = Table("Path", "Type", "Status", "Title")
     for s in sources:
         table.add_row(_esc(s.path), s.type, s.status.value, _esc(s.title or ""))
     console.print(table)
@@ -267,28 +267,28 @@ def source_list() -> None:
 
 @page_app.command("create")
 def page_create(
-    title: str = typer.Argument(..., help="Título da página."),
-    type_: str = typer.Option("concept", "--type", "-t", help="Tipo de página."),
+    title: str = typer.Argument(..., help="Page title."),
+    type_: str = typer.Option("concept", "--type", "-t", help="Page type."),
 ) -> None:
-    """Cria uma página da wiki a partir do template do tipo."""
+    """Create a wiki page from the type template."""
     paths = _brain()
     try:
         page_type = PageType(type_)
     except ValueError:
         valid = ", ".join(t.value for t in PageType)
-        _fail(f"Tipo inválido '{type_}'. Use um de: {valid}")
+        _fail(f"Invalid type '{type_}'. Use one of: {valid}")
         return
     try:
         dest = page_service.create_page(title, page_type, paths)
     except WikiError as exc:
         _fail(str(exc))
         return
-    console.print(f"[green]Página criada:[/green] {paths.relative(dest)}")
+    console.print(f"[green]Page created:[/green] {paths.relative(dest)}")
 
 
 @page_app.command("open")
-def page_open(path: str = typer.Argument(..., help="Caminho da página.")) -> None:
-    """Imprime o conteúdo de uma página."""
+def page_open(path: str = typer.Argument(..., help="Page path.")) -> None:
+    """Print the content of a page."""
     paths = _brain()
     try:
         target = resolve_input(path, paths.root)
@@ -296,13 +296,13 @@ def page_open(path: str = typer.Argument(..., help="Caminho da página.")) -> No
         _fail(str(exc))
         return
     if not target.is_file():
-        _fail(f"Página não encontrada: {path}")
+        _fail(f"Page not found: {path}")
     console.print(target.read_text(encoding="utf-8"), markup=False)
 
 
 @app.command()
 def index() -> None:
-    """Reconstrói os metadados e regenera wiki/index.md."""
+    """Rebuild metadata and regenerate wiki/index.md."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
@@ -311,19 +311,19 @@ def index() -> None:
     finally:
         conn.close()
     console.print(
-        f"[green]Index atualizado:[/green] {report.pages_indexed} páginas, "
+        f"[green]Index updated:[/green] {report.pages_indexed} pages, "
         f"{report.links_indexed} links."
     )
     if report.skipped:
         console.print(
-            f"[yellow]Ignoradas (frontmatter inválido):[/yellow] "
+            f"[yellow]Skipped (invalid frontmatter):[/yellow] "
             f"{', '.join(report.skipped)}"
         )
 
 
 @app.command()
-def search(query: str = typer.Argument(..., help="Termo de busca (FTS5).")) -> None:
-    """Busca páginas por palavra-chave (índice FTS5)."""
+def search(query: str = typer.Argument(..., help="Search query (FTS5).")) -> None:
+    """Search pages by keyword (FTS5 index)."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
@@ -331,9 +331,9 @@ def search(query: str = typer.Argument(..., help="Termo de busca (FTS5).")) -> N
     finally:
         conn.close()
     if not results:
-        console.print("[dim]Nenhum resultado.[/dim]")
+        console.print("[dim]No results found.[/dim]")
         return
-    table = Table("Página", "Título")
+    table = Table("Page", "Title")
     for path, title, _rank in results:
         table.add_row(_esc(path), _esc(title))
     console.print(table)
@@ -342,22 +342,22 @@ def search(query: str = typer.Argument(..., help="Termo de busca (FTS5).")) -> N
 @app.command()
 def lint(
     semantic: bool = typer.Option(
-        False, "--all/--structural", help="--all inclui auditoria semântica via LLM."
+        False, "--all/--structural", help="--all includes semantic audit via LLM."
     ),
 ) -> None:
-    """Audita a saúde da wiki (estrutural; --all adiciona semântica via LLM)."""
+    """Audit the health of the wiki (structural; --all adds semantic via LLM)."""
     paths = _brain()
     if semantic:
         cfg = load_config(paths)
         try:
             findings = lint_service.lint_all(paths, cfg, semantic=True)
         except Exception as exc:  # noqa: BLE001
-            _fail(f"Falha no lint semântico: {exc}")
+            _fail(f"Semantic lint failed: {exc}")
             return
     else:
         findings = lint_service.lint_structural(paths)
     if not findings:
-        console.print("[green]Lint OK — nenhum problema.[/green]")
+        console.print("[green]Lint OK — no issues found.[/green]")
         return
     color = {Severity.info: "blue", Severity.warn: "yellow", Severity.error: "red"}
     for f in findings:
@@ -372,10 +372,10 @@ def lint(
 
 @app.command()
 def ask(
-    question: str = typer.Argument(..., help="Pergunta para a wiki."),
-    save: bool = typer.Option(False, "--save", help="Salvar a resposta como página (cria CR)."),
+    question: str = typer.Argument(..., help="Question for the wiki."),
+    save: bool = typer.Option(False, "--save", help="Save the answer as a page (creates CR)."),
 ) -> None:
-    """Responde uma pergunta usando a wiki como fonte primária."""
+    """Answer a question using the wiki as the primary source."""
     paths = _brain()
     cfg = load_config(paths)
     conn = get_connection(paths.db_path)
@@ -384,28 +384,28 @@ def ask(
 
         result, cr = query_service.ask(question, paths, conn, cfg, save=save)
     except Exception as exc:  # noqa: BLE001
-        _fail(f"Falha na consulta: {exc}")
+        _fail(f"Query failed: {exc}")
         return
     finally:
         conn.close()
     console.print(result.answer, markup=False)
     if result.citations:
-        console.print("\n[dim]Fontes:[/dim]")
+        console.print("\n[dim]Sources:[/dim]")
         for i, c in enumerate(result.citations, 1):
             ref = c.page or c.source or "?"
             console.print(f"  [{i}] {_esc(ref)}")
     if cr is not None:
         console.print(
-            f"\n[green]Resposta salva como change request {cr.id}[/green] "
-            f"— revise com wiki review {cr.id}"
+            f"\n[green]Answer saved as change request {cr.id}[/green] "
+            f"— review with wiki review {cr.id}"
         )
 
 
 @app.command()
 def maintain(
-    apply_now: bool = typer.Option(False, "--apply", help="Aplica o CR de manutenção direto."),
+    apply_now: bool = typer.Option(False, "--apply", help="Apply the maintenance CR directly."),
 ) -> None:
-    """Detecta problemas (lint --all) e propõe correções como change request."""
+    """Detect issues (lint --all) and propose fixes as a change request."""
     paths = _brain()
     cfg = load_config(paths)
     conn = get_connection(paths.db_path)
@@ -415,17 +415,17 @@ def maintain(
         findings = lint_service.lint_all(paths, cfg, semantic=True)
         cr = maintenance_service.maintain(findings, paths, conn, cfg)
         if cr is None:
-            console.print("[green]Nada a corrigir.[/green]")
+            console.print("[green]Nothing to correct.[/green]")
             return
         console.print(
-            f"[green]CR de manutenção criado: {cr.id}[/green] "
-            f"({cr.files_changed} arquivos)"
+            f"[green]Maintenance CR created: {cr.id}[/green] "
+            f"({cr.files_changed} files)"
         )
         if apply_now:
             change_request_service.apply(cr.id, paths, conn)
-            console.print(f"[green]Aplicado {cr.id}.[/green]")
+            console.print(f"[green]Applied {cr.id}.[/green]")
     except Exception as exc:  # noqa: BLE001
-        _fail(f"Falha na manutenção: {exc}")
+        _fail(f"Maintenance failed: {exc}")
         return
     finally:
         conn.close()
@@ -433,10 +433,10 @@ def maintain(
 
 @app.command()
 def log() -> None:
-    """Imprime wiki/log.md."""
+    """Print wiki/log.md."""
     paths = _brain()
     if not paths.log_path.is_file():
-        _fail("log.md não encontrado.")
+        _fail("log.md not found.")
     console.print(paths.log_path.read_text(encoding="utf-8"), markup=False)
 
 
@@ -446,21 +446,21 @@ def _print_diff(diff: str) -> None:
     if diff.strip():
         console.print(Syntax(diff, "diff", theme="ansi_dark", word_wrap=True))
     else:
-        console.print("[dim](sem diferença)[/dim]")
+        console.print("[dim](no difference)[/dim]")
 
 
 @app.command()
-def ingest(file: str = typer.Argument(..., help="Arquivo de fonte a ingerir.")) -> None:
-    """Lê uma fonte com o LLM e cria um change request (não escreve a wiki).
+def ingest(file: str = typer.Argument(..., help="Source file to ingest.")) -> None:
+    """Read a source with the LLM and create a change request (does not write to the wiki).
 
-    Aceita um caminho dentro do brain (ex.: raw/articles/x.md) ou qualquer
-    arquivo legível do sistema (lido como fonte, sem cópia).
+    Accepts a path within the brain (e.g. raw/articles/x.md) or any
+    readable system file (read as source, without copying).
     """
     paths = _brain()
     direct = Path(file)
     target = direct if direct.is_file() else (paths.root / file)
     if not target.is_file():
-        _fail(f"Arquivo não encontrado: {file}")
+        _fail(f"File not found: {file}")
     target = target.resolve()
     cfg = load_config(paths)
     conn = get_connection(paths.db_path)
@@ -469,44 +469,44 @@ def ingest(file: str = typer.Argument(..., help="Arquivo de fonte a ingerir.")) 
 
         cr = ingest_service.ingest(target, paths, conn, cfg)
     except Exception as exc:  # noqa: BLE001
-        _fail(f"Falha na ingestão: {exc}")
+        _fail(f"Ingestion failed: {exc}")
         return
     finally:
         conn.close()
-    console.print(f"[green]Fonte processada[/green] (modelo: {cfg.model}).")
+    console.print(f"[green]Source processed[/green] (model: {cfg.model}).")
     for c in cr.changes:
         mark = "+" if c.operation == "create" else "~"
         console.print(f"  {mark} {_esc(c.path)} ({c.operation})")
     if cr.files_changed == 0:
         console.print(
-            f"[yellow]Atenção: o modelo não escreveu nenhuma página[/yellow] "
-            f"(CR {cr.id} vazio). Modelos pequenos costumam falhar nisso — "
-            f"use um modelo com bom suporte a tool calling (ex.: maior/cloud)."
+            f"[yellow]Warning: the model did not write any pages[/yellow] "
+            f"(empty CR {cr.id}). Small models often fail at this — "
+            f"use a model with good tool calling support (e.g., larger/cloud)."
         )
         return
-    console.print(f"Change request criado: [bold]{cr.id}[/bold] ({cr.files_changed} arquivos)")
-    console.print(f"Revise com:  wiki review {cr.id}")
+    console.print(f"Change request created: [bold]{cr.id}[/bold] ({cr.files_changed} files)")
+    console.print(f"Review with:  wiki review {cr.id}")
 
 
 @app.command()
-def review(cr_id: str = typer.Argument(None, help="ID do CR. Vazio = lista pendentes.")) -> None:
-    """Mostra os diffs de um change request, ou lista os pendentes."""
+def review(cr_id: str = typer.Argument(None, help="CR ID. Empty = list pending.")) -> None:
+    """Show the diffs of a change request, or list pending ones."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
         if cr_id is None:
             crs = change_request_service.list_crs(conn, status="pending_review")
             if not crs:
-                console.print("[dim]Nenhum change request pendente.[/dim]")
+                console.print("[dim]No pending change requests.[/dim]")
                 return
-            table = Table("CR", "Arquivos", "Resumo")
+            table = Table("CR", "Files", "Summary")
             for cr in crs:
                 table.add_row(cr.id, str(cr.files_changed), _esc((cr.summary or "")[:60]))
             console.print(table)
             return
         cr = change_request_service.get(cr_id, conn)
         if cr is None:
-            _fail(f"Change request não encontrado: {cr_id}")
+            _fail(f"Change request not found: {cr_id}")
             return
         console.print(f"[bold]{cr.id}[/bold] — {cr.status} — {_esc(cr.summary or '')}")
         for c in cr.changes:
@@ -518,10 +518,10 @@ def review(cr_id: str = typer.Argument(None, help="ID do CR. Vazio = lista pende
 
 @app.command()
 def apply(
-    cr_id: str = typer.Argument(..., help="ID do change request."),
-    commit: bool = typer.Option(False, "--commit", help="Cria um commit git ao aplicar."),
+    cr_id: str = typer.Argument(..., help="Change request ID."),
+    commit: bool = typer.Option(False, "--commit", help="Create a git commit when applying."),
 ) -> None:
-    """Aplica um change request: escreve a wiki, reindexa e registra no log."""
+    """Apply a change request: writes to the wiki, reindexes, and records to the log."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
@@ -531,12 +531,12 @@ def apply(
         return
     finally:
         conn.close()
-    console.print(f"[green]Aplicado {cr.id}[/green] ({cr.files_changed} arquivos).")
+    console.print(f"[green]Applied {cr.id}[/green] ({cr.files_changed} files).")
 
 
 @app.command()
-def reject(cr_id: str = typer.Argument(..., help="ID do change request.")) -> None:
-    """Rejeita um change request (mantém os diffs para auditoria)."""
+def reject(cr_id: str = typer.Argument(..., help="Change request ID.")) -> None:
+    """Reject a change request (keeps the diffs for auditing)."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
@@ -546,12 +546,12 @@ def reject(cr_id: str = typer.Argument(..., help="ID do change request.")) -> No
         return
     finally:
         conn.close()
-    console.print(f"[yellow]Rejeitado {cr_id}.[/yellow]")
+    console.print(f"[yellow]Rejected {cr_id}.[/yellow]")
 
 
 @app.command()
 def jobs() -> None:
-    """Lista os jobs (ingest/lint/query) registrados."""
+    """List registered jobs (ingest/lint/query)."""
     from ...db.repo import JobRepo
 
     paths = _brain()
@@ -561,9 +561,9 @@ def jobs() -> None:
     finally:
         conn.close()
     if not rows:
-        console.print("[dim]Nenhum job.[/dim]")
+        console.print("[dim]No jobs found.[/dim]")
         return
-    table = Table("ID", "Tipo", "Status", "Criado", "Erro")
+    table = Table("ID", "Type", "Status", "Created", "Error")
     for r in rows:
         table.add_row(
             str(r["id"]), r["type"], r["status"], r["created_at"][:19],
@@ -575,64 +575,64 @@ def jobs() -> None:
 @app.command()
 def mcp(
     brain: str | None = typer.Option(
-        None, help="Ativa este brain (caminho) antes de subir; senão usa o ativo."
+        None, help="Activate this brain (path) before starting; otherwise uses the active one."
     ),
 ) -> None:
-    """Sobe o MCP server (stdio) expondo a wiki para agentes externos.
+    """Start the MCP server (stdio) exposing the wiki to external agents.
 
-    Segue o brain ativo da registry — o mesmo do app/CLI. Trocar de brain em
-    qualquer canal é refletido aqui a cada chamada de tool (sem reiniciar).
+    Follows the active brain from the registry — the same as the app/CLI. Changing brains in
+    any channel is reflected here on every tool call (no restart required).
     """
     if brain is not None:
         _activate_brain_path(brain)
-    paths = _brain()  # resolve o ativo (erro limpo se nenhum)
+    paths = _brain()  # resolve the active one (clean error if none)
     try:
         from ...interfaces.mcp.server import main as mcp_main
     except ImportError:
-        _fail("SDK MCP não instalado. Rode: pip install -e '.[mcp]'")
+        _fail("MCP SDK not installed. Run: pip install -e '.[mcp]'")
         return
-    console.print(f"[green]MCP server (stdio)[/green] — brain ativo: {paths.root}")
+    console.print(f"[green]MCP server (stdio)[/green] — active brain: {paths.root}")
     mcp_main()
 
 
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", help="Host."),
-    port: int = typer.Option(8000, help="Porta."),
+    port: int = typer.Option(8000, help="Port."),
     brain: str | None = typer.Option(
         None,
-        help="Brain a servir (pin). Criado se não existir. "
-        "Sem isto, usa o brain ativo da registry; se não houver, a UI mostra "
-        "o onboarding e o usuário registra um.",
+        help="Brain to serve (pin). Created if it doesn't exist. "
+        "Without this, uses the active brain from the registry; if none exists, the UI shows "
+        "onboarding and the user registers one.",
     ),
 ) -> None:
-    """Sobe a API + UI (requer o extra 'api').
+    """Start the API + UI (requires the 'api' extra).
 
-    - ``--brain X`` ativa o brain X na registry (cria/registra se preciso).
-      Como a registry é compartilhada, isso também muda o brain do CLI/MCP.
-    - Sem ``--brain``: usa o brain ativo da registry. Se nenhum estiver
-      registrado, o servidor sobe e a UI trata como first-run/onboarding.
+    - ``--brain X`` activates brain X in the registry (creates/registers if needed).
+      Since the registry is shared, this also changes the CLI/MCP brain.
+    - Without ``--brain``: uses the active brain from the registry. If none is
+      registered, the server starts and the UI handles it as first-run/onboarding.
     """
     from ...core import brains as brains_registry
 
     if brain is not None:
         _activate_brain_path(brain)
-        console.print(f"[green]Brain ativo[/green] {Path(brain).expanduser().resolve()}")
+        console.print(f"[green]Active brain[/green] {Path(brain).expanduser().resolve()}")
     else:
         active = brains_registry.get_active_brain()
         if active:
-            console.print(f"[green]Brain ativo[/green] {active.path}")
+            console.print(f"[green]Active brain[/green] {active.path}")
         else:
             console.print(
-                "[yellow]Nenhum brain registrado — a UI abrirá o onboarding.[/yellow]"
+                "[yellow]No brains registered — the UI will open the onboarding flow.[/yellow]"
             )
 
     try:
         import uvicorn
     except ImportError:
-        _fail("FastAPI/uvicorn não instalados. Rode: pip install -e '.[api]'")
+        _fail("FastAPI/uvicorn not installed. Run: pip install -e '.[api]'")
         return
-    console.print(f"[green]API em[/green] http://{host}:{port}")
+    console.print(f"[green]API at[/green] http://{host}:{port}")
     uvicorn.run("llmwiki.interfaces.api.main:app", host=host, port=port)
 
 

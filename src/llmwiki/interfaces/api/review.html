@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-br"><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <title>llm-wiki — Review Changes</title>
 <style>
  body{font-family:system-ui,sans-serif;margin:0;display:flex;height:100vh}
@@ -13,17 +13,17 @@
  .apply{background:#238636;color:#fff;border:none}
  .reject{background:#da3633;color:#fff;border:none}
 </style></head><body>
-<div id="list"><h3>Pendentes</h3><div id="crs"></div></div>
-<div id="detail"><p>Selecione um change request.</p></div>
+<div id="list"><h3>Pending</h3><div id="crs"></div></div>
+<div id="detail"><p>Select a change request.</p></div>
 <script>
 async function load(){
  const r=await fetch('/change-requests?status=pending_review');
  const crs=await r.json();
  const el=document.getElementById('crs');el.innerHTML='';
- if(!crs.length){el.innerHTML='<p>Nenhum pendente.</p>';return;}
+ if(!crs.length){el.innerHTML='<p>No pending requests.</p>';return;}
  crs.forEach(cr=>{
   const d=document.createElement('div');d.className='cr';
-  d.innerHTML='<b>'+cr.id+'</b><br><small>'+cr.files_changed+' arquivos</small><br>'+(cr.summary||'');
+  d.innerHTML='<b>'+cr.id+'</b><br><small>'+cr.files_changed+' files</small><br>'+(cr.summary||'');
   d.onclick=()=>show(cr.id);el.appendChild(d);
  });
 }
@@ -39,8 +39,8 @@ function renderDiff(diff){
 async function show(id){
  const r=await fetch('/change-requests/'+id);const cr=await r.json();
  let html='<h2>'+cr.id+'</h2><p>'+(cr.summary||'')+'</p>';
- html+='<button class="apply" onclick="act(\''+id+'\',\'apply\')">Aplicar</button>';
- html+='<button class="reject" onclick="act(\''+id+'\',\'reject\')">Rejeitar</button>';
+ html+='<button class="apply" onclick="act(\''+id+'\',\'apply\')">Apply</button>';
+ html+='<button class="reject" onclick="act(\''+id+'\',\'reject\')">Reject</button>';
  cr.changes.forEach(c=>{
   html+='<h4>'+c.operation+': '+c.path+'</h4><pre>'+renderDiff(c.diff)+'</pre>';
  });
@@ -49,7 +49,7 @@ async function show(id){
 async function act(id,what){
  await fetch('/change-requests/'+id+'/'+what,
   {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
- document.getElementById('detail').innerHTML='<p>Feito: '+what+'</p>';load();
+ document.getElementById('detail').innerHTML='<p>Done: '+what+'</p>';load();
 }
 load();
 </script></body></html>

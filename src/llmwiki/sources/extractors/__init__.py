@@ -1,4 +1,4 @@
-"""Registry de extratores: extensão → função que devolve texto puro."""
+"""Registry of extractors: extension -> function returning plain text."""
 
 from __future__ import annotations
 
@@ -17,16 +17,16 @@ _REGISTRY: dict[str, Extractor] = {
 
 
 def extract_text(path: Path) -> str:
-    """Extrai texto de uma fonte conforme a extensão.
+    """Extracts text from a source based on its extension.
 
-    Extensão desconhecida cai no extrator de texto puro (lê como utf-8).
+    Unknown extensions fallback to the plain text extractor (reads as utf-8).
     """
     extractor = _REGISTRY.get(path.suffix.lower(), _markdown.extract)
     return extractor(path)
 
 
 def source_type(path: Path) -> str:
-    """Classifica a fonte pela extensão (usado na coluna ``sources.type``)."""
+    """Classifies the source by extension (used in the ``sources.type`` column)."""
     ext = path.suffix.lower()
     return {
         ".md": "md",

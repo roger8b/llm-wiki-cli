@@ -1,7 +1,7 @@
-"""Ingest service: orquestra fonte → agente → change request.
+"""Ingest service: orchestrates source -> agent -> change request.
 
-O ``runner`` é injetável para teste (sem LLM). Em produção usa o agente DeepAgents
-(``agents.factory.run_ingestion``), importado preguiçosamente.
+The ``runner`` is injectable for testing (without LLM). In production it uses the DeepAgents agent
+(``agents.factory.run_ingestion``), imported lazily.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def ingest(
     runner: Runner | None = None,
     job_id: int | None = None,
 ) -> ChangeRequest:
-    """Lê uma fonte, roda o agente de ingestão e cria um change request."""
+    """Reads a source, runs the ingestion agent, and creates a change request."""
     from ..sources.extractors import extract_text
 
     runner = runner or _default_runner

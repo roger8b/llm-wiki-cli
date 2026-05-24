@@ -1,7 +1,7 @@
-"""Repositórios CRUD sobre a conexão SQLite.
+"""CRUD repositories over SQLite connections.
 
-Cada repositório encapsula uma tabela. Conversões para/de modelos de domínio
-acontecem aqui; o resto da app não escreve SQL.
+Each repository encapsulates a table. Conversions to/from domain models
+happen here; the rest of the app does not write SQL.
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ class LinkRepo:
 
 
 class PageFtsRepo:
-    """Índice de busca textual (FTS5) sobre o corpo das páginas."""
+    """Full-text search index (FTS5) over page bodies."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn

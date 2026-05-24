@@ -1,6 +1,6 @@
-"""API FastAPI — casca fina sobre os services. Mesma lógica da CLI.
+"""FastAPI API — thin wrapper over services. Same logic as the CLI.
 
-Inclui uma UI mínima de Review Changes em ``GET /`` (HTML embutido, sem build).
+Includes a minimal Review Changes UI at ``GET /`` (embedded HTML, no build).
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ def ingest_source(path: str = Body(..., embed=True)) -> dict[str, Any]:
     paths = _ctx()
     target = resolve_input(path, paths.root)
     if not target.is_file():
-        raise HTTPException(status_code=400, detail=f"Arquivo não encontrado: {path}")
+        raise HTTPException(status_code=400, detail=f"File not found: {path}")
     conn = open_conn(paths)
     try:
         job_repo = JobRepo(conn)
@@ -184,9 +184,9 @@ def get_page(page_path: str) -> dict[str, Any]:
     try:
         target = resolve_input(page_path, paths.root)
     except PathOutsideBrainError as exc:
-        raise HTTPException(status_code=404, detail="Página não encontrada.") from exc
+        raise HTTPException(status_code=404, detail="Page not found.") from exc
     if not target.is_file():
-        raise HTTPException(status_code=404, detail="Página não encontrada.")
+        raise HTTPException(status_code=404, detail="Page not found.")
 
     meta, body = frontmatter.parse(target.read_text(encoding="utf-8"))
     return {"path": page_path, "frontmatter": meta, "body": body}
@@ -267,7 +267,7 @@ def get_cr(cr_id: str) -> dict[str, Any]:
     finally:
         conn.close()
     if cr is None:
-        raise HTTPException(status_code=404, detail="Change request não encontrado.")
+        raise HTTPException(status_code=404, detail="Change request not found.")
     return cr.model_dump(mode="json")
 
 
@@ -747,7 +747,7 @@ def get_job(job_id: int) -> dict[str, Any]:
     try:
         job = JobRepo(conn).get(job_id)
         if not job:
-            raise HTTPException(status_code=404, detail="Job não encontrado.")
+            raise HTTPException(status_code=404, detail="Job not found.")
         return dict(job)
     finally:
         conn.close()

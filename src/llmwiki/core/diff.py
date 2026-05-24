@@ -1,4 +1,4 @@
-"""Geração de unified diff (puro, sem LLM)."""
+"""Unified diff generation (pure, without LLM)."""
 
 from __future__ import annotations
 
@@ -6,16 +6,16 @@ import difflib
 
 
 def make_diff(old: str, new: str, path: str) -> str:
-    """Unified diff entre ``old`` e ``new`` rotulado com ``path``.
+    """Unified diff between ``old`` and ``new`` labeled with ``path``.
 
-    Para criação de arquivo, passe ``old=""``. Retorna string vazia se não houver
-    diferença.
+    For file creation, pass ``old=""``. Returns empty string if there is no
+    difference.
     """
     if old == new:
         return ""
     old_lines = old.splitlines(keepends=True)
     new_lines = new.splitlines(keepends=True)
-    # Garante quebra de linha final para um diff limpo.
+    # Ensures final newline for a clean diff.
     if old_lines and not old_lines[-1].endswith("\n"):
         old_lines[-1] += "\n"
     if new_lines and not new_lines[-1].endswith("\n"):

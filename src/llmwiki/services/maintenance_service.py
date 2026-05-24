@@ -1,4 +1,4 @@
-"""Maintenance service: transforma achados de lint em um change request de correção."""
+"""Maintenance service: transforms lint findings into a corrective change request."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def _default_runner(
 
 def _format_findings(findings: list[LintFinding]) -> str:
     return "\n".join(
-        f"- [{f.severity.value}] {f.kind}: {f.message} (páginas: {', '.join(f.pages)})"
+        f"- [{f.severity.value}] {f.kind}: {f.message} (pages: {', '.join(f.pages)})"
         for f in findings
     )
 
@@ -39,7 +39,7 @@ def maintain(
     *,
     runner: Runner | None = None,
 ) -> ChangeRequest | None:
-    """Roda o agente de manutenção sobre os achados e cria um CR (ou None se nada mudar)."""
+    """Runs the maintenance agent on the findings and creates a CR (or None if nothing changes)."""
     if not findings:
         return None
     runner = runner or _default_runner

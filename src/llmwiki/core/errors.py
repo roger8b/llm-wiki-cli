@@ -1,27 +1,27 @@
-"""Exceções de domínio. Interfaces capturam e traduzem em mensagens ao usuário."""
+"""Domain exceptions. Interfaces capture and translate them into user-facing messages."""
 
 from __future__ import annotations
 
 
 class WikiError(Exception):
-    """Base de todos os erros de domínio."""
+    """Base class for all domain errors."""
 
 
 class BrainNotFoundError(WikiError):
-    """Nenhum brain encontrado a partir do diretório atual."""
+    """No brain found starting from the current directory."""
 
 
 class BrainExistsError(WikiError):
-    """Tentativa de inicializar sobre um brain já existente sem --force."""
+    """Attempted to initialize over an existing brain without --force."""
 
 
 class PathOutsideBrainError(WikiError):
-    """Caminho resolvido cai fora da raiz do brain."""
+    """Resolved path falls outside the brain root."""
 
 
 class PageExistsError(WikiError):
-    """Tentativa de criar página que já existe."""
+    """Attempted to create a page that already exists."""
 
 
 class InvalidFrontmatterError(WikiError):
-    """Frontmatter YAML ausente ou inválido onde era obrigatório."""
+    """Missing or invalid YAML frontmatter where it is required."""

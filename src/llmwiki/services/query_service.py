@@ -1,7 +1,7 @@
-"""Query service: responde perguntas usando a wiki como fonte primária.
+"""Query service: answers questions using the wiki as the primary source.
 
-Operação somente leitura. Se ``save=True`` e o agente sugerir uma página, ela é
-transformada em change request (nunca escrita direto).
+Read-only operation. If ``save=True`` and the agent suggests a page, it is
+transformed into a change request (never written directly).
 """
 
 from __future__ import annotations
@@ -41,10 +41,10 @@ def ask(
     save: bool = False,
     runner: Runner | None = None,
 ) -> tuple[QueryResult, ChangeRequest | None]:
-    """Responde a pergunta. Se ``save`` e houver página sugerida, cria um CR."""
+    """Answers the question. If ``save`` and there is a suggested page, creates a CR."""
     runner = runner or _default_runner
-    # Backend sempre presente: scopa read_file ao brain root.
-    # Writes do agente ficam no staging e são descartados (operação read-only).
+    # Backend always present: scopes read_file to brain root.
+    # Agent writes go to staging and are discarded (read-only operation).
     read_backend = ChangeRequestBackend(paths.root)
     result = runner(cfg, read_backend, question=question, save=save)
 
@@ -56,7 +56,7 @@ def ask(
         if changes:
             cr = create_from_changes(
                 changes,
-                f"Resposta salva: {question[:60]}",
+                f"Saved answer: {question[:60]}",
                 paths,
                 conn,
             )
