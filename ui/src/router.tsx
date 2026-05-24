@@ -1,10 +1,13 @@
 import { lazy, Suspense } from "react"
 import { createBrowserRouter, Navigate } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
-import { ReviewView } from "@/views/ReviewView"
+const ReviewView = lazy(() =>
+  import("@/views/ReviewView").then((m) => ({ default: m.ReviewView })),
+)
 
-// Heavy views (diff viewer, markdown, graph) are code-split to keep the
-// initial bundle small. Review loads eagerly — it's the default screen.
+// Lazy-load ALL views to keep the initial main chunk small.
+// Even lightweight views like Sources are deferred to avoid pulling in their
+// dependencies (cmdk, react-markdown, diff libs, zustand stores) upfront.
 const SourcesView = lazy(() =>
   import("@/views/SourcesView").then((m) => ({ default: m.SourcesView })),
 )
@@ -47,7 +50,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: <Navigate to="/review" replace /> },
-      { path: "review", element: <ReviewView /> },
+      { path: "review", element: <Lazy><ReviewView /></Lazy> },
       { path: "wiki", element: <Lazy><WikiView /></Lazy> },
       { path: "sources", element: <Lazy><SourcesView /></Lazy> },
       { path: "ask", element: <Lazy><AskView /></Lazy> },

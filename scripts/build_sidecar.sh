@@ -41,9 +41,13 @@ WORK="$ROOT/.build-sidecar"
 rm -rf "$WORK"
 mkdir -p "$WORK" "$BIN_DIR"
 
+# --onedir (NOT --onefile): a onefile bootloader re-extracts the entire ~57MB
+# bundle to a temp dir on EVERY launch, costing ~7-8s of pure I/O before the
+# CLI even runs. --onedir extracts once at build time; launch just execs the
+# binary against the sibling _internal/ folder. Startup drops from ~9s to ~1-2s.
 echo "==> Running PyInstaller (this can take a few minutes)"
 "$PY" -m PyInstaller \
-  --onefile \
+  --onedir \
   --name wiki-backend \
   --distpath "$WORK/dist" \
   --workpath "$WORK/build" \
@@ -63,15 +67,16 @@ echo "==> Running PyInstaller (this can take a few minutes)"
   --hidden-import uvicorn.lifespan.on \
   "$ENTRY"
 
-# --onefile produces a single standalone executable.
-SRC="$WORK/dist/wiki-backend"
-DEST="$BIN_DIR/wiki-backend-$TRIPLE"
+# --onedir produces dist/wiki-backend/ (exe + _internal/). Tauri bundles this
+# whole folder as a resource (see tauri.conf.json) and the Rust shell resolves
+# the inner exe at runtime — exe and _internal/ must stay together.
+SRC_DIR="$WORK/dist/wiki-backend"
+DEST_DIR="$BIN_DIR/wiki-backend"
 
-# Remove any old _internal folder and copy the standalone binary
-rm -rf "$BIN_DIR/_internal"
-cp "$SRC" "$DEST"
+rm -rf "$DEST_DIR" "$BIN_DIR/_internal" "$BIN_DIR"/wiki-backend-*
+cp -R "$SRC_DIR" "$DEST_DIR"
 
 echo ""
-echo "OK. Sidecar built as a single self-contained file:"
-echo "  $DEST"
+echo "OK. Sidecar built as a onedir bundle (exe + _internal/) for triple $TRIPLE:"
+echo "  $DEST_DIR/"
 echo ""
