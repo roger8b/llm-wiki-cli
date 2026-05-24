@@ -1,5 +1,6 @@
 """API routers — split by domain."""
 
+from .ask import router as ask_router
 from .brains import router as brains_router
 from .changes import router as changes_router
 from .cli import router as cli_router
@@ -13,6 +14,7 @@ from .sources import router as sources_router
 from .wiki import router as wiki_router
 
 __all__ = [
+    "ask_router",
     "brains_router",
     "changes_router",
     "cli_router",

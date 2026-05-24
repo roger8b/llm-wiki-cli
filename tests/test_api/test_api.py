@@ -62,6 +62,63 @@ class TestReadEndpoints:
         assert r.status_code == 200
         assert "findings" in r.json()
 
+    def test_maintain_alias(self, client, brain: BrainPaths) -> None:
+        # The "Propose fixes" button POSTs /api/maintain; without the top-level
+        # alias the SPA catch-all only serves GET, so POST returned 405.
+        _seed_page(brain)
+        r = client.post("/api/maintain", json={"semantic": False})
+        assert r.status_code == 200
+        assert "job_id" in r.json()
+
+
+class TestAskHistory:
+    def test_history_empty(self, client) -> None:
+        r = client.get("/api/ask/history")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_promote_creates_cr_and_links_history(
+        self, client, brain: BrainPaths
+    ) -> None:
+        from llmwiki.db.connection import get_connection
+        from llmwiki.db.repo import AskHistoryRepo
+
+        conn = get_connection(brain.db_path)
+        hid = AskHistoryRepo(conn).insert("What is RAG?", "RAG combines **retrieval**.")
+        conn.close()
+
+        r = client.post(
+            "/api/ask/promote",
+            json={
+                "question": "What is RAG?",
+                "answer": "RAG combines **retrieval**.",
+                "history_id": hid,
+            },
+        )
+        assert r.status_code == 200
+        cr_id = r.json()["change_request_id"]
+        assert cr_id
+
+        # The history row is now linked to the created change request.
+        items = client.get("/api/ask/history").json()
+        assert items[0]["change_request_id"] == cr_id
+
+    def test_delete_and_clear(self, client, brain: BrainPaths) -> None:
+        from llmwiki.db.connection import get_connection
+        from llmwiki.db.repo import AskHistoryRepo
+
+        conn = get_connection(brain.db_path)
+        repo = AskHistoryRepo(conn)
+        a = repo.insert("q1", "a1")
+        repo.insert("q2", "a2")
+        conn.close()
+
+        assert client.delete(f"/api/ask/history/{a}").status_code == 200
+        assert len(client.get("/api/ask/history").json()) == 1
+
+        assert client.delete("/api/ask/history").status_code == 200
+        assert client.get("/api/ask/history").json() == []
+
     def test_review_ui_served(self, client) -> None:
         # GET / serves the built SPA (index.html with #root) when dist/ exists,
         # otherwise falls back to the legacy review.html. Accept either.
