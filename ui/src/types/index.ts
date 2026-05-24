@@ -72,6 +72,16 @@ export interface QueryResult {
   citations: Citation[]
   suggested_page?: SuggestedPage | null
   change_request_id?: string | null
+  history_id?: number
+}
+
+export interface AskHistoryItem {
+  id: number
+  question: string
+  answer: string
+  citations: Citation[]
+  change_request_id?: string | null
+  created_at: string
 }
 
 export type LintSeverity = "info" | "warn" | "error"

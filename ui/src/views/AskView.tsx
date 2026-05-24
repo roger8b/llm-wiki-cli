@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Sparkles, Send, Save } from "lucide-react"
+import { Sparkles, Send, ArrowUpRight, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
-import type { QueryResult } from "@/types"
+import type { AskHistoryItem, QueryResult } from "@/types"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,65 +17,125 @@ const SUGGESTED = [
   "What is chunking?",
 ]
 
-interface HistoryItem {
-  question: string
-  at: number
-}
-
 export function AskView() {
   const navigate = useNavigate()
   const [question, setQuestion] = useState("")
   const [save, setSave] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [promoting, setPromoting] = useState(false)
   const [result, setResult] = useState<QueryResult | null>(null)
-  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [activeId, setActiveId] = useState<number | null>(null)
+  const [history, setHistory] = useState<AskHistoryItem[]>([])
   const refetchCrs = useCrStore((s) => s.fetch)
   const [params] = useSearchParams()
   const askRef = useRef(false)
+
+  async function loadHistory() {
+    try {
+      setHistory(await api.askHistory())
+    } catch {
+      // history is best-effort; ignore load failures
+    }
+  }
+
+  useEffect(() => {
+    loadHistory()
+  }, [])
 
   async function ask(q: string) {
     const query = q.trim()
     if (!query) return
     setLoading(true)
     setResult(null)
+    setActiveId(null)
     try {
       const startRes = await api.ask(query, save)
-      if (startRes && typeof startRes === "object" && "job_id" in startRes) {
-        const jobId = (startRes as any).job_id
-        while (true) {
-          const job = await api.getJob(jobId)
-          if (job.status === "done") {
-            if (job.result) {
-              const res = JSON.parse(job.result) as QueryResult
-              setResult(res)
-              setHistory((h) => [{ question: query, at: Date.now() }, ...h].slice(0, 20))
-              if (res.change_request_id) {
-                await refetchCrs()
-                toast.success(`Saved as ${res.change_request_id}`)
-              }
-            } else {
-              toast.error("No result returned from job")
+      const jobId = (startRes as { job_id?: number }).job_id
+      if (typeof jobId !== "number") {
+        toast.error("Backend did not queue the question")
+        return
+      }
+      while (true) {
+        const job = await api.getJob(jobId)
+        if (job.status === "done") {
+          if (job.result) {
+            const res = JSON.parse(job.result) as QueryResult
+            setResult(res)
+            setActiveId(res.history_id ?? null)
+            if (res.change_request_id) {
+              await refetchCrs()
+              toast.success(`Saved as ${res.change_request_id}`)
             }
-            break
-          } else if (job.status === "error") {
-            toast.error(job.error || "Ask job failed")
-            break
+            await loadHistory()
+          } else {
+            toast.error("No result returned from job")
           }
-          await new Promise((resolve) => setTimeout(resolve, 1000))
+          break
+        } else if (job.status === "error") {
+          toast.error(job.error || "Ask job failed")
+          break
         }
-      } else {
-        const res = startRes as unknown as QueryResult
-        setResult(res)
-        setHistory((h) => [{ question: query, at: Date.now() }, ...h].slice(0, 20))
-        if (res.change_request_id) {
-          await refetchCrs()
-          toast.success(`Saved as ${res.change_request_id}`)
-        }
+        await new Promise((resolve) => setTimeout(resolve, 1000))
       }
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  /** Show a previously-asked answer from history without re-running the LLM. */
+  function openHistory(item: AskHistoryItem) {
+    setQuestion(item.question)
+    setResult({
+      answer: item.answer,
+      citations: item.citations,
+      change_request_id: item.change_request_id,
+    })
+    setActiveId(item.id)
+  }
+
+  async function promote() {
+    if (!result || !question.trim()) return
+    setPromoting(true)
+    try {
+      const { change_request_id } = await api.promoteAnswer({
+        question: question.trim(),
+        answer: result.answer,
+        history_id: activeId ?? undefined,
+      })
+      setResult((r) => (r ? { ...r, change_request_id } : r))
+      await Promise.all([refetchCrs(), loadHistory()])
+      toast.success(`Promoted to wiki page — ${change_request_id}`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setPromoting(false)
+    }
+  }
+
+  async function removeHistory(id: number, e: React.MouseEvent) {
+    e.stopPropagation()
+    try {
+      await api.deleteAskHistory(id)
+      if (activeId === id) {
+        setResult(null)
+        setActiveId(null)
+      }
+      await loadHistory()
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  async function clearHistory() {
+    try {
+      await api.clearAskHistory()
+      setResult(null)
+      setActiveId(null)
+      await loadHistory()
+    } catch (err) {
+      toast.error((err as Error).message)
     }
   }
 
@@ -160,8 +220,26 @@ export function AskView() {
 
         {result && (
           <div>
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Answer
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Answer
+              </span>
+              {result.change_request_id ? (
+                <span className="text-[12px] text-muted-foreground">
+                  Promoted → {result.change_request_id}
+                </span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={promoting}
+                  onClick={promote}
+                >
+                  <ArrowUpRight className="size-4" />
+                  {promoting ? "Promoting…" : "Promote to wiki page"}
+                </Button>
+              )}
             </div>
             <MarkdownReader
               content={result.answer}
@@ -183,36 +261,47 @@ export function AskView() {
                 </ul>
               </div>
             )}
-            {result.suggested_page && !result.change_request_id && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3 gap-1.5"
-                onClick={() => ask(question)}
-              >
-                <Save className="size-4" /> Save as wiki page →
-              </Button>
-            )}
           </div>
         )}
 
         {history.length > 0 && (
           <>
             <hr className="my-5 border-border" />
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              History
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                History
+              </span>
+              <button
+                onClick={clearHistory}
+                className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                <Trash2 className="size-3" /> Clear
+              </button>
             </div>
-            <ul className="space-y-1">
-              {history.map((h, i) => (
-                <li key={i}>
+            <ul className="space-y-0.5">
+              {history.map((h) => (
+                <li
+                  key={h.id}
+                  className={`group flex items-center gap-2 rounded px-1.5 py-1 ${
+                    activeId === h.id ? "bg-accent" : "hover:bg-accent/50"
+                  }`}
+                >
                   <button
-                    onClick={() => {
-                      setQuestion(h.question)
-                      ask(h.question)
-                    }}
-                    className="text-left text-[13px] text-muted-foreground hover:text-foreground"
+                    onClick={() => openHistory(h)}
+                    className="flex-1 truncate text-left text-[13px] text-muted-foreground hover:text-foreground"
+                    title={h.question}
                   >
-                    · {h.question}
+                    {h.question}
+                    {h.change_request_id && (
+                      <span className="ml-2 text-[11px] text-primary">↗ saved</span>
+                    )}
+                  </button>
+                  <button
+                    onClick={(e) => removeHistory(h.id, e)}
+                    className="opacity-0 transition group-hover:opacity-100"
+                    aria-label="Delete from history"
+                  >
+                    <X className="size-3.5 text-muted-foreground hover:text-destructive" />
                   </button>
                 </li>
               ))}

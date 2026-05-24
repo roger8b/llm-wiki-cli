@@ -150,8 +150,30 @@ body {
   margin: 0 0 12px;
   padding-left: 22px;
 }
+/* Tailwind's preflight strips list markers; restore them for rendered answers. */
+.prose-wiki ul {
+  list-style: disc;
+}
+.prose-wiki ol {
+  list-style: decimal;
+}
 .prose-wiki li {
   margin: 3px 0;
+}
+.prose-wiki li > ul,
+.prose-wiki li > ol {
+  margin: 3px 0 3px;
+}
+.prose-wiki > :first-child {
+  margin-top: 0;
+}
+.prose-wiki strong {
+  font-weight: 600;
+}
+.prose-wiki hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
 }
 .prose-wiki a {
   color: var(--primary);
