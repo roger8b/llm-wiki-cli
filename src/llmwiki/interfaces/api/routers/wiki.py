@@ -49,6 +49,36 @@ def get_page(page_path: str) -> dict[str, Any]:
     return {"path": page_path, "frontmatter": meta, "body": body}
 
 
+@router.get("/backlinks")
+def backlinks(path: str) -> dict[str, Any]:
+    """Pages that link to ``path`` — the deletion impact preview."""
+    from ....services import page_delete_service
+
+    paths = _ctx()
+    return {"path": path, "backlinks": page_delete_service.find_backlinks(path, paths)}
+
+
+@router.post("/delete")
+def delete_page(
+    path: str = Body(..., embed=True),
+    unlink_backlinks: bool = Body(False, embed=True),
+) -> dict[str, Any]:
+    """Propose deleting a page as a change request (optionally unlinking backlinks)."""
+    from ....services import page_delete_service
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        cr = page_delete_service.delete_page(
+            path, paths, conn, unlink_backlinks=unlink_backlinks
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Page not found.") from exc
+    finally:
+        conn.close()
+    return {"change_request_id": cr.id, "files_changed": cr.files_changed}
+
+
 @router.post("/lint")
 def lint(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
     """Run lint checks on the wiki."""
