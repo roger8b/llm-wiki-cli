@@ -43,7 +43,7 @@ mkdir -p "$WORK" "$BIN_DIR"
 
 echo "==> Running PyInstaller (this can take a few minutes)"
 "$PY" -m PyInstaller \
-  --onedir \
+  --onefile \
   --name wiki-backend \
   --distpath "$WORK/dist" \
   --workpath "$WORK/build" \
@@ -63,20 +63,15 @@ echo "==> Running PyInstaller (this can take a few minutes)"
   --hidden-import uvicorn.lifespan.on \
   "$ENTRY"
 
-# --onedir produces a folder; Tauri sidecar wants a single launchable file.
-# We ship the whole folder but expose the executable under the triple name.
-SRC="$WORK/dist/wiki-backend/wiki-backend"
+# --onefile produces a single standalone executable.
+SRC="$WORK/dist/wiki-backend"
 DEST="$BIN_DIR/wiki-backend-$TRIPLE"
 
-# Move the onedir folder next to the binary so its _internal deps resolve,
-# then symlink/copy the executable to the triple-named path Tauri expects.
-rm -rf "$BIN_DIR/wiki-backend.app-dir"
-cp -R "$WORK/dist/wiki-backend" "$BIN_DIR/wiki-backend.app-dir"
-cp "$BIN_DIR/wiki-backend.app-dir/wiki-backend" "$DEST"
+# Remove any old _internal folder and copy the standalone binary
+rm -rf "$BIN_DIR/_internal"
+cp "$SRC" "$DEST"
 
 echo ""
-echo "OK. Sidecar built:"
+echo "OK. Sidecar built as a single self-contained file:"
 echo "  $DEST"
-echo "  (deps in $BIN_DIR/wiki-backend.app-dir/_internal)"
 echo ""
-echo "Note: for a clean single-file binary use --onefile, but startup is slower."

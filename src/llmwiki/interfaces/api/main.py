@@ -31,9 +31,17 @@ from ...services import (
     lint_service,
     query_service,
 )
+from contextlib import asynccontextmanager
 from .deps import get_config, get_paths, open_conn
 
-app = FastAPI(title="llm-wiki API", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from ...workers import start_worker, stop_worker
+    start_worker()
+    yield
+    stop_worker()
+
+app = FastAPI(title="llm-wiki API", version="2.0.0", lifespan=lifespan)
 
 # CORS — allow the Vite dev server (localhost:5173) to call the API during
 # development. In production the SPA is served from the same origin, so this
@@ -99,23 +107,20 @@ def list_sources() -> list[dict[str, Any]]:
 @api.post("/sources/ingest")
 def ingest_source(path: str = Body(..., embed=True)) -> dict[str, Any]:
     from ...core.paths import resolve_input
-    from ...services import ingest_service
+    from ...db.repo import JobRepo
+    import json
 
     paths = _ctx()
-    cfg = get_config()
     target = resolve_input(path, paths.root)
     if not target.is_file():
         raise HTTPException(status_code=400, detail=f"Arquivo não encontrado: {path}")
     conn = open_conn(paths)
     try:
-        cr = ingest_service.ingest(target, paths, conn, cfg)
-    except WikiError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — surface LLM/provider errors cleanly
-        raise HTTPException(status_code=502, detail=_provider_error(exc)) from exc
+        job_repo = JobRepo(conn)
+        job_id = job_repo.create("ingest", json.dumps({"source": path}), status="queued")
     finally:
         conn.close()
-    return {"change_request_id": cr.id, "files_changed": cr.files_changed}
+    return {"job_id": job_id}
 
 
 def _register_temp_source(name: str, data: bytes) -> dict[str, Any]:
@@ -193,60 +198,53 @@ def query(
     question: str = Body(..., embed=True),
     save_as_page: bool = Body(False, embed=True),
 ) -> dict[str, Any]:
+    from ...db.repo import JobRepo
+    import json
+
     paths = _ctx()
-    cfg = get_config()
     conn = open_conn(paths)
     try:
-        result, cr = query_service.ask(question, paths, conn, cfg, save=save_as_page)
-    except WikiError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — surface LLM/provider errors cleanly
-        raise HTTPException(status_code=502, detail=_provider_error(exc)) from exc
+        job_repo = JobRepo(conn)
+        job_id = job_repo.create("ask", json.dumps({"question": question, "save": save_as_page}), status="queued")
     finally:
         conn.close()
-    out = result.model_dump(mode="json")
-    out["change_request_id"] = cr.id if cr else None
-    return out
+    return {"job_id": job_id}
 
 
 # ------------------------------------------------------------------- lint
 @api.post("/lint")
 def lint(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
+    from ...db.repo import JobRepo
+    import json
+
     paths = _ctx()
     if semantic:
-        findings = lint_service.lint_all(paths, get_config(), semantic=True)
+        conn = open_conn(paths)
+        try:
+            job_repo = JobRepo(conn)
+            job_id = job_repo.create("lint", json.dumps({"semantic": True}), status="queued")
+        finally:
+            conn.close()
+        return {"job_id": job_id}
     else:
         findings = lint_service.lint_structural(paths)
-    return {"findings": [f.model_dump(mode="json") for f in findings]}
+        return {"findings": [f.model_dump(mode="json") for f in findings]}
 
 
 @api.post("/maintain")
 def maintain(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
     """Run lint, then ask the LLM to propose fixes as a change request."""
-    from ...services import maintenance_service
+    from ...db.repo import JobRepo
+    import json
 
     paths = _ctx()
-    cfg = get_config()
-    if semantic:
-        findings = lint_service.lint_all(paths, cfg, semantic=True)
-    else:
-        findings = lint_service.lint_structural(paths)
-    if not findings:
-        return {"change_request_id": None, "files_changed": 0, "findings": 0}
     conn = open_conn(paths)
     try:
-        cr = maintenance_service.maintain(findings, paths, conn, cfg)
-    except WikiError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=_provider_error(exc)) from exc
+        job_repo = JobRepo(conn)
+        job_id = job_repo.create("maintain", json.dumps({"semantic": semantic}), status="queued")
     finally:
         conn.close()
-    return {
-        "change_request_id": cr.id if cr else None,
-        "files_changed": cr.files_changed if cr else 0,
-        "findings": len(findings),
-    }
+    return {"job_id": job_id}
 
 
 # -------------------------------------------------------- change requests
@@ -726,6 +724,33 @@ def cli_uninstall() -> dict[str, Any]:
     from . import setup as setup_mod
 
     return setup_mod.cli_uninstall()
+
+
+# ------------------------------------------------------------------ jobs
+@api.get("/jobs")
+def list_jobs(limit: int = Query(50)) -> list[dict[str, Any]]:
+    from ...db.repo import JobRepo
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        jobs = JobRepo(conn).list(limit=limit)
+        return [dict(j) for j in jobs]
+    finally:
+        conn.close()
+
+
+@api.get("/jobs/{job_id}")
+def get_job(job_id: int) -> dict[str, Any]:
+    from ...db.repo import JobRepo
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        job = JobRepo(conn).get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job não encontrado.")
+        return dict(job)
+    finally:
+        conn.close()
 
 
 # Mount every JSON endpoint under /api (after all routes are attached).

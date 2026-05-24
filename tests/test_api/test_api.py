@@ -230,3 +230,29 @@ def test_brain_not_found_returns_404(monkeypatch, tmp_path: Path) -> None:
 
     c = TestClient(app)
     assert c.get("/api/sources").status_code == 404
+
+
+class TestJobs:
+    def test_list_and_get_jobs(self, client) -> None:
+        r = client.get("/api/jobs")
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+        # Queue a query job
+        r = client.post("/api/query", json={"question": "What is attention?", "save_as_page": False})
+        assert r.status_code == 200
+        body = r.json()
+        assert "job_id" in body
+        job_id = body["job_id"]
+
+        # Fetch the queued job details
+        r = client.get(f"/api/jobs/{job_id}")
+        assert r.status_code == 200
+        job = r.json()
+        assert job["id"] == job_id
+        assert job["type"] == "ask"
+        assert job["status"] in ("queued", "running", "done", "error")
+
+        # Verify it appears in the jobs list
+        r = client.get("/api/jobs")
+        assert any(j["id"] == job_id for j in r.json())

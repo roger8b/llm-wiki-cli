@@ -204,13 +204,18 @@ class JobRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def create(self, type_: str, payload: str | None = None) -> int:
+    def create(self, type_: str, payload: str | None = None, status: str = "queued") -> int:
         cur = self.conn.execute(
-            "INSERT INTO jobs (type, status, payload, created_at) VALUES (?, 'running', ?, ?)",
-            (type_, payload, now_iso()),
+            "INSERT INTO jobs (type, status, payload, created_at) VALUES (?, ?, ?, ?)",
+            (type_, status, payload, now_iso()),
         )
         self.conn.commit()
         return int(cur.lastrowid or 0)
+
+    def get(self, job_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
 
     def complete(self, job_id: int, result: str | None = None, error: str | None = None) -> None:
         status = "error" if error else "done"

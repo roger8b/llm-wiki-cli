@@ -16,11 +16,11 @@ import type {
   ProviderPatch,
   ProviderStatus,
   ProvidersMap,
-  QueryResult,
   RegisteredBrain,
   SearchResult,
   Source,
   WorkspaceConfig,
+  Job,
 } from "@/types"
 
 // All endpoints live under /api (both dev and prod) so SPA client routes
@@ -78,7 +78,7 @@ export const api = {
   // ── sources ──
   listSources: () => request<Source[]>("/sources"),
   ingestSource: (path: string) =>
-    request<{ change_request_id: string; files_changed: number }>(
+    request<{ job_id: number }>(
       "/sources/ingest",
       { method: "POST", body: JSON.stringify({ path }) },
     ),
@@ -112,26 +112,26 @@ export const api = {
 
   // ── query ──
   ask: (question: string, saveAsPage = false) =>
-    request<QueryResult>("/query", {
+    request<{ job_id: number }>("/query", {
       method: "POST",
       body: JSON.stringify({ question, save_as_page: saveAsPage }),
     }),
 
   // ── lint ──
   lint: (semantic = false) =>
-    request<{ findings: LintFinding[] }>("/lint", {
+    request<{ findings?: LintFinding[]; job_id?: number }>("/lint", {
       method: "POST",
       body: JSON.stringify({ semantic }),
     }),
   maintain: (semantic = false) =>
-    request<{
-      change_request_id: string | null
-      files_changed: number
-      findings: number
-    }>("/maintain", {
+    request<{ job_id: number }>("/maintain", {
       method: "POST",
       body: JSON.stringify({ semantic }),
     }),
+
+  // ── jobs ──
+  listJobs: () => request<Job[]>("/jobs"),
+  getJob: (id: number) => request<Job>(`/jobs/${id}`),
 
   // ── search / graph ──
   search: (q: string) =>

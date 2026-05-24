@@ -50,9 +50,31 @@ export function LintView() {
   async function run(semantic: boolean) {
     setLoading(semantic ? "semantic" : "structural")
     try {
-      const res = await api.lint(semantic)
-      setFindings(res.findings)
-      toast.success(`Lint done — ${res.findings.length} finding(s)`)
+      const startRes = await api.lint(semantic)
+      if (startRes && typeof startRes === "object" && "job_id" in startRes) {
+        const jobId = (startRes as any).job_id
+        while (true) {
+          const job = await api.getJob(jobId)
+          if (job.status === "done") {
+            if (job.result) {
+              const res = JSON.parse(job.result)
+              setFindings(res.findings)
+              toast.success(`Lint done — ${res.findings.length} finding(s)`)
+            } else {
+              toast.error("No result returned from job")
+            }
+            break
+          } else if (job.status === "error") {
+            toast.error(job.error || "Lint job failed")
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+      } else {
+        const res = startRes as any
+        setFindings(res.findings)
+        toast.success(`Lint done — ${res.findings.length} finding(s)`)
+      }
     } catch (e) {
       toast.error((e as Error).message)
     } finally {

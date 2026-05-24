@@ -186,3 +186,14 @@ export interface BrainSettings {
   brains: RegisteredBrain[]
   activeBrainId: string | null
 }
+
+export interface Job {
+  id: number
+  type: string
+  status: "queued" | "running" | "done" | "error"
+  payload?: string | null
+  result?: string | null
+  error?: string | null
+  created_at: string
+  completed_at?: string | null
+}
