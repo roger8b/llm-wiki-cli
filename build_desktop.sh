@@ -5,18 +5,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-echo "==> 1. Compiling Python sidecar backend binary..."
-PYTHON=.venv/bin/python ./scripts/build_sidecar.sh
-
-echo "==> 2. Moving to frontend directory..."
+# Build the SPA FIRST so the PyInstaller sidecar bundles the current frontend.
+# (build_sidecar collects src/llmwiki/.../dist; building it after the sidecar
+# would freeze a one-build-old SPA into the binary.)
+echo "==> 1. Building frontend SPA..."
 cd ui
-
 if [ ! -d "node_modules" ]; then
   echo "==> node_modules not found, installing frontend dependencies..."
   npm install
 fi
+npm run build
+cd "$ROOT"
+
+echo "==> 2. Compiling Python sidecar backend binary..."
+PYTHON=.venv/bin/python ./scripts/build_sidecar.sh
 
 echo "==> 3. Building Tauri macOS application..."
+cd ui
 npx tauri build
 
 echo ""

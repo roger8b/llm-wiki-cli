@@ -71,6 +71,45 @@ class TestReadEndpoints:
         assert "job_id" in r.json()
 
 
+class TestPageDeletion:
+    def _seed_linked(self, brain: BrainPaths) -> None:
+        _seed_page(brain)  # wiki/concepts/rag.md, title RAG
+        other = brain.wiki / "concepts" / "vectors.md"
+        other.write_text(
+            "---\ntitle: Vectors\ntype: concept\n---\n# Vectors\nSee [[RAG]] for more.\n",
+            encoding="utf-8",
+        )
+
+    def test_backlinks(self, client, brain: BrainPaths) -> None:
+        self._seed_linked(brain)
+        r = client.get("/api/wiki/backlinks", params={"path": "wiki/concepts/rag.md"})
+        assert r.status_code == 200
+        paths = [b["path"] for b in r.json()["backlinks"]]
+        assert "wiki/concepts/vectors.md" in paths
+
+    def test_delete_keeps_references(self, client, brain: BrainPaths) -> None:
+        self._seed_linked(brain)
+        r = client.post(
+            "/api/wiki/delete",
+            json={"path": "wiki/concepts/rag.md", "unlink_backlinks": False},
+        )
+        assert r.status_code == 200
+        assert r.json()["files_changed"] == 1  # only the page deletion
+
+    def test_delete_unlinks_references(self, client, brain: BrainPaths) -> None:
+        self._seed_linked(brain)
+        r = client.post(
+            "/api/wiki/delete",
+            json={"path": "wiki/concepts/rag.md", "unlink_backlinks": True},
+        )
+        assert r.status_code == 200
+        assert r.json()["files_changed"] == 2  # deletion + rewritten backlink
+
+    def test_delete_missing_404(self, client) -> None:
+        r = client.post("/api/wiki/delete", json={"path": "wiki/nope.md"})
+        assert r.status_code == 404
+
+
 class TestAskHistory:
     def test_history_empty(self, client) -> None:
         r = client.get("/api/ask/history")

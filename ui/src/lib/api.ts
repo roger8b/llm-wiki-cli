@@ -39,10 +39,25 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const opts: RequestInit = {
     headers: { "Content-Type": "application/json" },
     ...init,
-  })
+  }
+  // WKWebView (the desktop WebView) reuses keep-alive connections; when the
+  // backend has closed an idle one, the reused socket is reset and fetch rejects
+  // with a network-level TypeError ("Load failed") before any response. The
+  // request never reached the server, so retrying once on a fresh connection is
+  // safe and transparent.
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, opts)
+  } catch (err) {
+    if (err instanceof TypeError) {
+      res = await fetch(`${BASE}${path}`, opts)
+    } else {
+      throw err
+    }
+  }
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -110,6 +125,15 @@ export const api = {
   // ── wiki pages ──
   listPages: () => request<PageMeta[]>("/wiki/pages"),
   getPage: (path: string) => request<PageDetail>(`/wiki/pages/${path}`),
+  backlinks: (path: string) =>
+    request<{ path: string; backlinks: { path: string; title: string }[] }>(
+      `/wiki/backlinks?path=${encodeURIComponent(path)}`,
+    ),
+  deletePage: (path: string, unlinkBacklinks: boolean) =>
+    request<{ change_request_id: string; files_changed: number }>("/wiki/delete", {
+      method: "POST",
+      body: JSON.stringify({ path, unlink_backlinks: unlinkBacklinks }),
+    }),
 
   // ── query ──
   ask: (question: string, saveAsPage = false) =>

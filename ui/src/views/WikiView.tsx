@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { ChevronRight, FileText, Search } from "lucide-react"
+import { ChevronRight, FileText, Search, Trash2, Link2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -8,6 +8,21 @@ import { timeAgo } from "@/lib/format"
 import type { PageDetail, PageMeta } from "@/types"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { useCrStore } from "@/stores/crs"
+
+interface Backlink {
+  path: string
+  title: string
+}
 
 function groupByDir(pages: PageMeta[]): Record<string, PageMeta[]> {
   const groups: Record<string, PageMeta[]> = {}
@@ -26,6 +41,12 @@ export function WikiView() {
   const [filter, setFilter] = useState("")
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [params] = useSearchParams()
+  const refetchCrs = useCrStore((s) => s.fetch)
+
+  // delete-page dialog state
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [backlinks, setBacklinks] = useState<Backlink[]>([])
+  const [deleting, setDeleting] = useState(false)
 
   // title → path map for wikilink resolution
   const titleMap = useMemo(() => {
@@ -62,6 +83,36 @@ export function WikiView() {
     const path = titleMap.get(title.toLowerCase())
     if (path) openPath(path)
     else toast(`No page titled "${title}" yet`)
+  }
+
+  async function openDeleteDialog() {
+    if (!detail) return
+    setBacklinks([])
+    setDeleteOpen(true)
+    try {
+      const res = await api.backlinks(detail.path)
+      setBacklinks(res.backlinks)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  async function confirmDelete(unlinkBacklinks: boolean) {
+    if (!detail) return
+    setDeleting(true)
+    try {
+      const { change_request_id } = await api.deletePage(
+        detail.path,
+        unlinkBacklinks,
+      )
+      await refetchCrs()
+      toast.success(`Deletion proposed — review ${change_request_id} to apply`)
+      setDeleteOpen(false)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const filtered = filter
@@ -143,20 +194,30 @@ export function WikiView() {
       <section className="flex-1 overflow-y-auto">
         {detail ? (
           <div className="mx-auto max-w-[760px] p-6">
-            <div className="mb-4 rounded-lg border bg-card px-4 py-2.5 text-[12px] text-muted-foreground">
-              <span className="font-mono">{detail.path}</span>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                {fm.type ? <span>type: {String(fm.type)}</span> : null}
-                {fm.confidence ? (
-                  <span>confidence: {String(fm.confidence)}</span>
-                ) : null}
-                {fm.updated_at ? (
-                  <span>updated: {timeAgo(String(fm.updated_at))}</span>
-                ) : null}
-                {Array.isArray(fm.tags) && fm.tags.length > 0 ? (
-                  <span>tags: {(fm.tags as string[]).join(", ")}</span>
-                ) : null}
+            <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 text-[12px] text-muted-foreground">
+              <div className="min-w-0">
+                <span className="font-mono">{detail.path}</span>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                  {fm.type ? <span>type: {String(fm.type)}</span> : null}
+                  {fm.confidence ? (
+                    <span>confidence: {String(fm.confidence)}</span>
+                  ) : null}
+                  {fm.updated_at ? (
+                    <span>updated: {timeAgo(String(fm.updated_at))}</span>
+                  ) : null}
+                  {Array.isArray(fm.tags) && fm.tags.length > 0 ? (
+                    <span>tags: {(fm.tags as string[]).join(", ")}</span>
+                  ) : null}
+                </div>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 gap-1.5 text-muted-foreground hover:text-destructive"
+                onClick={openDeleteDialog}
+              >
+                <Trash2 className="size-4" /> Delete
+              </Button>
             </div>
             <MarkdownReader content={detail.body} onWikiLink={onWikiLink} />
           </div>
@@ -166,6 +227,68 @@ export function WikiView() {
           </div>
         )}
       </section>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete “{detail?.frontmatter?.title ? String(detail.frontmatter.title) : detail?.path}”?</DialogTitle>
+            <DialogDescription>
+              Deletion is proposed as a change request — nothing is removed until
+              you apply it in Review.
+            </DialogDescription>
+          </DialogHeader>
+
+          {backlinks.length > 0 ? (
+            <div className="rounded-md border bg-muted/40 p-3 text-[13px]">
+              <div className="mb-1.5 flex items-center gap-1.5 font-medium text-foreground">
+                <Link2 className="size-3.5" />
+                {backlinks.length} page{backlinks.length > 1 ? "s" : ""} link
+                {backlinks.length > 1 ? "" : "s"} here
+              </div>
+              <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+                {backlinks.map((b) => (
+                  <li key={b.path} className="truncate text-muted-foreground" title={b.path}>
+                    · {b.title}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted-foreground">
+              No other pages link to this one.
+            </p>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-end">
+            {backlinks.length > 0 ? (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={deleting}
+                  onClick={() => confirmDelete(false)}
+                >
+                  Delete &amp; keep references
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={deleting}
+                  onClick={() => confirmDelete(true)}
+                >
+                  Delete &amp; unlink references
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={deleting}
+                onClick={() => confirmDelete(false)}
+              >
+                {deleting ? "Proposing…" : "Delete page"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

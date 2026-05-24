@@ -70,4 +70,13 @@ def serve(
         typer.echo("[red]FastAPI/uvicorn not installed. Run: pip install -e '.[api]'[/red]", err=True)
         raise typer.Exit(code=1)
     typer.echo(f"[green]API at[/green] http://{host}:{port}")
-    uvicorn.run("llmwiki.interfaces.api.main:app", host=host, port=port)
+    # Keep idle connections open well past typical user think-time. The desktop
+    # WebView (WKWebView) reuses keep-alive connections and surfaces a reset stale
+    # connection as "Load failed"; the default 5s closes them while the user is
+    # e.g. reviewing a diff before clicking Apply.
+    uvicorn.run(
+        "llmwiki.interfaces.api.main:app",
+        host=host,
+        port=port,
+        timeout_keep_alive=300,
+    )
