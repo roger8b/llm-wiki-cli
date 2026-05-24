@@ -61,3 +61,48 @@ def ask(
                 conn,
             )
     return result, cr
+
+
+def promote_answer(
+    question: str,
+    answer: str,
+    paths: BrainPaths,
+    conn: sqlite3.Connection,
+    *,
+    title: str | None = None,
+) -> ChangeRequest | None:
+    """Turn an already-generated answer into a wiki-page change request.
+
+    No LLM call — the answer markdown is wrapped in a synthesis page and proposed
+    as a change request (never written directly), mirroring the ``save`` flow.
+    """
+    from ..core.markdown import slugify
+    from ..core.misc import today
+
+    page_title = (title or question).strip() or "Untitled"
+    slug = slugify(page_title)
+    path = f"wiki/synthesis/{slug}.md"
+    content = (
+        "---\n"
+        f"title: {page_title}\n"
+        "type: synthesis\n"
+        "tags: []\n"
+        "sources: []\n"
+        f"updated_at: {today()}\n"
+        "confidence: medium\n"
+        "---\n"
+        f"# {page_title}\n\n"
+        f"{answer.strip()}\n"
+    )
+
+    backend = ChangeRequestBackend(paths.root)
+    backend.write(path, content)
+    changes = backend.collect_changes()
+    if not changes:
+        return None
+    return create_from_changes(
+        changes,
+        f"Promoted answer: {question[:60]}",
+        paths,
+        conn,
+    )

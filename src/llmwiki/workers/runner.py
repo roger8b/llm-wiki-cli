@@ -6,7 +6,7 @@ from pathlib import Path
 from ..core.paths import load_active_brain, resolve_input
 from ..core.config import load_config
 from ..db.connection import get_connection
-from ..db.repo import JobRepo
+from ..db.repo import AskHistoryRepo, JobRepo
 from ..services import ingest_service, lint_service, query_service, maintenance_service
 
 logger = logging.getLogger("llmwiki.workers")
@@ -113,6 +113,17 @@ class JobWorker(threading.Thread):
 
                             result_data = res.model_dump(mode="json")
                             result_data["change_request_id"] = cr.id if cr else None
+
+                            # Persist to permanent ask history (per-brain).
+                            history_id = AskHistoryRepo(conn).insert(
+                                question=question,
+                                answer=res.answer,
+                                citations=json.dumps(
+                                    [c.model_dump(mode="json") for c in res.citations]
+                                ),
+                                change_request_id=cr.id if cr else None,
+                            )
+                            result_data["history_id"] = history_id
                             JobRepo(conn).complete(job_id, result=json.dumps(result_data))
 
                         else:

@@ -290,6 +290,53 @@ class ChangeRequestRepo:
         self.conn.commit()
 
 
+class AskHistoryRepo:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert(
+        self,
+        question: str,
+        answer: str,
+        citations: str | None = None,
+        change_request_id: str | None = None,
+    ) -> int:
+        cur = self.conn.execute(
+            """
+            INSERT INTO ask_history (question, answer, citations, change_request_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (question, answer, citations, change_request_id, now_iso()),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def get(self, history_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM ask_history WHERE id = ?", (history_id,)
+        ).fetchone()
+
+    def list(self, limit: int = 50) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM ask_history ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+    def set_change_request(self, history_id: int, change_request_id: str) -> None:
+        self.conn.execute(
+            "UPDATE ask_history SET change_request_id = ? WHERE id = ?",
+            (change_request_id, history_id),
+        )
+        self.conn.commit()
+
+    def delete(self, history_id: int) -> None:
+        self.conn.execute("DELETE FROM ask_history WHERE id = ?", (history_id,))
+        self.conn.commit()
+
+    def clear(self) -> None:
+        self.conn.execute("DELETE FROM ask_history")
+        self.conn.commit()
+
+
 def _row_to_source(row: sqlite3.Row) -> Source:
     return Source.model_validate(
         {

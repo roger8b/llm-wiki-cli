@@ -29,6 +29,7 @@ from contextlib import asynccontextmanager
 
 from .deps import get_config, get_paths
 from .routers import (
+    ask_router,
     brains_router,
     changes_router,
     cli_router,
@@ -74,6 +75,7 @@ api.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api.include_router(providers_router, prefix="/providers", tags=["providers"])
 api.include_router(cli_router, prefix="/cli", tags=["cli"])
 api.include_router(query_router, prefix="/query", tags=["query"])
+api.include_router(ask_router, prefix="/ask", tags=["ask"])
 api.include_router(onboarding_router, prefix="/onboarding", tags=["onboarding"])
 
 # Config router is mounted without prefix (adds /config).
@@ -87,6 +89,14 @@ def lint(semantic: bool = False) -> dict[str, Any]:
     from .routers.wiki import _ctx, lint as _lint_impl
     paths = _ctx()
     return _lint_impl(semantic)
+
+
+@api.post("/maintain")
+def maintain(semantic: bool = False) -> dict[str, Any]:
+    """Lint and propose fixes as a change request (queues a maintain job)."""
+    from .routers.wiki import _ctx, maintain as _maintain_impl
+    paths = _ctx()
+    return _maintain_impl(semantic)
 
 
 @api.get("/graph")

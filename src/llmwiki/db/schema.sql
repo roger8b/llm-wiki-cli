@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS change_requests (
   applied_at    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ask_history (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  question          TEXT NOT NULL,
+  answer            TEXT NOT NULL,
+  citations         TEXT,
+  change_request_id TEXT REFERENCES change_requests(id) ON DELETE SET NULL,
+  created_at        TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
   path UNINDEXED, title, body, tags
 );

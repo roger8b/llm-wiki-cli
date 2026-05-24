@@ -3,6 +3,7 @@
 // In prod, the SPA is served by the same FastAPI process, so /api maps back.
 
 import type {
+  AskHistoryItem,
   ChangeRequest,
   CliStatus,
   Graph,
@@ -115,6 +116,24 @@ export const api = {
     request<{ job_id: number }>("/query", {
       method: "POST",
       body: JSON.stringify({ question, save_as_page: saveAsPage }),
+    }),
+
+  // ── ask history + promotion ──
+  askHistory: (limit = 50) =>
+    request<AskHistoryItem[]>(`/ask/history?limit=${limit}`),
+  deleteAskHistory: (id: number) =>
+    request<{ status: string }>(`/ask/history/${id}`, { method: "DELETE" }),
+  clearAskHistory: () =>
+    request<{ status: string }>("/ask/history", { method: "DELETE" }),
+  promoteAnswer: (payload: {
+    question: string
+    answer: string
+    title?: string
+    history_id?: number
+  }) =>
+    request<{ change_request_id: string; files_changed: number }>("/ask/promote", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   // ── lint ──
