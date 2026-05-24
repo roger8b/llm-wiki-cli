@@ -1,11 +1,25 @@
 import path from "node:path"
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
+// Vite injects `crossorigin` on every module <script>/<link rel=modulepreload>.
+// Tauri's macOS/Linux WebView (WKWebView) serves the SPA over a custom protocol
+// where that CORS request mode isn't satisfied, so module loading fails with
+// "Importing a module script failed". The app is same-origin, so the attribute
+// is unnecessary — strip it from the built HTML.
+function stripCrossorigin(): Plugin {
+  return {
+    name: "strip-crossorigin",
+    transformIndexHtml(html) {
+      return html.replace(/\s+crossorigin/g, "")
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), stripCrossorigin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -26,6 +40,9 @@ export default defineConfig({
     // Built SPA is embedded in the Python package and served by `wiki serve`.
     outDir: path.resolve(__dirname, "../src/llmwiki/interfaces/api/dist"),
     emptyOutDir: true,
+    // Tauri uses WebKit (WKWebView) on macOS/Linux — target Safari so emitted
+    // JS stays within what that engine parses.
+    target: "safari13",
     // Split vendor chunks to keep the main bundle small and avoid the 500KB
     // warning. Each import group below gets its own file in dist/assets/.
     rollupOptions: {
