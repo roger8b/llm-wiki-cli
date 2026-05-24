@@ -1,4 +1,4 @@
-"""Criação de páginas da wiki a partir de templates (determinístico)."""
+"""Creation of wiki pages from templates (deterministic)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ..core.misc import today
 from ..core.models import PageType
 from ..core.paths import BrainPaths
 
-# Tipo de página → subdiretório em wiki/.
+# Page type -> subdirectory in wiki/.
 _DIR = {
     PageType.concept: "concepts",
     PageType.entity: "entities",
@@ -34,11 +34,11 @@ def _template(page_type: PageType) -> str:
 def create_page(
     title: str, page_type: PageType, paths: BrainPaths
 ) -> Path:
-    """Cria uma nova página a partir do template do tipo. Retorna o caminho criado."""
+    """Creates a new page from the type template. Returns the created path."""
     slug = slugify(title)
     dest = paths.wiki / _DIR[page_type] / f"{slug}.md"
     if dest.exists():
-        raise PageExistsError(f"Página já existe: {paths.relative(dest)}")
+        raise PageExistsError(f"Page already exists: {paths.relative(dest)}")
 
     content = _template(page_type).replace("{{title}}", title).replace("{{today}}", today())
     dest.parent.mkdir(parents=True, exist_ok=True)

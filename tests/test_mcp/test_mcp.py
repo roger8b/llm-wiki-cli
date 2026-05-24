@@ -31,14 +31,14 @@ class TestMcpHelpers:
         assert "# RAG" in server._get_page("wiki/concepts/rag.md")
 
     def test_get_missing_page(self, seeded) -> None:
-        assert "não encontrada" in server._get_page("wiki/concepts/nope.md")
+        assert "not found" in server._get_page("wiki/concepts/nope.md")
 
     def test_lint(self, seeded) -> None:
         out = server._lint()
         assert isinstance(out, str)
 
     def test_pending_changes_empty(self, seeded) -> None:
-        assert "Nenhum" in server._list_pending()
+        assert "No pending" in server._list_pending()
 
 
 class TestBuildServer:

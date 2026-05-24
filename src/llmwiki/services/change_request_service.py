@@ -1,8 +1,8 @@
-"""Change Request service: persiste, lista, aplica e rejeita propostas de mudança.
+"""Change Request service: persists, lists, applies, and rejects change requests.
 
-Um change request é o canal pelo qual o LLM altera a wiki: ele é criado a partir
-das mudanças capturadas pelo ChangeRequestBackend, revisado pelo humano, e só então
-aplicado (escrito no disco). Os diffs + conteúdo final ficam em
+A change request is the channel through which the LLM updates the wiki: it is created from
+changes captured by the ChangeRequestBackend, reviewed by a human, and only then
+applied (written to disk). Diffs and the final content are saved in
 ``.llmwiki/change_requests/CR-.../meta.json``.
 """
 
@@ -29,7 +29,7 @@ def create_from_changes(
     job_id: int | None = None,
     source_path: str | None = None,
 ) -> ChangeRequest:
-    """Cria um CR a partir das mudanças capturadas. Status inicial: pending_review."""
+    """Creates a CR from captured changes. Initial status: pending_review."""
     repo = ChangeRequestRepo(conn)
     cr_id = repo.next_id()
     diff_dir = paths.change_requests / cr_id
@@ -113,13 +113,13 @@ def apply(
     *,
     git_commit: bool = False,
 ) -> ChangeRequest:
-    """Escreve as mudanças no disco, reindexa, registra no log e marca o CR aplicado."""
+    """Writes changes to disk, reindexes, records to log, and marks the CR as applied."""
     repo = ChangeRequestRepo(conn)
     row = repo.get(cr_id)
     if row is None:
-        raise ValueError(f"Change request não encontrado: {cr_id}")
+        raise ValueError(f"Change request not found: {cr_id}")
     if row["status"] != "pending_review":
-        raise ValueError(f"CR {cr_id} já está '{row['status']}'.")
+        raise ValueError(f"CR {cr_id} is already '{row['status']}'.")
 
     changes, source_path = _load_changes(row["diff_dir"])
     for change in changes:
@@ -151,19 +151,19 @@ def reject(cr_id: str, conn: sqlite3.Connection) -> None:
     repo = ChangeRequestRepo(conn)
     row = repo.get(cr_id)
     if row is None:
-        raise ValueError(f"Change request não encontrado: {cr_id}")
+        raise ValueError(f"Change request not found: {cr_id}")
     repo.set_status(cr_id, "rejected")
 
 
 def _append_log(paths: BrainPaths, cr_id: str, changes: list[FileChange]) -> None:
     paths.log_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"- {today()}: aplicado {cr_id} ({len(changes)} arquivos)"]
+    lines = [f"- {today()}: applied {cr_id} ({len(changes)} files)"]
     for c in changes:
         lines.append(f"    - {c.operation}: {c.path}")
     existing = (
         paths.log_path.read_text(encoding="utf-8")
         if paths.log_path.exists()
-        else "# Log da Wiki\n"
+        else "# Wiki Log\n"
     )
     body = existing.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
     paths.log_path.write_text(body, encoding="utf-8")
@@ -179,4 +179,5 @@ def _git_commit(paths: BrainPaths, cr_id: str) -> None:
             capture_output=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
         pass

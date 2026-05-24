@@ -1,12 +1,12 @@
-"""Parse e serialização de frontmatter YAML em arquivos Markdown.
+"""Parsing and serialization of YAML frontmatter in Markdown files.
 
-Formato suportado::
+Supported format::
 
     ---
     title: Foo
     tags: [a, b]
     ---
-    # corpo markdown
+    # markdown body
 """
 
 from __future__ import annotations
@@ -21,16 +21,16 @@ _FENCE = "---"
 
 
 def parse(text: str) -> tuple[dict[str, Any], str]:
-    """Separa frontmatter (dict) do corpo (str).
+    """Splits frontmatter (dict) from body (str).
 
-    Sem frontmatter → ``({}, text)``. Frontmatter presente mas YAML inválido →
+    No frontmatter → ``({}, text)``. Frontmatter present but YAML invalid →
     ``InvalidFrontmatterError``.
     """
     lines = text.split("\n")
     if not lines or lines[0].strip() != _FENCE:
         return {}, text
 
-    # Procura a cerca de fechamento.
+    # Look for the closing fence.
     closing = None
     for i in range(1, len(lines)):
         if lines[i].strip() == _FENCE:
@@ -47,17 +47,17 @@ def parse(text: str) -> tuple[dict[str, Any], str]:
     try:
         loaded = yaml.safe_load(raw_yaml) if raw_yaml.strip() else {}
     except yaml.YAMLError as exc:  # noqa: F841
-        raise InvalidFrontmatterError(f"Frontmatter YAML inválido: {exc}") from exc
+        raise InvalidFrontmatterError(f"Invalid YAML frontmatter: {exc}") from exc
 
     if loaded is None:
         loaded = {}
     if not isinstance(loaded, dict):
-        raise InvalidFrontmatterError("Frontmatter deve ser um mapeamento YAML.")
+        raise InvalidFrontmatterError("Frontmatter must be a YAML mapping.")
     return loaded, body
 
 
 def dump(meta: dict[str, Any], body: str) -> str:
-    """Serializa metadados + corpo de volta para texto com frontmatter."""
+    """Serializes metadata + body back to text with frontmatter."""
     if not meta:
         return body
     yaml_text = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()

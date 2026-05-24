@@ -88,7 +88,7 @@ class BrainPaths:
         return self.wiki / "log.md"
 
     def relative(self, target: Path) -> str:
-        """Caminho de ``target`` relativo à raiz do brain, com barras POSIX."""
+        """Path of ``target`` relative to the brain root, with POSIX slashes."""
         return target.resolve().relative_to(self.root.resolve()).as_posix()
 
 
@@ -118,10 +118,10 @@ def load_brain_for_info(brain: BrainInfo) -> BrainPaths:
 
 
 def resolve_input(user_input: str, brain_root: Path) -> Path:
-    """Resolve uma entrada de caminho do usuário.
+    """Resolve a user-input path.
 
-    Tenta o caminho absoluto/relativo ao cwd; se não existir, cai para
-    ``brain_root / user_input``. Garante que o resultado fica dentro do brain.
+    Tries the path absolute/relative to the cwd; if it does not exist, falls back to
+    ``brain_root / user_input``. Ensures the result remains within the brain.
     """
     direct = Path(user_input).resolve()
     chosen = direct if direct.exists() else (brain_root / user_input).resolve()
@@ -129,6 +129,6 @@ def resolve_input(user_input: str, brain_root: Path) -> Path:
     root = brain_root.resolve()
     if root not in (chosen, *chosen.parents):
         raise PathOutsideBrainError(
-            f"Caminho '{user_input}' resolve para fora do brain ({chosen})."
+            f"Path '{user_input}' resolves outside of the brain ({chosen})."
         )
     return chosen

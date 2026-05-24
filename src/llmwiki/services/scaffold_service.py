@@ -1,4 +1,4 @@
-"""Cria a estrutura de um novo brain (usado por ``llmwiki init``)."""
+"""Creates the structure of a new brain (used by ``llmwiki init``)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ _WIKI_SUBDIRS = (
     "research",
     "synthesis",
 )
-# (arquivo de template, destino relativo à raiz do brain)
+# (template file, destination relative to the brain root)
 _TEMPLATE_FILES = {
     "AGENTS.md": "schemas/AGENTS.md",
     "WIKI_PROTOCOL.md": "WIKI_PROTOCOL.md",
@@ -48,12 +48,12 @@ def _copy_template(name: str, dest: Path) -> None:
 
 
 def init_brain(root: Path, *, git: bool = True, force: bool = False) -> BrainPaths:
-    """Cria toda a árvore do brain. Levanta ``BrainExistsError`` se já existir."""
+    """Creates the entire brain tree. Raises ``BrainExistsError`` if it already exists."""
     root = root.resolve()
     paths = BrainPaths(root=root)
 
     if paths.dot.exists() and not force:
-        raise BrainExistsError(f"Já existe um brain em {root} (use --force).")
+        raise BrainExistsError(f"A brain already exists in {root} (use --force).")
 
     for sub in _RAW_SUBDIRS:
         (paths.raw / sub).mkdir(parents=True, exist_ok=True)
@@ -71,11 +71,11 @@ def init_brain(root: Path, *, git: bool = True, force: bool = False) -> BrainPat
 
     if not paths.index_path.exists():
         paths.index_path.write_text(
-            "# Índice da Wiki\n\n_Nenhuma página ainda._\n", encoding="utf-8"
+            "# Wiki Index\n\n_No pages yet._\n", encoding="utf-8"
         )
     if not paths.log_path.exists():
         paths.log_path.write_text(
-            f"# Log da Wiki\n\n- {today()}: brain inicializado.\n", encoding="utf-8"
+            f"# Wiki Log\n\n- {today()}: brain initialized.\n", encoding="utf-8"
         )
 
     # Seed the global config defaults (model, fts_limit…) before registering,
@@ -112,5 +112,5 @@ def _git_init(root: Path) -> None:
             encoding="utf-8",
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
-        # Git ausente não deve quebrar o init.
+        # Missing Git should not break init.
         pass

@@ -1,8 +1,7 @@
-"""Resolução de contexto (brain + config) para a API.
+"""Context resolution (brain + config) for the API.
 
-A resolução do brain ativo é centralizada em ``core.paths.load_active_brain``
-(registry compartilhada + self-heal), então API, CLI e MCP enxergam exatamente
-o mesmo brain selecionado.
+Active brain resolution is centralized in ``core.paths.load_active_brain``
+(shared registry + self-heal), so API, CLI, and MCP see exactly the same selected brain.
 """
 
 from __future__ import annotations

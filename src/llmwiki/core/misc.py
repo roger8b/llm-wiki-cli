@@ -1,4 +1,4 @@
-"""Pequenos utilitários puros: hashing e datas."""
+"""Small pure utilities: hashing and dates."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ from datetime import UTC, date, datetime
 
 
 def sha256(data: str | bytes) -> str:
-    """SHA-256 hex de uma string (utf-8) ou bytes."""
+    """SHA-256 hex of a string (utf-8) or bytes."""
     if isinstance(data, str):
         data = data.encode("utf-8")
     return hashlib.sha256(data).hexdigest()
 
 
 def today() -> str:
-    """Data atual em ISO (YYYY-MM-DD)."""
+    """Current date in ISO format (YYYY-MM-DD)."""
     return date.today().isoformat()
 
 
 def now_iso() -> str:
-    """Timestamp atual UTC em ISO8601."""
+    """Current UTC timestamp in ISO8601."""
     return datetime.now(UTC).isoformat()

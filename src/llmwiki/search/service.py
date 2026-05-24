@@ -1,8 +1,8 @@
-"""Search service: busca textual (FTS5) com hook opcional de busca semântica.
+"""Search service: text search (FTS5) with optional semantic search hook.
 
-A busca por keyword (FTS5) é real e sempre disponível. A camada semântica é um
-ponto de extensão: forneça um ``EmbeddingProvider`` + ``VectorStore`` para ativar
-busca híbrida (ex.: Qdrant). Sem provider, cai para FTS puro.
+Keyword search (FTS5) is real and always available. The semantic layer is an
+extension point: provide an ``EmbeddingProvider`` + ``VectorStore`` to enable
+hybrid search (e.g. Qdrant). Without a provider, it falls back to pure FTS.
 """
 
 from __future__ import annotations
@@ -47,10 +47,10 @@ def hybrid_search(
     embedder: EmbeddingProvider | None = None,
     store: VectorStore | None = None,
 ) -> list[SearchHit]:
-    """Combina keyword (FTS) e semântico (se embedder+store fornecidos).
+    """Combines keyword (FTS) and semantic (if embedder+store are provided).
 
-    Faz fusão por path mantendo o melhor score de cada origem. Sem camada
-    semântica configurada, retorna apenas os resultados de keyword.
+    Merges by path, keeping the best score from each source. Without a configured
+    semantic layer, returns keyword results only.
     """
     hits: dict[str, SearchHit] = {}
     for hit in keyword_search(conn, query, limit):

@@ -1,4 +1,4 @@
-"""Source Manager: registra fontes brutas em ``raw/`` (imutáveis)."""
+"""Source Manager: registers raw sources in ``raw/`` (immutable)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from ..core.paths import BrainPaths
 from ..db.repo import SourceRepo
 from .extractors import extract_text, source_type
 
-# Subpasta de raw/ por tipo de fonte.
+# Subfolder of raw/ by source type.
 _SUBDIR = {"md": "articles", "text": "articles", "pdf": "pdfs", "html": "articles"}
 
 
@@ -25,8 +25,8 @@ class AddResult:
 
 
 def add_source(file: Path, paths: BrainPaths, repo: SourceRepo) -> AddResult:
-    """Copia o arquivo para ``raw/<subdir>/`` (se ainda não estiver lá) e registra
-    a fonte no banco. Dedup por hash de conteúdo.
+    """Copies the file to ``raw/<subdir>/`` (if not already there) and registers
+    the source in the database. Dedup by content hash.
     """
     file = file.resolve()
     content = file.read_bytes()
