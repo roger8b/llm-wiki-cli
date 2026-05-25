@@ -57,10 +57,18 @@ export function WikiView() {
 
   const openPath = useCallback(async (path: string) => {
     setSelected(path)
+    setBacklinks([])
     try {
       setDetail(await api.getPage(path))
     } catch (e) {
       toast.error((e as Error).message)
+      return
+    }
+    try {
+      // Powers the "Linked from" panel and the delete dialog's impact preview.
+      setBacklinks((await api.backlinks(path)).backlinks)
+    } catch {
+      // backlinks are best-effort
     }
   }, [])
 
@@ -85,16 +93,10 @@ export function WikiView() {
     else toast(`No page titled "${title}" yet`)
   }
 
-  async function openDeleteDialog() {
+  function openDeleteDialog() {
     if (!detail) return
-    setBacklinks([])
+    // backlinks for the open page are already loaded by openPath.
     setDeleteOpen(true)
-    try {
-      const res = await api.backlinks(detail.path)
-      setBacklinks(res.backlinks)
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
   }
 
   async function confirmDelete(unlinkBacklinks: boolean) {
@@ -220,6 +222,27 @@ export function WikiView() {
               </Button>
             </div>
             <MarkdownReader content={detail.body} onWikiLink={onWikiLink} />
+
+            {backlinks.length > 0 && (
+              <div className="mt-6 rounded-lg border bg-card p-3">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Link2 className="size-3.5" /> Linked from
+                </div>
+                <ul className="space-y-0.5">
+                  {backlinks.map((b) => (
+                    <li key={b.path}>
+                      <button
+                        onClick={() => openPath(b.path)}
+                        className="text-left text-[13px] text-primary hover:underline"
+                        title={b.path}
+                      >
+                        {b.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
