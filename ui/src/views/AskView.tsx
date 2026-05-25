@@ -55,28 +55,25 @@ export function AskView() {
         toast.error("Backend did not queue the question")
         return
       }
-      while (true) {
-        const job = await api.getJob(jobId)
-        if (job.status === "done") {
-          if (job.result) {
-            const res = JSON.parse(job.result) as QueryResult
-            setResult(res)
-            setActiveId(res.history_id ?? null)
-            if (res.change_request_id) {
-              await refetchCrs()
-              toast.success(`Saved as ${res.change_request_id}`)
-            }
-            await loadHistory()
-          } else {
+      // Stream the job over SSE — the answer lands the instant the worker
+      // finishes (no 1s polling granularity).
+      await api.streamJob(jobId, {
+        onResult: async (result) => {
+          if (!result) {
             toast.error("No result returned from job")
+            return
           }
-          break
-        } else if (job.status === "error") {
-          toast.error(job.error || "Ask job failed")
-          break
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-      }
+          const res = JSON.parse(result) as QueryResult
+          setResult(res)
+          setActiveId(res.history_id ?? null)
+          if (res.change_request_id) {
+            await refetchCrs()
+            toast.success(`Saved as ${res.change_request_id}`)
+          }
+          await loadHistory()
+        },
+        onError: (msg) => toast.error(msg || "Ask job failed"),
+      })
     } catch (e) {
       toast.error((e as Error).message)
     } finally {

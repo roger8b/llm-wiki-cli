@@ -187,6 +187,64 @@ export const api = {
   // ── jobs ──
   listJobs: () => request<Job[]>("/jobs"),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),
+  /**
+   * Subscribe to a job's progress + final result over SSE (fetch + stream, so
+   * the X-Wiki-Token header is sent — EventSource can't). Resolves when the
+   * stream ends. `onResult` receives the raw job.result string (or null).
+   */
+  streamJob: async (
+    id: number,
+    h: {
+      onStatus?: (status: string) => void
+      onResult?: (result: string | null) => void
+      onError?: (message: string) => void
+    },
+  ): Promise<void> => {
+    let res: Response
+    try {
+      res = await fetch(`${BASE}/jobs/${id}/events`, { headers: authHeaders() })
+    } catch {
+      // network drop (e.g. WebView stale keep-alive) — one retry
+      res = await fetch(`${BASE}/jobs/${id}/events`, { headers: authHeaders() })
+    }
+    if (!res.ok || !res.body) {
+      h.onError?.(`stream failed (${res.status})`)
+      return
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ""
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let sep: number
+      while ((sep = buf.indexOf("\n\n")) !== -1) {
+        const frame = buf.slice(0, sep)
+        buf = buf.slice(sep + 2)
+        let event = "message"
+        let data = ""
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim()
+          else if (line.startsWith("data:")) data += line.slice(5).trim()
+        }
+        if (!data) continue
+        const payload = JSON.parse(data) as {
+          status?: string
+          result?: string | null
+          detail?: string
+        }
+        if (event === "status") h.onStatus?.(payload.status ?? "")
+        else if (event === "result") {
+          h.onResult?.(payload.result ?? null)
+          return
+        } else if (event === "error") {
+          h.onError?.(payload.detail ?? "Job failed.")
+          return
+        }
+      }
+    }
+  },
 
   // ── search / graph ──
   search: (q: string) =>

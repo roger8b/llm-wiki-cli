@@ -123,6 +123,46 @@ class TestPageDeletion:
         assert client.get("/api/change-requests").json() == []
 
 
+class TestJobEventsSSE:
+    def _job(self, brain: BrainPaths):
+        from llmwiki.db.connection import get_connection
+        from llmwiki.db.repo import JobRepo
+
+        conn = get_connection(brain.db_path)
+        return conn, JobRepo(conn)
+
+    def test_events_streams_done_result(self, client, brain: BrainPaths) -> None:
+        conn, repo = self._job(brain)
+        jid = repo.create("ask", '{"question":"q"}')
+        repo.complete(jid, result='{"answer":"hi"}')
+        conn.close()
+
+        r = client.get(f"/api/jobs/{jid}/events")
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers["content-type"]
+        assert "event: status" in r.text
+        assert "event: result" in r.text
+        assert '"answer\\":\\"hi' in r.text or "answer" in r.text
+        assert "event: end" in r.text
+
+    def test_events_streams_error(self, client, brain: BrainPaths) -> None:
+        conn, repo = self._job(brain)
+        jid = repo.create("ask", "{}")
+        repo.complete(jid, error="boom")
+        conn.close()
+
+        r = client.get(f"/api/jobs/{jid}/events")
+        assert r.status_code == 200
+        assert "event: error" in r.text
+        assert "boom" in r.text
+
+    def test_events_not_found(self, client) -> None:
+        r = client.get("/api/jobs/99999/events")
+        assert r.status_code == 200
+        assert "event: error" in r.text
+        assert "not found" in r.text.lower()
+
+
 class TestApiToken:
     def test_open_when_token_unset(self, client) -> None:
         # No WIKI_API_TOKEN -> API stays open (CLI / dev behaviour).
