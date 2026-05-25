@@ -13,8 +13,9 @@ from pathlib import Path
 
 from ..core import frontmatter, markdown
 from ..core.diff import make_diff
+from ..core.errors import PathOutsideBrainError
 from ..core.models import ChangeRequest, FileChange
-from ..core.paths import BrainPaths
+from ..core.paths import BrainPaths, resolve_input
 from .change_request_service import create_from_changes
 
 _SPECIAL = {"index.md", "log.md"}
@@ -89,10 +90,22 @@ def delete_page(
     *,
     unlink_backlinks: bool = False,
 ) -> ChangeRequest:
-    """Create a change request that deletes ``page_path`` (and optionally unlinks it)."""
-    target = paths.root / page_path
+    """Create a change request that deletes ``page_path`` (and optionally unlinks it).
+
+    ``page_path`` is resolved and confirmed to live inside the brain before any
+    change is staged — a traversal like ``../../x`` raises ``FileNotFoundError``
+    so the deletion can never escape the brain root.
+    """
+    try:
+        target = resolve_input(page_path, paths.root)
+    except PathOutsideBrainError as exc:
+        raise FileNotFoundError(page_path) from exc
     if not target.is_file():
         raise FileNotFoundError(page_path)
+
+    # Normalize to the brain-relative path so the staged FileChange (and the
+    # backlink scan) operate on a guaranteed-in-brain path.
+    page_path = paths.relative(target)
 
     old = target.read_text(encoding="utf-8")
     changes: list[FileChange] = [
