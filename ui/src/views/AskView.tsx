@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useCrStore } from "@/stores/crs"
+import { useAskStore } from "@/stores/ask"
 
 const SUGGESTED = [
   "What are the trade-offs of RAG vs fine-tuning?",
@@ -19,12 +20,17 @@ const SUGGESTED = [
 
 export function AskView() {
   const navigate = useNavigate()
-  const [question, setQuestion] = useState("")
+  // Question / answer / active history id live in a store so they survive
+  // navigating away from this tab and back.
+  const question = useAskStore((s) => s.question)
+  const setQuestion = useAskStore((s) => s.setQuestion)
+  const result = useAskStore((s) => s.result)
+  const setResult = useAskStore((s) => s.setResult)
+  const activeId = useAskStore((s) => s.activeId)
+  const setActiveId = useAskStore((s) => s.setActiveId)
   const [save, setSave] = useState(false)
   const [loading, setLoading] = useState(false)
   const [promoting, setPromoting] = useState(false)
-  const [result, setResult] = useState<QueryResult | null>(null)
-  const [activeId, setActiveId] = useState<number | null>(null)
   const [history, setHistory] = useState<AskHistoryItem[]>([])
   const refetchCrs = useCrStore((s) => s.fetch)
   const [params] = useSearchParams()
@@ -101,7 +107,7 @@ export function AskView() {
         answer: result.answer,
         history_id: activeId ?? undefined,
       })
-      setResult((r) => (r ? { ...r, change_request_id } : r))
+      setResult({ ...result, change_request_id })
       await Promise.all([refetchCrs(), loadHistory()])
       toast.success(`Promoted to wiki page — ${change_request_id}`)
     } catch (e) {
@@ -136,10 +142,12 @@ export function AskView() {
     }
   }
 
-  // honor ?q= from the command palette (ask once)
+  // honor ?q= from the command palette (ask once). Skip if we already have an
+  // answer for that question in the store (restored after navigating back), so
+  // returning to /ask?q=… doesn't re-run the query.
   useEffect(() => {
     const q = params.get("q")
-    if (q && !askRef.current) {
+    if (q && !askRef.current && !(result && question === q)) {
       askRef.current = true
       setQuestion(q)
       ask(q)
