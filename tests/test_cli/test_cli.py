@@ -23,6 +23,9 @@ class TestInit:
         assert (root / ".llmwiki").exists()  # marker dir still in brain
         assert (root / "wiki" / "index.md").exists()
         assert (root / "WIKI_PROTOCOL.md").exists()
+        # operating contract ships at the brain root for humans + agents
+        assert (root / "AGENTS.md").exists()
+        assert (root / "CLAUDE.md").exists()
 
     def test_refuses_existing_without_force(self, tmp_path: Path) -> None:
         runner.invoke(app, ["init", str(tmp_path / "b"), "--no-git"])
