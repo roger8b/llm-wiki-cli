@@ -109,6 +109,19 @@ class TestPageDeletion:
         r = client.post("/api/wiki/delete", json={"path": "wiki/nope.md"})
         assert r.status_code == 404
 
+    def test_delete_rejects_path_traversal(self, client, brain: BrainPaths) -> None:
+        # A traversal path must never stage a deletion outside the brain root.
+        secret = brain.root.parent / "secret.txt"
+        secret.write_text("TOPSECRET", encoding="utf-8")
+        r = client.post(
+            "/api/wiki/delete",
+            json={"path": "../secret.txt", "unlink_backlinks": False},
+        )
+        assert r.status_code == 404
+        assert secret.exists()  # not even staged for deletion
+        # no change request was created
+        assert client.get("/api/change-requests").json() == []
+
 
 class TestAskHistory:
     def test_history_empty(self, client) -> None:
