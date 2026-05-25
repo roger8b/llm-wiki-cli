@@ -26,6 +26,13 @@ def get_connection(db_path: Path, apply_schema: bool = True) -> sqlite3.Connecti
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets the background job worker and API requests read/write concurrently
+    # without the "database is locked" errors plain rollback-journal mode causes;
+    # busy_timeout makes a writer wait for the lock instead of failing instantly.
+    # journal_mode=WAL persists on the file; busy_timeout is per-connection.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA synchronous = NORMAL")
     if not apply_schema:
         return conn
     try:
