@@ -40,6 +40,43 @@ wiki apply <cr>              # write the CR to wiki/, reindex, log
 wiki ask "<question>"        # answer grounded in the wiki
 ```
 
+## Command surface
+
+Brains & sources:
+
+- `wiki brain create <path>` — scaffold + register + activate a brain
+- `wiki brain list | current | use <ref> | add <path> | rm <ref>` — manage brains
+- `wiki source add <file>` / `wiki source list` — manage raw sources in `raw/`
+
+Knowledge in / out (all writes go through a CR):
+
+- `wiki ingest <file>` — LLM reads a source and proposes a CR
+- `wiki ask "<question>"` — answer grounded in the wiki (read-only)
+- `wiki maintain` — lint + propose fixes as a CR
+- `wiki page create <title>` / `wiki page open <path>` — page management
+
+Review & apply CRs:
+
+- `wiki review [<cr>]` — list pending CRs / show a diff
+- `wiki apply <cr>` — write the CR to `wiki/`, reindex, log
+- `wiki reject <cr>` — discard a CR (diffs kept for auditing)
+- `wiki jobs` — list background jobs (ingest / lint / query)
+
+Index, search, health:
+
+- `wiki index` — rebuild metadata and regenerate `wiki/index.md`
+- `wiki search "<term>"` — keyword (FTS5) search over pages
+- `wiki lint [--all]` — audit health (structural; `--all` adds semantic via LLM)
+- `wiki log` — print `wiki/log.md`
+
+Interfaces:
+
+- `wiki serve` — start the API + desktop UI backend
+- `wiki mcp` — start the MCP server (exposes the brain to external agents)
+
+> Run `wiki <command> --help` for options. The CLI, the desktop app, and the MCP
+> server all operate the **same** brain through these flows.
+
 ## Page types & frontmatter
 
 Types: `concept` | `entity` | `source_summary` | `synthesis` | `decision` |
