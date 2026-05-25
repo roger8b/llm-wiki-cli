@@ -21,6 +21,14 @@ echo "==> 2. Compiling Python sidecar backend binary..."
 PYTHON=.venv/bin/python ./scripts/build_sidecar.sh
 
 echo "==> 3. Building Tauri macOS application..."
+# bundle_dmg.sh fails if a volume named "llm-wiki" from a previous DMG is still
+# mounted — detach any stragglers and remove leftover temp DMGs first.
+while [ -d "/Volumes/llm-wiki" ]; do
+  echo "==> Detaching stale /Volumes/llm-wiki"
+  hdiutil detach "/Volumes/llm-wiki" -force >/dev/null 2>&1 || break
+done
+rm -f ui/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
+
 cd ui
 npx tauri build
 

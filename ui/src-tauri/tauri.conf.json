@@ -22,6 +22,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns"
     ],
-    "resources": ["binaries/wiki-backend/**/*"]
+    "resources": ["binaries/wiki-backend/**/*"],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist"
+    }
   }
 }
