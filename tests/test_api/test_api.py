@@ -123,6 +123,30 @@ class TestPageDeletion:
         assert client.get("/api/change-requests").json() == []
 
 
+class TestApiToken:
+    def test_open_when_token_unset(self, client) -> None:
+        # No WIKI_API_TOKEN -> API stays open (CLI / dev behaviour).
+        assert client.get("/api/change-requests").status_code == 200
+
+    def test_requires_token_when_set(self, client, monkeypatch) -> None:
+        monkeypatch.setenv("WIKI_API_TOKEN", "s3cret")
+        # protected route without the header -> 401
+        assert client.get("/api/change-requests").status_code == 401
+        # with the right header -> ok
+        ok = client.get("/api/change-requests", headers={"X-Wiki-Token": "s3cret"})
+        assert ok.status_code == 200
+        # wrong token -> 401
+        assert (
+            client.get("/api/change-requests", headers={"X-Wiki-Token": "nope"}).status_code
+            == 401
+        )
+
+    def test_health_exempt_from_token(self, client, monkeypatch) -> None:
+        # The desktop shell's readiness probe must work without the token.
+        monkeypatch.setenv("WIKI_API_TOKEN", "s3cret")
+        assert client.get("/api/health").status_code == 200
+
+
 class TestAskHistory:
     def test_history_empty(self, client) -> None:
         r = client.get("/api/ask/history")

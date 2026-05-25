@@ -16,13 +16,14 @@ Router split:
 
 from __future__ import annotations
 
+import os
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from contextlib import asynccontextmanager
@@ -61,6 +62,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    """Gate /api/* on a per-session token when WIKI_API_TOKEN is set.
+
+    The desktop shell generates a random token, passes it to this sidecar via the
+    env var, and injects it into the WebView; the SPA echoes it as X-Wiki-Token.
+    This blocks other local processes and browser-based (CSRF / DNS-rebinding)
+    access to the brain. When the env var is unset (plain `wiki serve`, dev,
+    tests) the API stays open — auth is opt-in.
+
+    Exemptions: non-/api routes (the SPA + assets, loaded before JS runs),
+    /api/health (the shell's readiness probe), and CORS preflight (OPTIONS).
+    """
+    token = os.environ.get("WIKI_API_TOKEN")
+    if token:
+        path = request.url.path
+        if (
+            path.startswith("/api/")
+            and path != "/api/health"
+            and request.method != "OPTIONS"
+            and request.headers.get("x-wiki-token") != token
+        ):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
 
 # All JSON endpoints live under /api to avoid collisions with SPA routes.
 api = APIRouter()

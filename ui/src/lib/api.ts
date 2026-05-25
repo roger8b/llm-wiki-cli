@@ -29,6 +29,14 @@ import type {
 // Dev: Vite proxies /api → http://localhost:8000. Prod: same-origin FastAPI.
 const BASE = "/api"
 
+// The desktop shell injects a per-session token (window.__WIKI_TOKEN__) that the
+// backend requires on /api/* when WIKI_API_TOKEN is set. In dev / browser there
+// is no token and the backend leaves the API open, so this is a no-op there.
+function authHeaders(): Record<string, string> {
+  const token = (globalThis as { __WIKI_TOKEN__?: string }).__WIKI_TOKEN__
+  return token ? { "X-Wiki-Token": token } : {}
+}
+
 class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -40,8 +48,12 @@ class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const opts: RequestInit = {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...init?.headers,
+    },
   }
   // WKWebView (the desktop WebView) reuses keep-alive connections; when the
   // backend has closed an idle one, the reused socket is reset and fetch rejects

@@ -109,6 +109,27 @@ fn default_brain() -> String {
     format!("{home}/.wiki/brains/desktop")
 }
 
+/// A random per-session API token. 32 bytes of OS entropy, hex-encoded.
+///
+/// Passed to the backend via env (WIKI_API_TOKEN) and injected into the WebView
+/// so the SPA can authenticate; this keeps other local processes and any
+/// browser page from driving the local API.
+fn gen_token() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 32];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(&mut buf).is_ok() {
+            return buf.iter().map(|b| format!("{b:02x}")).collect();
+        }
+    }
+    // Degraded fallback if /dev/urandom is unavailable.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}{:x}", std::process::id())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -117,12 +138,14 @@ pub fn run() {
         .setup(|app| {
             let port = free_port();
             let brain = default_brain();
+            let token = gen_token();
             eprintln!("[llm-wiki] Using port={port}, brain={brain}");
 
             // Reap orphaned backends from a prior crash/force-quit before spawning.
             kill_stray_backends(&brain);
 
-            // Spawn the FastAPI backend (PyInstaller onedir exe).
+            // Spawn the FastAPI backend (PyInstaller onedir exe). The token goes
+            // via env (not argv) so it doesn't leak in `ps`.
             let exe = resolve_backend_exe(&app.handle());
             eprintln!("[llm-wiki] backend exe: {}", exe.display());
             let t0 = Instant::now();
@@ -136,6 +159,7 @@ pub fn run() {
                     "--brain",
                     &brain,
                 ])
+                .env("WIKI_API_TOKEN", &token)
                 .spawn()
                 .expect("failed to start backend");
             let child_pid = child.id();
@@ -149,6 +173,7 @@ pub fn run() {
             // Wait for readiness, then open the window pointing at the backend.
             let url = format!("http://127.0.0.1:{port}");
             let handle = app.handle().clone();
+            let win_token = token.clone();
             let t1 = Instant::now();
             std::thread::spawn(move || {
                 let ready = wait_for_http_ready(port, Duration::from_secs(60));
@@ -171,6 +196,9 @@ pub fn run() {
                 .title("llm-wiki")
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(900.0, 600.0)
+                // Expose the per-session token to the SPA before any page script
+                // runs. {win_token:?} emits a safely-quoted JS string literal.
+                .initialization_script(&format!("window.__WIKI_TOKEN__ = {win_token:?};"))
                 .build()
                 .expect("failed to build window");
                 eprintln!(
