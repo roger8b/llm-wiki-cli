@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import time
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from ..deps import get_paths, open_conn
 
 router = APIRouter()
+
+# How often the SSE stream re-reads the job row, and when it gives up.
+_POLL_SECONDS = 0.25
+_STREAM_TIMEOUT_SECONDS = 600
 
 
 def _ctx() -> Any:
@@ -16,6 +24,10 @@ def _ctx() -> Any:
         return get_paths()
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 @router.get("")
@@ -46,3 +58,55 @@ def get_job(job_id: int) -> dict[str, Any]:
         return dict(job)
     finally:
         conn.close()
+
+
+def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
+    """Server-Sent Events for a job's lifecycle.
+
+    Pushes ``status`` on every state change and a terminal ``result``/``error``
+    the instant the worker finishes — replacing the client's 1s polling, so the
+    answer (or job outcome) lands immediately. Runs in a worker thread (sync
+    generator), so the ``time.sleep`` poll never blocks the event loop.
+    """
+    from ....db.repo import JobRepo
+
+    conn = open_conn(paths)
+    try:
+        repo = JobRepo(conn)
+        if repo.get(job_id) is None:
+            yield _sse("error", {"detail": "Job not found."})
+            return
+
+        last_status: str | None = None
+        deadline = time.monotonic() + _STREAM_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            row = repo.get(job_id)
+            if row is None:
+                yield _sse("error", {"detail": "Job disappeared."})
+                return
+            status = row["status"]
+            if status != last_status:
+                last_status = status
+                yield _sse("status", {"status": status})
+            if status == "done":
+                yield _sse("result", {"result": row["result"]})
+                yield _sse("end", {})
+                return
+            if status == "error":
+                yield _sse("error", {"detail": row["error"] or "Job failed."})
+                return
+            time.sleep(_POLL_SECONDS)
+        yield _sse("error", {"detail": "Stream timed out."})
+    finally:
+        conn.close()
+
+
+@router.get("/{job_id}/events")
+def job_events(job_id: int) -> StreamingResponse:
+    """Stream a job's progress + final result over SSE."""
+    paths = _ctx()
+    return StreamingResponse(
+        _job_event_stream(paths, job_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
