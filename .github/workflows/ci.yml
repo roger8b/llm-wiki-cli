@@ -106,3 +106,45 @@ jobs:
           path: ui/src-tauri/target/release/bundle/
           if-no-files-found: error
 
+  frontend-unit:
+    name: Frontend unit tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Node dependencies
+        run: npm --prefix ui ci
+      - name: Vitest
+        run: npm --prefix ui test
+
+  webkit-e2e:
+    name: WebKit smoke tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Node dependencies
+        run: npm --prefix ui ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python package (serves the SPA)
+        run: pip install -e ".[agent,ollama,api,mcp]"
+      - name: Build SPA into the package
+        run: npm --prefix ui run build
+      - name: Install Playwright WebKit
+        working-directory: ui
+        run: npx playwright install --with-deps webkit
+      - name: Run WebKit smoke tests
+        working-directory: ui
+        run: npm run test:e2e
+
