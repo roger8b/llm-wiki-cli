@@ -25,6 +25,9 @@ wiki apply <cr>          # the CR is written to wiki/, reindexed, and logged
 To answer questions, use `wiki ask "<question>"` — it is grounded in the wiki
 and stays read-only.
 
+> A brain is created with `wiki brain create <path>`. `wiki init` is a deprecated
+> alias kept for compatibility — prefer `wiki brain create`.
+
 ## Stack (for contributors to the tool itself)
 
 - Python 3.12 backend: Typer CLI + FastAPI API + MCP server (`src/llmwiki/`).

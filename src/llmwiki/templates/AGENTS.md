@@ -77,6 +77,13 @@ Interfaces:
 > Run `wiki <command> --help` for options. The CLI, the desktop app, and the MCP
 > server all operate the **same** brain through these flows.
 
+### Compatibility: `wiki init`
+
+`wiki init` is a **deprecated alias** of `wiki brain create`, kept only so older
+scripts keep working — it prints a deprecation notice and forwards to
+`wiki brain create`. **Use `wiki brain create <path>` as the canonical entry
+point.** Do not build new flows or docs around `wiki init`.
+
 ## Page types & frontmatter
 
 Types: `concept` | `entity` | `source_summary` | `synthesis` | `decision` |
