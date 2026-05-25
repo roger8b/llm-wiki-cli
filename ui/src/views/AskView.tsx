@@ -28,8 +28,11 @@ export function AskView() {
   const setResult = useAskStore((s) => s.setResult)
   const activeId = useAskStore((s) => s.activeId)
   const setActiveId = useAskStore((s) => s.setActiveId)
+  // loading lives in the store so the in-flight query's loading UI survives
+  // navigating away and back (the async ask() keeps running and updates it).
+  const loading = useAskStore((s) => s.loading)
+  const setLoading = useAskStore((s) => s.setLoading)
   const [save, setSave] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [promoting, setPromoting] = useState(false)
   const [history, setHistory] = useState<AskHistoryItem[]>([])
   const refetchCrs = useCrStore((s) => s.fetch)
