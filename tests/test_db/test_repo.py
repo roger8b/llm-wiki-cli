@@ -17,6 +17,17 @@ def conn(tmp_path: Path):
     c.close()
 
 
+class TestConnectionPragmas:
+    def test_wal_and_busy_timeout(self, tmp_path: Path) -> None:
+        c = get_connection(tmp_path / "db.sqlite")
+        try:
+            assert c.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+            assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+            assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        finally:
+            c.close()
+
+
 class TestSourceRepo:
     def test_upsert_and_get_by_path(self, conn) -> None:
         repo = SourceRepo(conn)
