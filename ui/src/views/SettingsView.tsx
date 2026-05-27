@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
+  AgentInfo,
   CliStatus,
   ModelTestResult,
   OllamaStatus,
@@ -21,6 +22,7 @@ import type {
   SkillsStatus,
 } from "@/types"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { BrainSettings } from "@/components/settings/BrainSettings"
@@ -91,6 +93,10 @@ export function SettingsView() {
   // ── skills ──
   const [skills, setSkills] = useState<SkillsStatus | null>(null)
   const [skillsBusy, setSkillsBusy] = useState(false)
+  const [skillAgents, setSkillAgents] = useState<AgentInfo[]>([])
+  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set())
+  const [skillScope, setSkillScope] = useState<"local" | "global" | "both">("global")
+  const [skillMethod, setSkillMethod] = useState<"symlink" | "copy">("symlink")
 
   function snap(s: {
     provider: Provider
@@ -148,6 +154,13 @@ export function SettingsView() {
     load()
     api.cliStatus().then(setCli).catch(() => {})
     api.skillsStatus().then(setSkills).catch(() => {})
+    api
+      .skillsAgents()
+      .then((r) => {
+        setSkillAgents(r.agents)
+        setSelectedAgents(new Set(r.agents.filter((a) => a.detected).map((a) => a.name)))
+      })
+      .catch(() => {})
   }, [])
 
   function switchProvider(p: Provider) {
@@ -256,7 +269,11 @@ export function SettingsView() {
   async function installSkills() {
     setSkillsBusy(true)
     try {
-      await api.installSkills({ scope: "global", agent: "claude" })
+      await api.installSkills({
+        agents: [...selectedAgents],
+        scope: skillScope,
+        method: skillMethod,
+      })
       setSkills(await api.skillsStatus())
       toast.success("Skills installed")
     } catch (e) {
@@ -554,42 +571,80 @@ export function SettingsView() {
             <Terminal className="size-3.5" /> Agent skills
           </div>
           <p className="mb-3 text-[12px] text-muted-foreground">
-            Install skills that teach your AI agents to use this wiki (global,
-            <code> ~/.claude/skills</code>).
+            Install skills (from the central store <code>~/.wiki/skills</code>, via
+            symlink) so your AI agents can use this wiki. Pick agents, scope, and method.
           </p>
           {skills && (
             <div className="space-y-3">
-              {(() => {
-                const installedNames = new Set(
-                  skills.installs.flatMap((i) =>
-                    i.skills_status.filter((s) => s.present).map((s) => s.name),
-                  ),
-                )
-                return (
-                  <ul className="space-y-0.5 text-[13px]">
-                    {skills.available.map((name) => (
-                      <li key={name} className="flex items-center gap-2">
-                        {installedNames.has(name) ? (
-                          <Check className="size-4 text-apply" />
-                        ) : (
-                          <X className="size-4 text-muted-foreground" />
-                        )}
-                        <code>{name}</code>
-                      </li>
-                    ))}
-                  </ul>
-                )
-              })()}
+              {/* agents */}
+              <div className="space-y-1">
+                {skillAgents.map((a) => (
+                  <label key={a.name} className="flex items-center gap-2 text-[13px]">
+                    <Checkbox
+                      checked={selectedAgents.has(a.name)}
+                      onCheckedChange={(v) =>
+                        setSelectedAgents((prev) => {
+                          const n = new Set(prev)
+                          if (v) n.add(a.name)
+                          else n.delete(a.name)
+                          return n
+                        })
+                      }
+                    />
+                    {a.display}
+                    {a.detected && (
+                      <span className="text-[11px] text-apply">(detected)</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+
+              {/* scope + method toggles */}
+              <div className="flex flex-wrap gap-4 text-[12px]">
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Scope:</span>
+                  {(["local", "global", "both"] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSkillScope(s)}
+                      className={cn(
+                        "rounded px-2 py-0.5",
+                        skillScope === s ? "bg-primary text-primary-foreground" : "hover:bg-accent",
+                      )}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground">Method:</span>
+                  {(["symlink", "copy"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setSkillMethod(m)}
+                      className={cn(
+                        "rounded px-2 py-0.5",
+                        skillMethod === m ? "bg-primary text-primary-foreground" : "hover:bg-accent",
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {skills.installs.length > 0 && (
                 <p className="text-[11px] text-muted-foreground">
-                  Installed in {skills.installs.length} location(s) · store {skills.store}
+                  Installed in {skills.installs.length} location(s) · {skills.available.length} skills
+                  in store
                 </p>
               )}
+
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   onClick={installSkills}
-                  disabled={skillsBusy}
+                  disabled={skillsBusy || selectedAgents.size === 0}
                   className="gap-1.5"
                 >
                   {skillsBusy && <Loader2 className="size-4 animate-spin" />}
@@ -602,7 +657,7 @@ export function SettingsView() {
                     onClick={removeSkills}
                     disabled={skillsBusy}
                   >
-                    Remove
+                    Remove all
                   </Button>
                 )}
               </div>
