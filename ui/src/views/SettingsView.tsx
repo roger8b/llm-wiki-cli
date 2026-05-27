@@ -256,7 +256,7 @@ export function SettingsView() {
   async function installSkills() {
     setSkillsBusy(true)
     try {
-      await api.installSkills()
+      await api.installSkills({ scope: "global", agent: "claude" })
       setSkills(await api.skillsStatus())
       toast.success("Skills installed")
     } catch (e) {
@@ -268,7 +268,7 @@ export function SettingsView() {
   async function removeSkills() {
     setSkillsBusy(true)
     try {
-      await api.removeSkills()
+      await api.removeSkills({})
       setSkills(await api.skillsStatus())
       toast("Skills removed")
     } catch (e) {
@@ -559,26 +559,32 @@ export function SettingsView() {
           </p>
           {skills && (
             <div className="space-y-3">
-              <ul className="space-y-0.5 text-[13px]">
-                {skills.available.map((name) => {
-                  const entry = skills.skills.find((s) => s.name === name)
-                  return (
-                    <li key={name} className="flex items-center gap-2">
-                      {entry?.present ? (
-                        <Check className="size-4 text-apply" />
-                      ) : (
-                        <X className="size-4 text-muted-foreground" />
-                      )}
-                      <code>{name}</code>
-                      {entry?.present && (
-                        <span className="text-[11px] text-muted-foreground">
-                          v{entry.version}
-                        </span>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
+              {(() => {
+                const installedNames = new Set(
+                  skills.installs.flatMap((i) =>
+                    i.skills_status.filter((s) => s.present).map((s) => s.name),
+                  ),
+                )
+                return (
+                  <ul className="space-y-0.5 text-[13px]">
+                    {skills.available.map((name) => (
+                      <li key={name} className="flex items-center gap-2">
+                        {installedNames.has(name) ? (
+                          <Check className="size-4 text-apply" />
+                        ) : (
+                          <X className="size-4 text-muted-foreground" />
+                        )}
+                        <code>{name}</code>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              })()}
+              {skills.installs.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Installed in {skills.installs.length} location(s) · store {skills.store}
+                </p>
+              )}
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -587,9 +593,9 @@ export function SettingsView() {
                   className="gap-1.5"
                 >
                   {skillsBusy && <Loader2 className="size-4 animate-spin" />}
-                  {skills.skills.length > 0 ? "Reinstall / update" : "Install"}
+                  {skills.installs.length > 0 ? "Reinstall / update" : "Install"}
                 </Button>
-                {skills.skills.length > 0 && (
+                {skills.installs.length > 0 && (
                   <Button
                     size="sm"
                     variant="outline"

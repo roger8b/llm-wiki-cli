@@ -16,6 +16,7 @@ import type {
   ProviderName,
   ProviderPatch,
   ProviderStatus,
+  AgentInfo,
   ProvidersMap,
   RegisteredBrain,
   SearchResult,
@@ -360,22 +361,28 @@ export const api = {
   cliUninstall: () => request<CliStatus>("/cli", { method: "DELETE" }),
 
   // ── agent skills ──
-  skillsStatus: (scope = "global") =>
-    request<SkillsStatus>(`/skills?scope=${scope}`),
-  installSkills: (scope = "global") =>
-    request<{ installed: string[]; target: string }>("/skills/install", {
+  skillsStatus: () => request<SkillsStatus>("/skills"),
+  skillsAgents: () => request<{ agents: AgentInfo[] }>("/skills/agents"),
+  installSkills: (opts: {
+    agents?: string[]
+    agent?: string
+    scope?: string
+    method?: string
+    force?: boolean
+  }) =>
+    request<{ store: string; results: unknown[] }>("/skills/install", {
       method: "POST",
-      body: JSON.stringify({ scope }),
+      body: JSON.stringify(opts),
     }),
-  updateSkills: (scope = "global") =>
-    request<{ installed: string[]; target: string }>("/skills/update", {
+  updateSkills: () =>
+    request<{ store: string; refreshed: string[] }>("/skills/update", {
       method: "POST",
-      body: JSON.stringify({ scope }),
+      body: JSON.stringify({}),
     }),
-  removeSkills: (scope = "global") =>
+  removeSkills: (opts: { name?: string; agent?: string; scope?: string } = {}) =>
     request<{ removed: string[] }>("/skills/remove", {
       method: "POST",
-      body: JSON.stringify({ scope }),
+      body: JSON.stringify(opts),
     }),
 }
 

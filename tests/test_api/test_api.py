@@ -326,32 +326,38 @@ class TestBrainsEndpoint:
 
 
 class TestSkills:
-    def test_install_list_doctor_remove(self, client, tmp_path, monkeypatch) -> None:
+    def test_install_status_doctor_remove(self, client, tmp_path, monkeypatch) -> None:
         monkeypatch.chdir(tmp_path)  # scope=local resolves to cwd
 
-        # available before install
-        r = client.get("/api/skills", params={"scope": "local"})
+        # available before install; no installs yet
+        r = client.get("/api/skills")
         assert r.status_code == 200
         assert "wiki-query" in r.json()["available"]
-        assert r.json()["skills"] == []
+        assert r.json()["installs"] == []
 
-        # install
-        r = client.post("/api/skills/install", json={"scope": "local"})
+        # install (local → tmp cwd)
+        r = client.post("/api/skills/install", json={"scope": "local", "agent": "claude"})
         assert r.status_code == 200
-        assert set(r.json()["installed"]) == set(client.get("/api/skills", params={"scope": "local"}).json()["available"])
+        assert len(r.json()["results"]) == 1
 
-        # listed + doctor ok
-        listed = client.get("/api/skills", params={"scope": "local"}).json()
-        assert {s["name"] for s in listed["skills"]} == set(listed["available"])
-        assert client.get("/api/skills/doctor", params={"scope": "local"}).json()["ok"] is True
+        # status reflects the install; doctor ok
+        installs = client.get("/api/skills").json()["installs"]
+        assert len(installs) == 1
+        assert all(s["present"] for s in installs[0]["skills_status"])
+        assert client.get("/api/skills/doctor").json()["ok"] is True
 
         # remove all
-        r = client.post("/api/skills/remove", json={"scope": "local"})
+        assert client.post("/api/skills/remove", json={}).status_code == 200
+        assert client.get("/api/skills").json()["installs"] == []
+
+    def test_agents_endpoint(self, client) -> None:
+        r = client.get("/api/skills/agents")
         assert r.status_code == 200
-        assert client.get("/api/skills", params={"scope": "local"}).json()["skills"] == []
+        names = {a["name"] for a in r.json()["agents"]}
+        assert {"pi", "claude-code", "gemini-cli"} <= names
 
     def test_bad_scope_400(self, client) -> None:
-        assert client.get("/api/skills", params={"scope": "bogus"}).status_code == 400
+        assert client.post("/api/skills/install", json={"scope": "bogus"}).status_code == 400
 
 
 class TestHealth:
