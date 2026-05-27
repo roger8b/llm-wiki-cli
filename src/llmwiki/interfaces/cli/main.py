@@ -24,8 +24,8 @@ from .commands import (
     apply,
     ask,
     brain_app,
-    ingest,
     index,
+    ingest,
     jobs,
     lint,
     log,
@@ -36,6 +36,7 @@ from .commands import (
     review,
     search,
     serve,
+    skills_app,
     source_app,
 )
 from .commands.brain import _create_brain_impl
@@ -50,6 +51,7 @@ app = typer.Typer(
 app.add_typer(source_app, name="source")
 app.add_typer(page_app, name="page")
 app.add_typer(brain_app, name="brain")
+app.add_typer(skills_app, name="skills")
 
 
 @app.command()
