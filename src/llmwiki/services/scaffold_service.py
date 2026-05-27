@@ -23,11 +23,8 @@ _WIKI_SUBDIRS = (
     "synthesis",
 )
 # (template file, destination relative to the brain root)
-# AGENTS.md and CLAUDE.md sit at the brain root so humans and agents (incl.
-# Claude Code) auto-discover the operating contract on entry.
 _TEMPLATE_FILES = {
-    "AGENTS.md": "AGENTS.md",
-    "CLAUDE.md": "CLAUDE.md",
+    "AGENTS.md": "schemas/AGENTS.md",
     "WIKI_PROTOCOL.md": "WIKI_PROTOCOL.md",
     "wiki_schema.md": "schemas/wiki_schema.md",
 }
