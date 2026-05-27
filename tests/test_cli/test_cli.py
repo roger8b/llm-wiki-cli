@@ -9,11 +9,11 @@ from llmwiki.interfaces.cli.main import app
 runner = CliRunner()
 
 
-class TestInit:
+class TestBrainCreate:
     def test_creates_tree(self, tmp_path: Path) -> None:
         from llmwiki.core import brains as brains_registry
 
-        result = runner.invoke(app, ["init", str(tmp_path / "b"), "--no-git"])
+        result = runner.invoke(app, ["brain", "create", str(tmp_path / "b"), "--no-git"])
         assert result.exit_code == 0
         root = tmp_path / "b"
         # Brain is registered; its DB lives under ~/.wiki/brains/<uuid>/
@@ -25,15 +25,45 @@ class TestInit:
         assert (root / "WIKI_PROTOCOL.md").exists()
 
     def test_refuses_existing_without_force(self, tmp_path: Path) -> None:
-        runner.invoke(app, ["init", str(tmp_path / "b"), "--no-git"])
-        result = runner.invoke(app, ["init", str(tmp_path / "b"), "--no-git"])
+        runner.invoke(app, ["brain", "create", str(tmp_path / "b"), "--no-git"])
+        result = runner.invoke(app, ["brain", "create", str(tmp_path / "b"), "--no-git"])
         assert result.exit_code == 1
+
+
+class TestInitWorkspaceRules:
+    def test_init_injects_into_both_files_idempotently(self, tmp_path: Path, monkeypatch) -> None:
+        brain = tmp_path / "b"
+        runner.invoke(app, ["brain", "create", str(brain), "--no-git"])
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        monkeypatch.chdir(ws)
+
+        r = runner.invoke(app, ["init"])
+        assert r.exit_code == 0
+        for fn in ("AGENTS.md", "CLAUDE.md"):
+            text = (ws / fn).read_text()
+            assert "<!-- llm-wiki:start -->" in text
+            assert "wiki ask" in text
+
+        runner.invoke(app, ["init"])  # idempotent
+        assert (ws / "AGENTS.md").read_text().count("<!-- llm-wiki:start -->") == 1
+
+    def test_init_remove(self, tmp_path: Path, monkeypatch) -> None:
+        runner.invoke(app, ["brain", "create", str(tmp_path / "b"), "--no-git"])
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        monkeypatch.chdir(ws)
+        runner.invoke(app, ["init", "--claude"])
+        assert (ws / "CLAUDE.md").exists()
+        r = runner.invoke(app, ["init", "--remove", "--claude"])
+        assert r.exit_code == 0
+        assert "<!-- llm-wiki:start -->" not in (ws / "CLAUDE.md").read_text()
 
 
 class TestEndToEnd:
     def test_flow(self, tmp_path: Path, monkeypatch) -> None:
         root = tmp_path / "b"
-        runner.invoke(app, ["init", str(root), "--no-git"])
+        runner.invoke(app, ["brain", "create", str(root), "--no-git"])
         monkeypatch.chdir(root)
 
         assert runner.invoke(app, ["page", "create", "RAG", "--type", "concept"]).exit_code == 0
@@ -51,7 +81,7 @@ class TestEndToEnd:
 
     def test_invalid_page_type_exits_1(self, tmp_path: Path, monkeypatch) -> None:
         root = tmp_path / "b"
-        runner.invoke(app, ["init", str(root), "--no-git"])
+        runner.invoke(app, ["brain", "create", str(root), "--no-git"])
         monkeypatch.chdir(root)
         result = runner.invoke(app, ["page", "create", "X", "--type", "bogus"])
         assert result.exit_code == 1

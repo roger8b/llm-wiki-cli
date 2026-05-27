@@ -39,7 +39,6 @@ from .commands import (
     skills_app,
     source_app,
 )
-from .commands.brain import _create_brain_impl
 
 app = typer.Typer(
     help="wiki — local-first knowledge base maintained by an LLM.",
@@ -62,14 +61,51 @@ def version() -> None:
 
 @app.command()
 def init(
-    path: str = typer.Argument("brain", help="Directory of the brain to create."),
-    name: str | None = typer.Option(None, help="Name (default: folder name)."),
-    no_git: bool = typer.Option(False, "--no-git", help="Do not run git init."),
-    force: bool = typer.Option(False, "--force", help="Overwrite an existing brain."),
+    brain: str | None = typer.Option(
+        None, "--brain", help="Brain the rules point to (default: the active brain)."
+    ),
+    agents: bool = typer.Option(False, "--agents", help="Only write AGENTS.md."),
+    claude: bool = typer.Option(False, "--claude", help="Only write CLAUDE.md."),
+    remove: bool = typer.Option(
+        False, "--remove", help="Remove the managed rules block instead of writing it."
+    ),
 ) -> None:
-    """[DEPRECATED] Alias of 'wiki brain create'. Use 'wiki brain create'."""
-    typer.echo("[yellow]'wiki init' is deprecated — use 'wiki brain create'.[/yellow]")
-    _create_brain_impl(path, name, git=not no_git, force=force)
+    """Write wiki-usage rules into this workspace's AGENTS.md / CLAUDE.md.
+
+    Run inside a workspace (a code project). Teaches the agent to use the brain
+    as a knowledge source (`wiki ask`) and to record durable knowledge
+    (`wiki ingest`/CR). To CREATE a brain, use `wiki brain create`.
+    """
+    from pathlib import Path
+
+    from ...core import brains as reg
+    from ...services import rules_service
+
+    cwd = Path.cwd()
+    targets = []
+    if agents:
+        targets.append("AGENTS.md")
+    if claude:
+        targets.append("CLAUDE.md")
+    if not targets:
+        targets = list(rules_service.RULE_FILES)
+
+    if remove:
+        for fn in targets:
+            removed = rules_service.remove_block(cwd / fn)
+            typer.echo(f"{'removed block from' if removed else 'no block in'} {fn}")
+        return
+
+    active = reg.get_active_brain()
+    brain_name = brain or (active.name if active else "your brain")
+    if not active and not brain:
+        typer.echo(
+            "[yellow]No active brain — create one with 'wiki brain create'.[/yellow]"
+        )
+    block = rules_service.render_block(brain_name)
+    for fn in targets:
+        action = rules_service.upsert_block(cwd / fn, block)
+        typer.echo(f"[green]{action}[/green] {fn}")
 
 
 # Register top-level commands.
