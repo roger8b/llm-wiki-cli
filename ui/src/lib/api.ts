@@ -19,6 +19,7 @@ import type {
   ProvidersMap,
   RegisteredBrain,
   SearchResult,
+  SkillsStatus,
   Source,
   WorkspaceConfig,
   Job,
@@ -357,6 +358,25 @@ export const api = {
   cliStatus: () => request<CliStatus>("/cli"),
   cliInstall: () => request<CliStatus>("/cli/install", { method: "POST" }),
   cliUninstall: () => request<CliStatus>("/cli", { method: "DELETE" }),
+
+  // ── agent skills ──
+  skillsStatus: (scope = "global") =>
+    request<SkillsStatus>(`/skills?scope=${scope}`),
+  installSkills: (scope = "global") =>
+    request<{ installed: string[]; target: string }>("/skills/install", {
+      method: "POST",
+      body: JSON.stringify({ scope }),
+    }),
+  updateSkills: (scope = "global") =>
+    request<{ installed: string[]; target: string }>("/skills/update", {
+      method: "POST",
+      body: JSON.stringify({ scope }),
+    }),
+  removeSkills: (scope = "global") =>
+    request<{ removed: string[] }>("/skills/remove", {
+      method: "POST",
+      body: JSON.stringify({ scope }),
+    }),
 }
 
 export { ApiError }

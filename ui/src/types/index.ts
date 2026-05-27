@@ -84,6 +84,21 @@ export interface AskHistoryItem {
   created_at: string
 }
 
+export interface SkillEntry {
+  name: string
+  version: string
+  scope: string
+  agent: string
+  target: string
+  present: boolean
+}
+
+export interface SkillsStatus {
+  available: string[]
+  target: string
+  skills: SkillEntry[]
+}
+
 export type LintSeverity = "info" | "warn" | "error"
 
 export interface LintFinding {

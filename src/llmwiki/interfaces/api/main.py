@@ -40,6 +40,7 @@ from .routers import (
     providers_router,
     query_router,
     search_router,
+    skills_router,
     sources_router,
     wiki_router,
 )
@@ -104,6 +105,7 @@ api.include_router(providers_router, prefix="/providers", tags=["providers"])
 api.include_router(cli_router, prefix="/cli", tags=["cli"])
 api.include_router(query_router, prefix="/query", tags=["query"])
 api.include_router(ask_router, prefix="/ask", tags=["ask"])
+api.include_router(skills_router, prefix="/skills", tags=["skills"])
 api.include_router(onboarding_router, prefix="/onboarding", tags=["onboarding"])
 
 # Config router is mounted without prefix (adds /config).
