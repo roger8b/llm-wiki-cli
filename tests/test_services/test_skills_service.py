@@ -2,66 +2,70 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from llmwiki.services import skills_service
+import pytest
+
+from llmwiki.services import skills_service as ss
 
 
 def test_available_lists_shipped_skills() -> None:
-    names = skills_service.available()
-    assert "wiki-query" in names
-    assert "wiki-ingest" in names
-    assert "wiki-maintain" in names
+    names = ss.available()
+    assert {"wiki-query", "wiki-ingest", "wiki-maintain"} <= set(names)
 
 
-def test_install_writes_files_and_manifest(tmp_path: Path) -> None:
-    res = skills_service.install(scope="local", root=tmp_path)
+def test_install_symlinks_into_store(tmp_path: Path) -> None:
+    res = ss.install(agent="claude", scope="local", method="symlink", root=tmp_path)
     skills_dir = tmp_path / ".claude" / "skills"
-    assert res["target"] == str(skills_dir.resolve())
-    assert set(res["installed"]) == set(skills_service.available())
-    # each skill has its SKILL.md on disk
-    for name in res["installed"]:
-        assert (skills_dir / name / "SKILL.md").is_file()
-    # manifest written with entries
-    assert (skills_dir / skills_service.MANIFEST_NAME).is_file()
-    listed = skills_service.list_installed(scope="local", root=tmp_path)
-    assert {s["name"] for s in listed["skills"]} == set(res["installed"])
-    assert all(s["present"] for s in listed["skills"])
+    # central store populated (WIKI_HOME isolated to tmp by conftest)
+    store = Path(res["store"])
+    assert (store / "wiki-query" / "SKILL.md").is_file()
+    # each skill is a symlink in the agent dir pointing at the store
+    for name in ss.available():
+        link = skills_dir / name
+        assert link.is_symlink()
+        assert (link / "SKILL.md").is_file()  # resolves through the symlink
+
+    listed = ss.list_installed()
+    assert len(listed["installs"]) == 1
+    statuses = listed["installs"][0]["skills_status"]
+    assert all(s["present"] and s["symlink"] for s in statuses)
+    assert ss.doctor()["ok"] is True
 
 
-def test_doctor_clean_then_detects_modification(tmp_path: Path) -> None:
-    skills_service.install(scope="local", root=tmp_path)
-    assert skills_service.doctor(scope="local", root=tmp_path)["ok"] is True
-
-    # tamper with an installed skill
-    md = tmp_path / ".claude" / "skills" / "wiki-query" / "SKILL.md"
-    md.write_text(md.read_text(encoding="utf-8") + "\nedited\n", encoding="utf-8")
-    report = skills_service.doctor(scope="local", root=tmp_path)
-    assert report["ok"] is False
-    assert any(i["skill"] == "wiki-query" and i["issue"] == "modified" for i in report["issues"])
+def test_multi_agent_dedup_dests(tmp_path: Path) -> None:
+    # gemini + cursor share .agents/skills -> one dest; claude has its own
+    res = ss.install(agents=["claude", "gemini", "cursor"], scope="local", root=tmp_path)
+    dests = {r["dest"] for r in res["results"]}
+    assert len(dests) == 2  # .claude/skills + .agents/skills (gemini+cursor shared)
 
 
-def test_doctor_detects_missing(tmp_path: Path) -> None:
-    skills_service.install(scope="local", root=tmp_path)
-    (tmp_path / ".claude" / "skills" / "wiki-ingest" / "SKILL.md").unlink()
-    report = skills_service.doctor(scope="local", root=tmp_path)
-    assert any(i["skill"] == "wiki-ingest" and i["issue"] == "missing" for i in report["issues"])
+def test_doctor_detects_broken_symlink(tmp_path: Path) -> None:
+    res = ss.install(agent="claude", scope="local", root=tmp_path)
+    # delete the store target -> dangling symlinks
+    import shutil
+
+    shutil.rmtree(Path(res["store"]) / "wiki-query")
+    issues = ss.doctor()["issues"]
+    assert any(i["issue"] == "broken-symlink" and i["skill"] == "wiki-query" for i in issues)
 
 
-def test_remove_one_and_all(tmp_path: Path) -> None:
-    skills_service.install(scope="local", root=tmp_path)
-    skills_service.remove("wiki-maintain", scope="local", root=tmp_path)
-    listed = skills_service.list_installed(scope="local", root=tmp_path)
-    names = {s["name"] for s in listed["skills"]}
-    assert "wiki-maintain" not in names
-    assert not (tmp_path / ".claude" / "skills" / "wiki-maintain").exists()
-
-    skills_service.remove(scope="local", root=tmp_path)  # all
-    assert skills_service.list_installed(scope="local", root=tmp_path)["skills"] == []
+def test_copy_method(tmp_path: Path) -> None:
+    ss.install(agent="claude", scope="local", method="copy", root=tmp_path)
+    link = tmp_path / ".claude" / "skills" / "wiki-query"
+    assert link.is_dir() and not link.is_symlink()
 
 
-def test_unknown_agent_and_scope_raise(tmp_path: Path) -> None:
-    import pytest
+def test_remove_unlinks_but_keeps_store(tmp_path: Path) -> None:
+    res = ss.install(agent="claude", scope="local", root=tmp_path)
+    store = Path(res["store"])
+    ss.remove()  # all
+    assert not (tmp_path / ".claude" / "skills" / "wiki-query").exists()
+    assert ss.list_installed()["installs"] == []
+    # store is the source of truth — never deleted
+    assert (store / "wiki-query" / "SKILL.md").is_file()
 
+
+def test_unknown_agent_and_method_raise(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        skills_service.resolve_skills_dir(agent="bogus", root=tmp_path)
+        ss.install(agent="bogus", scope="local", root=tmp_path)
     with pytest.raises(ValueError):
-        skills_service.resolve_skills_dir(scope="bogus", root=tmp_path)
+        ss.install(agent="claude", method="bogus", scope="local", root=tmp_path)

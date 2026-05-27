@@ -84,19 +84,32 @@ export interface AskHistoryItem {
   created_at: string
 }
 
-export interface SkillEntry {
+export interface SkillStatus {
   name: string
-  version: string
-  scope: string
-  agent: string
-  target: string
   present: boolean
+  symlink: boolean
+  broken: boolean
+}
+
+export interface SkillInstall {
+  dest: string
+  agents: string[]
+  scope: string
+  method: string
+  version: string
+  skills_status: SkillStatus[]
 }
 
 export interface SkillsStatus {
+  store: string
   available: string[]
-  target: string
-  skills: SkillEntry[]
+  installs: SkillInstall[]
+}
+
+export interface AgentInfo {
+  name: string
+  display: string
+  detected: boolean
 }
 
 export type LintSeverity = "info" | "warn" | "error"

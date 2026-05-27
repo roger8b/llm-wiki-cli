@@ -1,36 +1,41 @@
-"""Installable agent skills shipped with the CLI (local-first).
+"""Installable agent skills — central store + symlink/copy install (multi-agent).
 
-Skills are ``SKILL.md`` artifacts (+ optional flat support files) packaged under
-``llmwiki/skills/<name>/``. They teach an agent to operate the brain through the
-real CLI (the behavioral contract). This service installs them into an agent's
-skills directory and tracks state in a manifest, so the same logic backs both the
-CLI (`wiki skills ...`) and the API (`/api/skills/*`).
+Skills ship as ``SKILL.md`` artifacts under ``llmwiki/skills/<name>/``. They are
+materialized once into a **central store** (``~/.wiki/skills``) — the single
+source of truth on the machine — and then linked into each agent's skills
+directory (symlink by default, copy as a fallback), per workspace (``local``) or
+per user (``global``). Updating the store propagates to every symlink. A global
+manifest records every install so list/doctor/remove are multi-agent aware.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
+import os
+import shutil
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from .. import __version__
+from ..core import paths as _paths
+from ..core.agents import AGENTS, resolve_agent
 from ..core.misc import now_iso
 
 _SKILLS_PKG = "llmwiki.skills"
-MANIFEST_NAME = ".llmwiki-skills.json"
-
-# Agent adapters: map an agent name to its skills directory under a base root.
-# v1 ships only "claude"; the seam lets new agents be added without touching the
-# install/list/doctor logic (#71).
-_ADAPTERS: dict[str, str] = {
-    "claude": ".claude/skills",
-}
-DEFAULT_AGENT = "claude"
 
 
-# ─────────────────────────────────────────── discovery (packaged skills)
+def _store() -> Path:
+    """Central skill store (~/.wiki/skills), resolved at call-time so tests that
+    redirect WIKI_HOME are honored."""
+    return _paths.WIKI_HOME / "skills"
+
+
+def _manifest_path() -> Path:
+    return _store() / ".installs.json"
+
+
+# ─────────────────────────────────────────── packaged skills + central store
 
 def _skills_root() -> Any:
     return resources.files(_SKILLS_PKG)
@@ -46,185 +51,216 @@ def available() -> list[str]:
 
 
 def _skill_files(name: str) -> list[str]:
-    """Flat list of file names inside a packaged skill dir."""
     return sorted(f.name for f in _skills_root().joinpath(name).iterdir() if f.is_file())
 
 
-def _packaged_text(name: str, filename: str) -> str:
-    return _skills_root().joinpath(name).joinpath(filename).read_text(encoding="utf-8")
+def sync_store() -> Path:
+    """Materialize the packaged skills into the central store (~/.wiki/skills)."""
+    _store().mkdir(parents=True, exist_ok=True)
+    for name in available():
+        dest = _store() / name
+        dest.mkdir(parents=True, exist_ok=True)
+        for filename in _skill_files(name):
+            content = _skills_root().joinpath(name).joinpath(filename).read_text(encoding="utf-8")
+            (dest / filename).write_text(content, encoding="utf-8")
+    return _store()
 
 
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+# ─────────────────────────────────────────── manifest
 
-
-# ─────────────────────────────────────────── target resolution (adapters)
-
-def resolve_skills_dir(
-    *, scope: str = "local", agent: str = DEFAULT_AGENT, root: Path | None = None
-) -> Path:
-    """Resolve the agent's skills directory.
-
-    scope: ``local`` -> under ``root`` (default cwd); ``global`` -> under ~.
-    """
-    if agent not in _ADAPTERS:
-        raise ValueError(f"Unknown agent adapter: {agent} (known: {', '.join(_ADAPTERS)})")
-    if scope == "local":
-        base = root or Path.cwd()
-    elif scope == "global":
-        base = Path.home()
-    else:
-        raise ValueError(f"Unknown scope: {scope} (use 'local' or 'global')")
-    return (base / _ADAPTERS[agent]).resolve()
-
-
-def _manifest_path(skills_dir: Path) -> Path:
-    return skills_dir / MANIFEST_NAME
-
-
-def _read_manifest(skills_dir: Path) -> dict[str, Any]:
-    path = _manifest_path(skills_dir)
-    if not path.is_file():
-        return {"version": __version__, "skills": {}}
+def _read_manifest() -> dict[str, Any]:
+    if not _manifest_path().is_file():
+        return {"version": __version__, "installs": {}}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(_manifest_path().read_text(encoding="utf-8"))
+        data.setdefault("installs", {})
+        return data
     except (json.JSONDecodeError, OSError):
-        return {"version": __version__, "skills": {}}
+        return {"version": __version__, "installs": {}}
 
 
-def _write_manifest(skills_dir: Path, manifest: dict[str, Any]) -> None:
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    _manifest_path(skills_dir).write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def _write_manifest(data: dict[str, Any]) -> None:
+    _store().mkdir(parents=True, exist_ok=True)
+    data["version"] = __version__
+    _manifest_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ─────────────────────────────────────────── destination resolution
+
+def _resolve_dests(
+    agents: list[str], scope: str, root: Path
+) -> dict[Path, list[str]]:
+    """Map each target skills dir to the agent(s) that share it (dedup)."""
+    if scope not in ("local", "global", "both"):
+        raise ValueError(f"Unknown scope: {scope} (use local | global | both)")
+    scopes = ["local", "global"] if scope == "both" else [scope]
+    dests: dict[Path, list[str]] = {}
+    for name in agents:
+        spec = AGENTS[resolve_agent(name)]
+        for sc in scopes:
+            d = spec.skills_dir(sc, root).resolve()
+            dests.setdefault(d, [])
+            if spec.name not in dests[d]:
+                dests[d].append(spec.name)
+    return dests
+
+
+def _rm(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _link_one(src: Path, link: Path, method: str, force: bool) -> bool:
+    """Symlink (or copy) one skill dir into a destination. Returns True if written."""
+    if link.is_symlink() or link.exists():
+        if not force:
+            return False
+        _rm(link)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if method == "symlink":
+        try:
+            os.symlink(src, link, target_is_directory=True)
+            return True
+        except OSError:
+            pass  # fall back to copy (e.g. FS without symlink support)
+    shutil.copytree(src, link)
+    return True
 
 
 # ─────────────────────────────────────────── operations
 
 def install(
     *,
+    agents: list[str] | None = None,
+    agent: str | None = None,
     scope: str = "local",
-    agent: str = DEFAULT_AGENT,
+    method: str = "symlink",
     root: Path | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Install all packaged skills into the agent's skills dir; write the manifest.
+    """Install skills into the chosen agents' skills dirs from the central store."""
+    if method not in ("symlink", "copy"):
+        raise ValueError(f"Unknown method: {method} (use symlink | copy)")
+    names = list(agents or ([] if agent is None else [agent])) or ["claude"]
+    names = [resolve_agent(n) for n in names]
 
-    Idempotent: re-running overwrites the shipped files and refreshes the manifest.
-    """
-    skills_dir = resolve_skills_dir(scope=scope, agent=agent, root=root)
-    manifest = _read_manifest(skills_dir)
-    installed: list[str] = []
+    sync_store()
+    root = (root or Path.cwd()).resolve()
+    manifest = _read_manifest()
+    results: list[dict[str, Any]] = []
 
-    for name in available():
-        dest = skills_dir / name
-        existing = manifest["skills"].get(name)
-        if existing and not force:
-            # already recorded; reinstall anyway to stay in sync (idempotent)
-            pass
-        dest.mkdir(parents=True, exist_ok=True)
-        skill_md = _packaged_text(name, "SKILL.md")
-        for filename in _skill_files(name):
-            (dest / filename).write_text(
-                _packaged_text(name, filename), encoding="utf-8"
-            )
-        manifest["skills"][name] = {
-            "name": name,
-            "version": __version__,
+    for dest, dest_agents in _resolve_dests(names, scope, root).items():
+        written: list[str] = []
+        for name in available():
+            if _link_one(_store() / name, dest / name, method, force):
+                written.append(name)
+        manifest["installs"][str(dest)] = {
+            "dest": str(dest),
+            "agents": dest_agents,
             "scope": scope,
-            "agent": agent,
-            "target": str(dest),
-            "checksum": _sha256(skill_md),
+            "method": method,
+            "skills": available(),
+            "version": __version__,
             "installed_at": now_iso(),
         }
-        installed.append(name)
+        results.append({"dest": str(dest), "agents": dest_agents, "written": written})
 
-    manifest["version"] = __version__
-    _write_manifest(skills_dir, manifest)
-    return {"target": str(skills_dir), "scope": scope, "agent": agent, "installed": installed}
-
-
-def list_installed(
-    *, scope: str = "local", agent: str = DEFAULT_AGENT, root: Path | None = None
-) -> dict[str, Any]:
-    """List installed skills from the manifest, annotated with on-disk status."""
-    skills_dir = resolve_skills_dir(scope=scope, agent=agent, root=root)
-    manifest = _read_manifest(skills_dir)
-    skills = []
-    for entry in sorted(manifest["skills"].values(), key=lambda e: e["name"]):
-        present = (Path(entry["target"]) / "SKILL.md").is_file()
-        skills.append({**entry, "present": present})
-    return {"target": str(skills_dir), "skills": skills}
+    _write_manifest(manifest)
+    return {"store": str(_store()), "method": method, "scope": scope, "results": results}
 
 
-def doctor(
-    *, scope: str = "local", agent: str = DEFAULT_AGENT, root: Path | None = None
-) -> dict[str, Any]:
-    """Integrity check: manifest vs disk vs shipped (missing / changed / outdated)."""
-    skills_dir = resolve_skills_dir(scope=scope, agent=agent, root=root)
-    manifest = _read_manifest(skills_dir)
-    shipped = set(available())
+def _skill_status(dest: Path, name: str) -> dict[str, Any]:
+    link = dest / name
+    is_link = link.is_symlink()
+    present = link.exists()  # follows symlink; False if the target is gone
+    return {"name": name, "present": present, "symlink": is_link, "broken": is_link and not present}
+
+
+def list_installed() -> dict[str, Any]:
+    """All recorded installs (across agents/scopes) annotated with on-disk status."""
+    manifest = _read_manifest()
+    installs = []
+    for rec in manifest["installs"].values():
+        dest = Path(rec["dest"])
+        installs.append(
+            {
+                **rec,
+                "skills_status": [_skill_status(dest, n) for n in rec.get("skills", [])],
+            }
+        )
+    return {"store": str(_store()), "available": available(), "installs": installs}
+
+
+def doctor() -> dict[str, Any]:
+    """Integrity check across all installs: missing / broken symlink / outdated."""
+    manifest = _read_manifest()
     issues: list[dict[str, str]] = []
-
-    for name, entry in sorted(manifest["skills"].items()):
-        md = Path(entry["target"]) / "SKILL.md"
-        if not md.is_file():
-            issues.append({"skill": name, "issue": "missing", "detail": "SKILL.md not on disk"})
-            continue
-        on_disk = _sha256(md.read_text(encoding="utf-8"))
-        if name in shipped and on_disk != _sha256(_packaged_text(name, "SKILL.md")):
-            issues.append({"skill": name, "issue": "modified", "detail": "differs from shipped"})
-        if entry.get("version") != __version__:
-            issues.append(
-                {
-                    "skill": name,
-                    "issue": "outdated",
-                    "detail": f"{entry.get('version')} != {__version__}",
-                }
-            )
-
-    not_installed = sorted(shipped - set(manifest["skills"]))
-    return {
-        "target": str(skills_dir),
-        "ok": not issues,
-        "issues": issues,
-        "available_not_installed": not_installed,
-    }
+    for rec in manifest["installs"].values():
+        dest = Path(rec["dest"])
+        for name in rec.get("skills", []):
+            link = dest / name
+            if link.is_symlink() and not link.exists():
+                issues.append({"dest": rec["dest"], "skill": name, "issue": "broken-symlink"})
+            elif not link.is_symlink() and not link.exists():
+                issues.append({"dest": rec["dest"], "skill": name, "issue": "missing"})
+        if rec.get("version") != __version__:
+            issues.append({"dest": rec["dest"], "skill": "*", "issue": "outdated"})
+    return {"store": str(_store()), "ok": not issues, "issues": issues}
 
 
-def update(
-    *, scope: str = "local", agent: str = DEFAULT_AGENT, root: Path | None = None
-) -> dict[str, Any]:
-    """Reinstall the shipped skills (refresh content + manifest to the CLI version)."""
-    return install(scope=scope, agent=agent, root=root, force=True)
+def update() -> dict[str, Any]:
+    """Refresh the store and re-link every recorded install (copies get refreshed)."""
+    sync_store()
+    manifest = _read_manifest()
+    refreshed = []
+    for rec in list(manifest["installs"].values()):
+        dest = Path(rec["dest"])
+        for name in rec.get("skills", []):
+            _link_one(_store() / name, dest / name, rec.get("method", "symlink"), force=True)
+        rec["version"] = __version__
+        rec["installed_at"] = now_iso()
+        refreshed.append(rec["dest"])
+    _write_manifest(manifest)
+    return {"store": str(_store()), "refreshed": refreshed}
 
 
 def remove(
     name: str | None = None,
     *,
-    scope: str = "local",
-    agent: str = DEFAULT_AGENT,
+    agent: str | None = None,
+    scope: str | None = None,
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """Remove one skill (by name) or all installed skills; update the manifest.
+    """Remove installed skill links. Never touches the central store.
 
-    Idempotent: removing something not installed is a no-op.
+    name: a specific skill (omit for all). agent/scope: limit which installs.
     """
-    import shutil
+    manifest = _read_manifest()
+    root = (root or Path.cwd()).resolve()
+    keep_dests: set[str] | None = None
+    if agent or scope:
+        agents = [resolve_agent(agent)] if agent else list(AGENTS)
+        keep_dests = {str(d) for d in _resolve_dests(agents, scope or "both", root)}
 
-    skills_dir = resolve_skills_dir(scope=scope, agent=agent, root=root)
-    manifest = _read_manifest(skills_dir)
-    targets = [name] if name else list(manifest["skills"].keys())
     removed: list[str] = []
-
-    for skill in targets:
-        entry = manifest["skills"].pop(skill, None)
-        if entry is None:
+    for dest_str, rec in list(manifest["installs"].items()):
+        if keep_dests is not None and dest_str not in keep_dests:
             continue
-        dest = Path(entry["target"])
-        if dest.is_dir():
-            shutil.rmtree(dest, ignore_errors=True)
-        removed.append(skill)
+        dest = Path(dest_str)
+        skills = [name] if name else list(rec.get("skills", []))
+        for skill in skills:
+            link = dest / skill
+            if link.is_symlink() or link.exists():
+                _rm(link)
+                removed.append(f"{dest_str}/{skill}")
+        if name:
+            rec["skills"] = [s for s in rec.get("skills", []) if s != name]
+            if not rec["skills"]:
+                manifest["installs"].pop(dest_str, None)
+        else:
+            manifest["installs"].pop(dest_str, None)
 
-    _write_manifest(skills_dir, manifest)
-    return {"target": str(skills_dir), "removed": removed}
+    _write_manifest(manifest)
+    return {"store": str(_store()), "removed": removed}
