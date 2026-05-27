@@ -318,7 +318,8 @@ longer need to be inside a brain directory to run commands.
 | `wiki brain create <path> [--name] [--no-git] [--force]` | Scaffold a new brain, register + activate |
 | `wiki brain add <path> [--name]` | Register an existing brain folder |
 | `wiki brain rm <name\|id\|path>` | Remove a brain from the registry (keeps files) |
-| `wiki init <dir>` | **Deprecated** alias of `wiki brain create` |
+| `wiki init [--brain] [--agents] [--claude] [--remove]` | Write wiki-usage rules into this workspace's `AGENTS.md`/`CLAUDE.md` (teach an agent to use the brain). For creating a brain use `wiki brain create` |
+| `wiki skills install \| list \| doctor \| update \| remove` | Install agent skills that operate the brain via the CLI |
 | `wiki index` | Rebuild FTS index + regenerate `wiki/index.md` |
 | `wiki log` | Print `wiki/log.md` (applied change history) |
 
