@@ -18,6 +18,7 @@ import type {
   OllamaStatus,
   ProviderName,
   ProvidersMap,
+  SkillsStatus,
 } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -87,6 +88,10 @@ export function SettingsView() {
   const [cli, setCli] = useState<CliStatus | null>(null)
   const [cliBusy, setCliBusy] = useState(false)
 
+  // ── skills ──
+  const [skills, setSkills] = useState<SkillsStatus | null>(null)
+  const [skillsBusy, setSkillsBusy] = useState(false)
+
   function snap(s: {
     provider: Provider
     modelName: string
@@ -142,6 +147,7 @@ export function SettingsView() {
     }
     load()
     api.cliStatus().then(setCli).catch(() => {})
+    api.skillsStatus().then(setSkills).catch(() => {})
   }, [])
 
   function switchProvider(p: Provider) {
@@ -244,6 +250,31 @@ export function SettingsView() {
       toast("CLI removed")
     } finally {
       setCliBusy(false)
+    }
+  }
+
+  async function installSkills() {
+    setSkillsBusy(true)
+    try {
+      await api.installSkills()
+      setSkills(await api.skillsStatus())
+      toast.success("Skills installed")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSkillsBusy(false)
+    }
+  }
+  async function removeSkills() {
+    setSkillsBusy(true)
+    try {
+      await api.removeSkills()
+      setSkills(await api.skillsStatus())
+      toast("Skills removed")
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSkillsBusy(false)
     }
   }
 
@@ -510,6 +541,62 @@ export function SettingsView() {
                 {cli.installed && (
                   <Button size="sm" variant="outline" onClick={cliUninstall} disabled={cliBusy}>
                     Uninstall
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Agent skills ── */}
+        <div className="mt-4 rounded-lg border bg-card p-5">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <Terminal className="size-3.5" /> Agent skills
+          </div>
+          <p className="mb-3 text-[12px] text-muted-foreground">
+            Install skills that teach your AI agents to use this wiki (global,
+            <code> ~/.claude/skills</code>).
+          </p>
+          {skills && (
+            <div className="space-y-3">
+              <ul className="space-y-0.5 text-[13px]">
+                {skills.available.map((name) => {
+                  const entry = skills.skills.find((s) => s.name === name)
+                  return (
+                    <li key={name} className="flex items-center gap-2">
+                      {entry?.present ? (
+                        <Check className="size-4 text-apply" />
+                      ) : (
+                        <X className="size-4 text-muted-foreground" />
+                      )}
+                      <code>{name}</code>
+                      {entry?.present && (
+                        <span className="text-[11px] text-muted-foreground">
+                          v{entry.version}
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={installSkills}
+                  disabled={skillsBusy}
+                  className="gap-1.5"
+                >
+                  {skillsBusy && <Loader2 className="size-4 animate-spin" />}
+                  {skills.skills.length > 0 ? "Reinstall / update" : "Install"}
+                </Button>
+                {skills.skills.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={removeSkills}
+                    disabled={skillsBusy}
+                  >
+                    Remove
                   </Button>
                 )}
               </div>

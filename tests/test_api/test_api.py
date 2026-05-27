@@ -325,6 +325,35 @@ class TestBrainsEndpoint:
         assert client.get("/api/brains/active").json()["name"] == "Fresh"
 
 
+class TestSkills:
+    def test_install_list_doctor_remove(self, client, tmp_path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)  # scope=local resolves to cwd
+
+        # available before install
+        r = client.get("/api/skills", params={"scope": "local"})
+        assert r.status_code == 200
+        assert "wiki-query" in r.json()["available"]
+        assert r.json()["skills"] == []
+
+        # install
+        r = client.post("/api/skills/install", json={"scope": "local"})
+        assert r.status_code == 200
+        assert set(r.json()["installed"]) == set(client.get("/api/skills", params={"scope": "local"}).json()["available"])
+
+        # listed + doctor ok
+        listed = client.get("/api/skills", params={"scope": "local"}).json()
+        assert {s["name"] for s in listed["skills"]} == set(listed["available"])
+        assert client.get("/api/skills/doctor", params={"scope": "local"}).json()["ok"] is True
+
+        # remove all
+        r = client.post("/api/skills/remove", json={"scope": "local"})
+        assert r.status_code == 200
+        assert client.get("/api/skills", params={"scope": "local"}).json()["skills"] == []
+
+    def test_bad_scope_400(self, client) -> None:
+        assert client.get("/api/skills", params={"scope": "bogus"}).status_code == 400
+
+
 class TestHealth:
     def test_health_ok(self, client) -> None:
         r = client.get("/api/health")

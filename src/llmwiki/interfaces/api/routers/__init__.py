@@ -10,6 +10,7 @@ from .onboarding import router as onboarding_router
 from .providers import router as providers_router
 from .query import router as query_router
 from .search import router as search_router
+from .skills import router as skills_router
 from .sources import router as sources_router
 from .wiki import router as wiki_router
 
@@ -24,6 +25,7 @@ __all__ = [
     "providers_router",
     "query_router",
     "search_router",
+    "skills_router",
     "sources_router",
     "wiki_router",
 ]
