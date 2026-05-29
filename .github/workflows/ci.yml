@@ -80,39 +80,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Install Node dependencies
-        run: npm --prefix ui ci
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install Python dependencies
-        run: |
-          pip install -e ".[agent,ollama,api,mcp]"
-          pip install pyinstaller
-      # The SPA must be built BEFORE the PyInstaller sidecar: build_sidecar.sh
-      # bundles src/llmwiki/interfaces/api/dist; on a fresh runner that dir is
-      # empty, so without this step the .app artifact would ship an empty SPA.
-      - name: Build SPA (so the sidecar bundles the current frontend)
-        run: |
-          # Delete fresh so Vite cannot skip the build via its incremental
-          # build cache (mtime-based). Without this, Vite skips the build when
-          # source files have not changed since the previous run, leaving the
-          # dist/ folder empty and the SPA missing from the onedir sidecar.
-          rm -rf src/llmwiki/interfaces/api/dist/
-          npm --prefix ui run build
-      - name: Build PyInstaller sidecar
-        run: ./scripts/build_sidecar.sh
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build Tauri App
-        working-directory: ui
-        run: npx tauri build
+      - name: Build Desktop App
+        run: ./build_desktop.sh
       - name: Upload macOS Desktop Artifacts
         uses: actions/upload-artifact@v4
         with:
