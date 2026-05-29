@@ -186,6 +186,12 @@ class TestApiToken:
         monkeypatch.setenv("WIKI_API_TOKEN", "s3cret")
         assert client.get("/api/health").status_code == 200
 
+    def test_onboarding_exempt_from_token(self, client, monkeypatch) -> None:
+        # First-run probe must work even before window.__WIKI_TOKEN__ is wired —
+        # otherwise a token race / 401 lands the user on an empty Review screen.
+        monkeypatch.setenv("WIKI_API_TOKEN", "s3cret")
+        assert client.get("/api/onboarding").status_code == 200
+
 
 class TestAskHistory:
     def test_history_empty(self, client) -> None:
