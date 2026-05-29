@@ -88,10 +88,9 @@ fn kill_stray_backends(brain: &str) {
 /// Tauri preserves each resource's path relative to src-tauri. When running the
 /// raw `target/release` binary during development, the resource dir doesn't hold
 /// it, so fall back to the in-tree `binaries/` folder produced by build_sidecar.sh.
-fn resolve_backend_exe(handle: &tauri::AppHandle) -> PathBuf {
-    if let Ok(res) = handle.path().resource_dir() {
-        // Tauri preserves each resource's path relative to src-tauri, so the
-        // glob "binaries/wiki-backend/**/*" lands under <res>/binaries/wiki-backend/.
+fn resolve_backend_exe(_handle: &tauri::AppHandle) -> PathBuf {
+    // Try Tauri resource dir first (primary mechanism for .app bundle).
+    if let Ok(res) = _handle.path().resource_dir() {
         for rel in ["binaries/wiki-backend/wiki-backend", "wiki-backend/wiki-backend"] {
             let candidate = res.join(rel);
             if candidate.exists() {
@@ -99,7 +98,35 @@ fn resolve_backend_exe(handle: &tauri::AppHandle) -> PathBuf {
             }
         }
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/wiki-backend/wiki-backend")
+
+    // Runtime-relative fallback: derive the sidecar path from the main binary's
+    // runtime location (not a compile-time path baked into the binary).  This
+    // fixes the "NotFound" bug when the .app ships to a machine other than the
+    // CI runner that built it.
+    if let Ok(exe_path) = std::env::current_exe() {
+        let app_dir = exe_path
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent());
+        if let Some(dir) = app_dir {
+            let sidecar = dir
+                .join("Contents")
+                .join("Resources")
+                .join("binaries")
+                .join("wiki-backend")
+                .join("wiki-backend");
+            if sidecar.exists() {
+                return sidecar;
+            }
+            // In-tree layout when running `cargo run` from src-tauri/
+            let sidecar_dev = dir.join("binaries").join("wiki-backend").join("wiki-backend");
+            if sidecar_dev.exists() {
+                return sidecar_dev;
+            }
+        }
+    }
+
+    panic!("wiki-backend executable not found")
 }
 
 /// Default brain for the desktop app: ~/.wiki/brains/desktop (auto-created by
