@@ -56,7 +56,10 @@ jobs:
       - name: Install (clean, lockfile-faithful)
         run: npm --prefix ui ci
       - name: Type-check + build SPA
-        run: npm --prefix ui run build
+        run: |
+          # Delete fresh so Vite cannot skip the build (mtime-based incremental).
+          rm -rf src/llmwiki/interfaces/api/dist/
+          npm --prefix ui run build
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -151,7 +154,10 @@ jobs:
       - name: Install Python package (serves the SPA)
         run: pip install -e ".[agent,ollama,api,mcp]"
       - name: Build SPA into the package
-        run: npm --prefix ui run build
+        run: |
+          # Delete fresh so Vite cannot skip the build (mtime-based incremental).
+          rm -rf src/llmwiki/interfaces/api/dist/
+          npm --prefix ui run build
       - name: Install Playwright WebKit
         working-directory: ui
         run: npx playwright install --with-deps webkit
