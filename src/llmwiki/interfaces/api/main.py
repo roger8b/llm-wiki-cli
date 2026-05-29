@@ -76,7 +76,9 @@ async def require_api_token(request: Request, call_next):
     tests) the API stays open — auth is opt-in.
 
     Exemptions: non-/api routes (the SPA + assets, loaded before JS runs),
-    /api/health (the shell's readiness probe), and CORS preflight (OPTIONS).
+    /api/health (the shell's readiness probe), /api/onboarding (first-run probe
+    — exposes only the needs_onboarding boolean + brain count; gating it broke
+    fresh installs when the token wasn't yet injected) and CORS preflight.
     """
     token = os.environ.get("WIKI_API_TOKEN")
     if token:
@@ -84,6 +86,7 @@ async def require_api_token(request: Request, call_next):
         if (
             path.startswith("/api/")
             and path != "/api/health"
+            and path != "/api/onboarding"
             and request.method != "OPTIONS"
             and request.headers.get("x-wiki-token") != token
         ):
