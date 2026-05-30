@@ -18,7 +18,16 @@ npm run build
 cd "$ROOT"
 
 echo "==> 2. Compiling Python sidecar backend binary..."
-PYTHON=.venv/bin/python ./scripts/build_sidecar.sh
+# Resolve Python: prefer .venv if it exists, otherwise fall back to system python3.
+# (local dev may use a venv; CI always uses system python via setup-python action.)
+if [ -f ".venv/bin/python" ]; then
+  PYTHON=".venv/bin/python"
+else
+  PYTHON="python3"
+fi
+echo "==> Using Python: $PYTHON"
+
+PYTHON="$PYTHON" ./scripts/build_sidecar.sh
 
 echo "==> 3. Building Tauri macOS application..."
 # bundle_dmg.sh fails if a volume named "llm-wiki" from a previous DMG is still
