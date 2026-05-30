@@ -524,6 +524,21 @@ cd ui && cargo tauri build                 # → target/release/bundle/{macos,dm
 
 Output: `llm-wiki.app` and `llm-wiki_<version>_aarch64.dmg`.
 
+### Running without an Apple Developer account
+
+If you don't have a paid Apple Developer account, macOS will block the app from
+launching (Gatekeeper quarantine). After copying the app to your Applications
+folder, remove the quarantine attribute:
+
+```bash
+xattr -cr ~/Applications/llm-wiki.app
+```
+
+On first launch, macOS may still show a "cannot be opened because it is from
+an unidentified developer" warning. Control-click the app icon, choose "Open",
+and confirm. After the first successful open, the app launches normally from
+Launchpad/Spotlight.
+
 ### Dev
 
 For fast iteration, skip Tauri and run the web stack directly:
