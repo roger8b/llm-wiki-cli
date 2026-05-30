@@ -17,6 +17,7 @@ Router split:
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -26,9 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from contextlib import asynccontextmanager
-
-from .deps import get_config, get_paths
+from .deps import get_paths
 from .routers import (
     ask_router,
     brains_router,
@@ -119,24 +118,21 @@ api.include_router(config_router, prefix="/config", tags=["config"])
 @api.post("/lint")
 def lint(semantic: bool = False) -> dict[str, Any]:
     """Lint the wiki (structural by default)."""
-    from .routers.wiki import _ctx, lint as _lint_impl
-    paths = _ctx()
+    from .routers.wiki import lint as _lint_impl
     return _lint_impl(semantic)
 
 
 @api.post("/maintain")
 def maintain(semantic: bool = False) -> dict[str, Any]:
     """Lint and propose fixes as a change request (queues a maintain job)."""
-    from .routers.wiki import _ctx, maintain as _maintain_impl
-    paths = _ctx()
+    from .routers.wiki import maintain as _maintain_impl
     return _maintain_impl(semantic)
 
 
 @api.get("/graph")
 def graph() -> dict[str, Any]:
     """Wiki graph (nodes + edges)."""
-    from .routers.search import _ctx, graph as _graph_impl
-    paths = _ctx()
+    from .routers.search import graph as _graph_impl
     return _graph_impl()
 
 

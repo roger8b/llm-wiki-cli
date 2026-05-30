@@ -17,7 +17,7 @@ def _brain():
         return load_active_brain()
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def _activate_brain_path(path: str) -> None:
@@ -67,8 +67,11 @@ def serve(
     try:
         import uvicorn
     except ImportError:
-        typer.echo("[red]FastAPI/uvicorn not installed. Run: pip install -e '.[api]'[/red]", err=True)
-        raise typer.Exit(code=1)
+        typer.echo(
+            "[red]FastAPI/uvicorn not installed. Run: pip install -e '.[api]'[/red]",
+            err=True,
+        )
+        raise typer.Exit(code=1) from None
     typer.echo(f"[green]API at[/green] http://{host}:{port}")
     # Keep idle connections open well past typical user think-time. The desktop
     # WebView (WKWebView) reuses keep-alive connections and surfaces a reset stale

@@ -82,9 +82,9 @@ def delete_page(
 @router.post("/lint")
 def lint(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
     """Run lint checks on the wiki."""
-    from ....db.repo import JobRepo
-
     import json
+
+    from ....db.repo import JobRepo
 
     paths = _ctx()
     if semantic:
@@ -105,9 +105,9 @@ def lint(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
 @router.post("/maintain")
 def maintain(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
     """Run lint and propose fixes as a change request."""
-    from ....db.repo import JobRepo
-
     import json
+
+    from ....db.repo import JobRepo
 
     paths = _ctx()
     conn = open_conn(paths)

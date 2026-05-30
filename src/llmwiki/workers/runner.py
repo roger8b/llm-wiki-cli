@@ -1,13 +1,14 @@
-import threading
-import time
 import json
 import logging
+import threading
+import time
 from pathlib import Path
-from ..core.paths import load_active_brain, resolve_input
+
 from ..core.config import load_config
+from ..core.paths import load_active_brain, resolve_input
 from ..db.connection import get_connection
 from ..db.repo import AskHistoryRepo, JobRepo
-from ..services import ingest_service, lint_service, query_service, maintenance_service
+from ..services import ingest_service, lint_service, maintenance_service, query_service
 
 logger = logging.getLogger("llmwiki.workers")
 
@@ -43,7 +44,8 @@ class JobWorker(threading.Thread):
                 try:
                     # Find first queued job
                     cur = conn.execute(
-                        "SELECT id, type, payload FROM jobs WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
+                        "SELECT id, type, payload FROM jobs "
+                        "WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
                     )
                     row = cur.fetchone()
                     if not row:

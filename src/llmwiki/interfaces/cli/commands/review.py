@@ -24,7 +24,7 @@ def _brain():
         return load_active_brain()
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def _print_diff(diff: str) -> None:
@@ -72,7 +72,7 @@ def apply(
         cr = change_request_service.apply(cr_id, paths, conn, git_commit=commit)
     except ValueError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     finally:
         conn.close()
     typer.echo(f"[green]Applied {cr.id}[/green] ({cr.files_changed} files).")
@@ -86,7 +86,7 @@ def reject(cr_id: str = typer.Argument(..., help="Change request ID.")) -> None:
         change_request_service.reject(cr_id, conn)
     except ValueError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     finally:
         conn.close()
     typer.echo(f"[yellow]Rejected {cr_id}.[/yellow]")

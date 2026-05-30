@@ -10,7 +10,6 @@ from rich.console import Console
 from rich.table import Table
 
 from ....core.errors import WikiError
-from ....core.paths import BrainPaths
 from ....services import scaffold_service
 
 brain_app = typer.Typer(
@@ -114,7 +113,7 @@ def brain_add(
         )
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     typer.echo(f"[green]Registered + active:[/green] {b.name}  {b.path}")
 
 
@@ -142,5 +141,5 @@ def brain_rm(ref: str = typer.Argument(..., help="Name, ID, or path.")) -> None:
         reg.remove_brain(b.id)
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     typer.echo(f"[yellow]Removed from registry:[/yellow] {b.name}")

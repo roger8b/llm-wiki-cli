@@ -11,7 +11,7 @@ from rich.markup import escape as esc
 from rich.table import Table
 
 from ....core.errors import WikiError
-from ....core.paths import load_active_brain, BrainPaths
+from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import SourceRepo
 from ....sources.manager import add_source
@@ -28,7 +28,7 @@ def _brain() -> BrainPaths:
         return load_active_brain()
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 @source_app.command("add")

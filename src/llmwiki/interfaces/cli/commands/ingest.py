@@ -9,7 +9,7 @@ from rich.markup import escape as esc
 
 from ....core.config import load_config
 from ....core.errors import WikiError
-from ....core.paths import load_active_brain, resolve_input
+from ....core.paths import load_active_brain
 from ....db.connection import get_connection
 from ....services import ingest_service
 
@@ -19,7 +19,7 @@ def _brain():
         return load_active_brain()
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def ingest(file: str = typer.Argument(..., help="Source file to ingest.")) -> None:
@@ -41,7 +41,7 @@ def ingest(file: str = typer.Argument(..., help="Source file to ingest.")) -> No
         cr = ingest_service.ingest(target, paths, conn, cfg)
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"[red]Ingestion failed: {exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
     finally:
         conn.close()
     typer.echo(f"[green]Source processed[/green] (model: {cfg.model}).")
