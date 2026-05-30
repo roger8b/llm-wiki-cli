@@ -88,7 +88,7 @@ def providers_ollama_pull(model: str = Body(..., embed=True)) -> Response:
     import json as _json
     import urllib.request
 
-    from .setup import OLLAMA_URL
+    from ..setup import OLLAMA_URL
 
     def _events() -> Any:
         body = _json.dumps({"name": model, "stream": True}).encode()
