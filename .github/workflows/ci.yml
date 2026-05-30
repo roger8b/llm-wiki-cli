@@ -11,6 +11,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pre-commit:
+    name: Pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: pre-commit/action@v3.0.1
+
   lint:
     name: Lint & type-check (Python)
     runs-on: ubuntu-latest
@@ -43,6 +54,52 @@ jobs:
         run: pip install -e ".[agent,ollama,api,mcp,dev]"
       - name: Pytest (with coverage)
         run: pytest --cov=src/llmwiki --cov-report=term-missing
+
+  frontend-unit:
+    name: Frontend unit tests (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Node dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Vitest
+        working-directory: ui
+        run: npm test
+
+  webkit-e2e:
+    name: WebKit smoke tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Node dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Install Python package (serves the SPA)
+        run: pip install -e ".[agent,ollama,api,mcp]"
+      - name: Build SPA into the package
+        working-directory: ui
+        run: npm run build
+      - name: Install Playwright WebKit
+        working-directory: ui
+        run: npx playwright install --with-deps webkit
+      - name: Run WebKit smoke tests
+        working-directory: ui
+        run: npm run test:e2e
 
   build-desktop:
     name: Build macOS Desktop App (Tauri)
