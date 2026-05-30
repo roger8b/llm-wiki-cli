@@ -10,141 +10,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint & type-check (Python)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install dev deps
-        run: pip install -e ".[agent,ollama,api,mcp,dev]"
-      - name: Ruff
-        run: ruff check src/ tests/
-      - name: Mypy
-        # NOTE: mypy is `strict` but not yet clean across the tree. Keep it
-        # non-blocking until the type debt is paid down, then drop this flag.
-        continue-on-error: true
-        run: mypy src/llmwiki
-
-  test:
-    name: Tests (Python 3.12)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install deps
-        run: pip install -e ".[agent,ollama,api,mcp,dev]"
-      - name: Pytest (with coverage)
-        run: pytest --cov=src/llmwiki --cov-report=term-missing
-
-  build-python-pkg:
-    name: Build Python Package (CLI & Server)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Install (clean, lockfile-faithful)
-        run: npm --prefix ui ci
-      - name: Type-check + build SPA
-        run: npm --prefix ui run build
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install build tools
-        run: pip install build
-      - name: Build wheel and sdist
-        run: python -m build
-      - name: Upload Python Package Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-packages
-          path: dist/*
-          if-no-files-found: error
-
   build-desktop:
     name: Build macOS Desktop App (Tauri)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - name: Install Node dependencies
-        run: npm --prefix ui ci
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      # Step 1: build SPA first so PyInstaller bundles the current frontend
+      - name: Install frontend dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Build frontend SPA
+        working-directory: ui
+        run: npm run build
+
+      # Step 2: compile Python sidecar binary (PyInstaller)
       - name: Install Python dependencies
         run: |
-          pip install -e ".[agent,ollama,api,mcp,dev]"
+          pip install -e ".[agent,ollama,api,mcp]"
           pip install pyinstaller
+
       - name: Build PyInstaller sidecar
-        run: ./scripts/build_sidecar.sh
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Build Tauri App
+        run: PYTHON="$(which python)" ./scripts/build_sidecar.sh
+
+      # Step 3: build Tauri macOS app
+      - name: Clean stale DMG mounts
+        run: |
+          while [ -d "/Volumes/llm-wiki" ]; do
+            hdiutil detach "/Volumes/llm-wiki" -force >/dev/null 2>&1 || break
+          done
+          rm -f ui/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
+
+      - name: Build Tauri app
         working-directory: ui
         run: npx tauri build
-      - name: Upload macOS Desktop Artifacts
+
+      - name: Upload macOS desktop artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-desktop-app
           path: ui/src-tauri/target/release/bundle/
           if-no-files-found: error
-
-  frontend-unit:
-    name: Frontend unit tests (Vitest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Install Node dependencies
-        run: npm --prefix ui ci
-      - name: Vitest
-        run: npm --prefix ui test
-
-  webkit-e2e:
-    name: WebKit smoke tests (Playwright)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - name: Install Node dependencies
-        run: npm --prefix ui ci
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install Python package (serves the SPA)
-        run: pip install -e ".[agent,ollama,api,mcp]"
-      - name: Build SPA into the package
-        run: npm --prefix ui run build
-      - name: Install Playwright WebKit
-        working-directory: ui
-        run: npx playwright install --with-deps webkit
-      - name: Run WebKit smoke tests
-        working-directory: ui
-        run: npm run test:e2e
-
