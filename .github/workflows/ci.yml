@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dev deps
-        run: pip install -e ".[agent,ollama,api,mcp,dev]"
+        run: pip install -e ".[agent,ollama,anthropic,openai,google,api,mcp,dev]"
       - name: Ruff
         run: ruff check src/ tests/
       - name: Mypy

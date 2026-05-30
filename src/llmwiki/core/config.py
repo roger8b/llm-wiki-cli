@@ -133,9 +133,17 @@ def update_config(patch: dict[str, object]) -> None:
             continue
         if key == "providers" and isinstance(patch[key], dict):
             # deep-merge per-provider settings instead of replacing the map
-            current = dict(data.get("providers") or {})
-            for prov, settings in patch[key].items():
-                merged = dict(current.get(prov) or {})
+            providers_val = data.get("providers")
+            current: dict[str, object] = (
+                dict(providers_val) if isinstance(providers_val, dict) else {}
+            )
+            patch_providers = patch[key]
+            assert isinstance(patch_providers, dict)
+            for prov, settings in patch_providers.items():
+                prov_val = current.get(prov)
+                merged: dict[str, object] = (
+                    dict(prov_val) if isinstance(prov_val, dict) else {}
+                )
                 if isinstance(settings, dict):
                     merged.update(settings)
                 current[prov] = merged
