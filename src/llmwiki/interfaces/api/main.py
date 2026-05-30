@@ -27,6 +27,8 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from .deps import get_paths
 from .routers import (
@@ -66,7 +68,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def require_api_token(request: Request, call_next: Any) -> Any:
+async def require_api_token(request: Request, call_next: RequestResponseEndpoint) -> Response:
     """Gate /api/* on a per-session token when WIKI_API_TOKEN is set.
 
     The desktop shell generates a random token, passes it to this sidecar via the

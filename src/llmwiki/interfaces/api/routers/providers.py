@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Body, HTTPException, Response
 
@@ -68,9 +68,7 @@ def providers_update(
         settings["model"] = model or None
     if settings:
         update_config({"providers": {provider: settings}})
-    all_status: dict[str, Any] = _provider_status()
-    result: dict[str, Any] = all_status[provider]
-    return result
+    return cast(dict[str, Any], _provider_status()[provider])
 
 
 @router.delete("/{provider}/key")
@@ -81,9 +79,7 @@ def providers_delete_key(provider: str) -> dict[str, Any]:
     if provider not in _REMOTE_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
     delete_api_key(provider)
-    all_status: dict[str, Any] = _provider_status()
-    result: dict[str, Any] = all_status[provider]
-    return result
+    return cast(dict[str, Any], _provider_status()[provider])
 
 
 @router.post("/ollama/pull")

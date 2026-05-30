@@ -56,6 +56,9 @@ def _build_model(cfg: WorkspaceConfig) -> Any:
     except ImportError:
         return model_str  # fallback: let DeepAgents resolve
 
+    # NOTE: mypy strict requires the langchain extras (`ollama`, `openai`, ...)
+    # to be installed; without them ChatOllama is `Any` and these declarations
+    # would trip `[misc]` / `[override]` errors. CI lint job installs all extras.
     class _NoStreamOllama(ChatOllama):
         """ChatOllama subclass that always uses stream=False in HTTP requests."""
 

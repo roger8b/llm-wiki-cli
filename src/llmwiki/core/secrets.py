@@ -10,10 +10,7 @@ env-based setups keep working.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 _SERVICE = "llm-wiki"
 

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, HTTPException
 
 from ..deps import get_paths
+
+if TYPE_CHECKING:
+    from ....core.brains import BrainInfo
 
 router = APIRouter()
 
@@ -82,16 +85,15 @@ def create_and_init_brain(
     from ....services import scaffold_service
 
     root = Path(path).expanduser().resolve()
+    brain: BrainInfo | None
     try:
         if (root / ".llmwiki").exists():
             brain = reg.register_or_get(root, name=name, activate=activate)
         else:
             paths = scaffold_service.init_brain(root, git=False)
-            brain = get_brain(paths.brain_id or "")  # type: ignore[assignment]
+            brain = get_brain(paths.brain_id or "")
         if brain is None:
             raise HTTPException(status_code=500, detail="Brain registration failed.")
-        # brain is BrainInfo | None per above check
-        assert brain is not None  # help type narrowing
         updates: dict[str, str] = {}
         if name and brain.name != name:
             updates["name"] = name
