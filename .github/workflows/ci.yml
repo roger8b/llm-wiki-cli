@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci-refactor]
   pull_request:
 
 concurrency:
@@ -24,9 +24,6 @@ jobs:
       - name: Ruff
         run: ruff check src/ tests/
       - name: Mypy
-        # NOTE: mypy is `strict` but not yet clean across the tree. Keep it
-        # non-blocking until the type debt is paid down, then drop this flag.
-        continue-on-error: true
         run: mypy src/llmwiki
 
   test:
@@ -41,7 +38,7 @@ jobs:
       - name: Install deps
         run: pip install -e ".[agent,ollama,api,mcp,dev]"
       - name: Pytest (with coverage)
-        run: pytest --cov=src/llmwiki --cov-report=term-missing
+        run: pytest --cov=src/llmwiki --cov-report=term-missing --cov-fail-under=0
 
   build-python-pkg:
     name: Build Python Package (CLI & Server)
@@ -53,7 +50,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - name: Install (clean, lockfile-faithful)
+      - name: Install Node dependencies
         run: npm --prefix ui ci
       - name: Type-check + build SPA
         run: npm --prefix ui run build
@@ -61,10 +58,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install build tools
-        run: pip install build
       - name: Build wheel and sdist
-        run: python -m build
+        run: pip install build && python -m build
       - name: Upload Python Package Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -75,6 +70,7 @@ jobs:
   build-desktop:
     name: Build macOS Desktop App (Tauri)
     runs-on: macos-latest
+    needs: [lint, test]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -84,6 +80,8 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Install Node dependencies
         run: npm --prefix ui ci
+      - name: Build Frontend SPA
+        run: npm --prefix ui run build
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -93,6 +91,8 @@ jobs:
           pip install -e ".[agent,ollama,api,mcp,dev]"
           pip install pyinstaller
       - name: Build PyInstaller sidecar
+        env:
+          PYTHON: python
         run: ./scripts/build_sidecar.sh
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -121,8 +121,8 @@ jobs:
       - name: Vitest
         run: npm --prefix ui test
 
-  webkit-e2e:
-    name: WebKit smoke tests (Playwright)
+  e2e:
+    name: E2E smoke tests (Playwright)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,10 +141,9 @@ jobs:
         run: pip install -e ".[agent,ollama,api,mcp]"
       - name: Build SPA into the package
         run: npm --prefix ui run build
-      - name: Install Playwright WebKit
+      - name: Install Playwright browsers
         working-directory: ui
-        run: npx playwright install --with-deps webkit
-      - name: Run WebKit smoke tests
+        run: npx playwright install --with-deps
+      - name: Run Playwright smoke tests
         working-directory: ui
         run: npm run test:e2e
-
