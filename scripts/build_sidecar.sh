@@ -33,7 +33,12 @@ echo "==> Target triple: $TRIPLE"
 # --- ensure pyinstaller -------------------------------------------------
 if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
   echo "==> Installing pyinstaller"
-  "$PY" -m pip install --quiet pyinstaller
+  # On macOS/Homebrew and other PEP-668-compliant distros, pip refuses to
+  # install into the system Python. Use --break-system-packages as a last
+  # resort for local builds where no venv is available.
+  PIP_FLAGS="--quiet"
+  "$PY" -m pip install $PIP_FLAGS --break-system-packages pyinstaller || \
+    "$PY" -m pip install $PIP_FLAGS pyinstaller
 fi
 
 # --- build --------------------------------------------------------------
