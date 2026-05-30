@@ -19,7 +19,6 @@ cd "$ROOT"
 
 echo "==> 2. Compiling Python sidecar backend binary..."
 # Resolve Python: prefer .venv if it exists, otherwise fall back to system python3.
-# (local dev may use a venv; CI always uses system python via setup-python action.)
 if [ -f ".venv/bin/python" ]; then
   PYTHON=".venv/bin/python"
 else
