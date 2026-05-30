@@ -1,41 +1,53 @@
-#!/usr/bin/env bash
-# Automation script to compile the Python sidecar and build the Tauri desktop app.
-set -euo pipefail
+build-desktop:
+    name: Build macOS Desktop App (Tauri)
+    runs-on: macos-latest
+    needs: [lint, test-python, frontend-unit] # Executa após as validações
+    
+    steps:
+      - uses: actions/checkout@v4
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT"
+      # 1. Configura o Node e faz o Build do SPA primeiro (Igual ao Passo 1 do local)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install Node dependencies
+        run: npm --prefix ui ci
+      - name: Build Frontend SPA
+        run: npm --prefix ui run build # <--- FALTAVA ISSO AQUI ANTES DO SIDECAR!
 
-# Build the SPA FIRST so the PyInstaller sidecar bundles the current frontend.
-# (build_sidecar collects src/llmwiki/.../dist; building it after the sidecar
-# would freeze a one-build-old SPA into the binary.)
-echo "==> 1. Building frontend SPA..."
-cd ui
-if [ ! -d "node_modules" ]; then
-  echo "==> node_modules not found, installing frontend dependencies..."
-  npm install
-fi
-npm run build
-cd "$ROOT"
+      # 2. Configura o Python e instala dependências no escopo global
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          pip install -e ".[agent,ollama,api,mcp,dev]"
+          pip install pyinstaller
 
-echo "==> 2. Compiling Python sidecar backend binary..."
-PYTHON=.venv/bin/python ./scripts/build_sidecar.sh
+      # 3. Compila o Sidecar (Passo 2 do local)
+      # Injetamos a variável PYTHON apontando para o binário global da CI
+      # para o seu script 'build_sidecar.sh' não quebrar procurando o .venv
+      <--- Note a linha env abaixo
+      - name: Build PyInstaller sidecar
+        env:
+          PYTHON: python 
+        run: ./scripts/build_sidecar.sh
 
-echo "==> 3. Building Tauri macOS application..."
-# bundle_dmg.sh fails if a volume named "llm-wiki" from a previous DMG is still
-# mounted — detach any stragglers and remove leftover temp DMGs first.
-while [ -d "/Volumes/llm-wiki" ]; do
-  echo "==> Detaching stale /Volumes/llm-wiki"
-  hdiutil detach "/Volumes/llm-wiki" -force >/dev/null 2>&1 || break
-done
-rm -f ui/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
+      # 4. Configura o Rust e faz o Build do Tauri (Passo 3 do local)
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        
+      - name: Build Tauri App
+        working-directory: ui
+        run: npx tauri build
 
-cd ui
-npx tauri build
-
-echo ""
-echo "=========================================================="
-echo "SUCCESS: App built successfully!"
-echo "=========================================================="
-echo "Installer DMG: ui/src-tauri/target/release/bundle/dmg/llm-wiki_2.0.0_aarch64.dmg"
-echo "App Bundle:    ui/src-tauri/target/release/bundle/macos/llm-wiki.app"
-echo "=========================================================="
+      # 5. Coleta os artefatos gerados (.app / .dmg)
+      - name: Upload macOS Desktop Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-desktop-app
+          path: ui/src-tauri/target/release/bundle/
+          if-no-files-found: error
