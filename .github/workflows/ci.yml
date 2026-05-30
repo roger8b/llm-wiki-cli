@@ -11,17 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pre-commit:
-    name: Pre-commit hooks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-      - uses: pre-commit/action@v3.0.1
-
   lint:
     name: Lint & type-check (Python)
     runs-on: ubuntu-latest
