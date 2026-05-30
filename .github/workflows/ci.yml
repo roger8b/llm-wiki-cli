@@ -10,19 +10,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint & type-check (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dev deps
+        run: pip install -e ".[agent,ollama,api,mcp,dev]"
+      - name: Ruff
+        run: ruff check src/ tests/
+      - name: Mypy
+        # mypy is `strict` but not yet clean across the tree — keep non-blocking
+        # until the type debt is paid down, then drop continue-on-error.
+        continue-on-error: true
+        run: mypy src/llmwiki
+
+  test:
+    name: Tests (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -e ".[agent,ollama,api,mcp,dev]"
+      - name: Pytest (with coverage)
+        run: pytest --cov=src/llmwiki --cov-report=term-missing
+
   build-desktop:
     name: Build macOS Desktop App (Tauri)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -60,7 +93,7 @@ jobs:
         run: npx tauri build
 
       - name: Upload macOS desktop artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: macos-desktop-app
           path: ui/src-tauri/target/release/bundle/
