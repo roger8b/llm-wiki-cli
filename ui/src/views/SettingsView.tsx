@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import {
   Settings as SettingsIcon,
   Loader2,
-  Terminal,
   Check,
   X,
   AlertTriangle,
@@ -24,7 +23,6 @@ import type {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { BrainSettings } from "@/components/settings/BrainSettings"
 
 type Provider = "ollama" | ProviderName
@@ -46,20 +44,66 @@ function meta(p: Provider) {
   return PROVIDERS.find((x) => x.id === p)!
 }
 
-function Field({
-  label,
-  hint,
+type Section = "general" | "model" | "search" | "security" | "tools"
+
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "model", label: "Model" },
+  { id: "search", label: "Search" },
+  { id: "security", label: "Security" },
+  { id: "tools", label: "Tools" },
+]
+
+/** Card section matching the prototype: header (title + desc) over stacked rows. */
+function Section({
+  title,
+  desc,
+  danger,
   children,
 }: {
-  label: string
-  hint?: string
+  title: string
+  desc?: string
+  danger?: boolean
   children: React.ReactNode
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label className="text-[11px]">{label}</Label>
-      {children}
-      {hint && <p className="text-[12px] text-muted-foreground">{hint}</p>}
+    <div
+      className={cn(
+        "mb-4 overflow-hidden rounded-lg border bg-card",
+        danger && "border-rejected/30",
+      )}
+    >
+      <div
+        className={cn(
+          "border-b px-4 pb-3 pt-3.5",
+          danger ? "bg-rejected/5" : "bg-muted/40",
+        )}
+      >
+        <h3 className={cn("text-[13.5px] font-semibold", danger && "text-rejected")}>{title}</h3>
+        {desc && <p className="mt-0.5 text-[12px] text-muted-foreground">{desc}</p>}
+      </div>
+      <div>{children}</div>
+    </div>
+  )
+}
+
+/** Horizontal label/control row (label left, control right) like the prototype. */
+function Row({
+  name,
+  desc,
+  children,
+}: {
+  name: string
+  desc?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-4 border-b px-4 py-3 last:border-b-0">
+      <div className="flex-1">
+        <span className="block text-[13.5px] font-medium">{name}</span>
+        {desc && <span className="mt-0.5 block text-[12px] text-muted-foreground">{desc}</span>}
+      </div>
+      <div className="shrink-0">{children}</div>
     </div>
   )
 }
@@ -67,6 +111,7 @@ function Field({
 export function SettingsView() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [section, setSection] = useState<Section>("general")
 
   // ── model state ──
   const [provider, setProvider] = useState<Provider>("ollama")
@@ -210,6 +255,22 @@ export function SettingsView() {
     }
   }
 
+  function discard() {
+    try {
+      const s = JSON.parse(snapshot)
+      setProvider(s.provider)
+      setModelName(s.modelName)
+      setBaseUrl(s.baseUrl)
+      setTemperature(s.temperature)
+      setNumCtx(s.numCtx)
+      setReqTimeout(s.reqTimeout)
+      setFtsLimit(s.ftsLimit)
+      setTest(null)
+    } catch {
+      /* snapshot malformed — nothing to restore */
+    }
+  }
+
   async function saveKey() {
     if (!keyInput || isLocal) return
     setKeyBusy(true)
@@ -304,370 +365,430 @@ export function SettingsView() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="mx-auto max-w-[680px]">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="flex items-center gap-2 font-display text-lg font-semibold">
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex-1 overflow-y-auto px-9 py-7">
+        <div className="mx-auto max-w-[820px]">
+          <h1 className="mb-7 flex items-center gap-2 font-display text-xl font-semibold tracking-[-0.3px]">
             <SettingsIcon className="size-5 text-primary" /> Settings
           </h1>
-          <Button onClick={save} disabled={!dirty || saving} className="gap-1.5">
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            Save changes
-          </Button>
-        </div>
 
-        {/* ── Model ── */}
-        <div className="rounded-lg border bg-card p-5">
-          <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Model
-          </div>
-
-          {/* provider selector */}
-          <div className="mb-4 inline-flex rounded-md border p-0.5">
-            {PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => switchProvider(p.id)}
-                className={cn(
-                  "rounded px-3 py-1 text-[12px] font-medium transition-colors",
-                  provider === p.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            {isLocal ? (
-              <Field label="Model" hint={ollama?.running ? undefined : "Ollama not detected — start it to list models."}>
-                {ollama?.running && ollama.models.length > 0 ? (
-                  <select
-                    value={modelName}
-                    onChange={(e) => {
-                      setModelName(e.target.value)
-                      setTest(null)
-                    }}
-                    className="w-full rounded-md border bg-background px-3 py-2 font-mono text-[13px]"
-                  >
-                    {[...new Set([...ollama.models, modelName])].map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    value={modelName}
-                    onChange={(e) => setModelName(e.target.value)}
-                    className="font-mono"
-                    placeholder="llama3.1"
-                  />
-                )}
-              </Field>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Base URL">
-                    <Input
-                      value={baseUrl}
-                      onChange={(e) => setBaseUrl(e.target.value)}
-                      placeholder={meta(provider).urlPlaceholder}
-                      className="font-mono text-[12px]"
-                    />
-                  </Field>
-                  <Field label="Model">
-                    <Input
-                      value={modelName}
-                      onChange={(e) => {
-                        setModelName(e.target.value)
-                        setTest(null)
-                      }}
-                      placeholder={meta(provider).defaultModel}
-                      className="font-mono text-[12px]"
-                    />
-                  </Field>
-                </div>
-
-                <Field label="API key">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="password"
-                      value={keyInput}
-                      onChange={(e) => setKeyInput(e.target.value)}
-                      placeholder={hasKey ? "•••••••••• (stored — type to replace)" : "paste your key"}
-                      className="flex-1 font-mono text-[12px]"
-                    />
-                    <Button size="sm" onClick={saveKey} disabled={!keyInput || keyBusy} className="gap-1.5">
-                      {keyBusy && <Loader2 className="size-3.5 animate-spin" />}
-                      Save key
-                    </Button>
-                    {hasKey && (
-                      <Button size="sm" variant="outline" onClick={clearKey} disabled={keyBusy}>
-                        Clear
-                      </Button>
-                    )}
-                  </div>
-                  <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                    {hasKey ? (
-                      <>
-                        <KeyRound className="size-3.5 text-apply" /> key stored in OS keychain
-                      </>
-                    ) : (
-                      <>
-                        <Lock className="size-3.5" /> stored in the OS keychain — never in config files
-                      </>
-                    )}
-                  </p>
-                </Field>
-              </>
-            )}
-
-            {/* shared: temperature */}
-            <Field
-              label="Temperature"
-              hint="0 = deterministic, higher = more creative. Empty = provider default."
-            >
-              <Input
-                type="number"
-                step="0.1"
-                min="0"
-                max="2"
-                value={temperature ?? ""}
-                placeholder="default"
-                onChange={(e) =>
-                  setTemperature(e.target.value === "" ? null : Number(e.target.value))
-                }
-                className="w-32"
-              />
-            </Field>
-
-            {/* ollama-only tuning */}
-            {isLocal && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Context window (num_ctx)"
-                  hint="Larger = reads more, fuller answers (more RAM)."
-                >
-                  <Input
-                    type="number"
-                    step="1024"
-                    min="512"
-                    value={numCtx}
-                    onChange={(e) => setNumCtx(Number(e.target.value))}
-                  />
-                </Field>
-                <Field label="Request timeout (s)">
-                  <Input
-                    type="number"
-                    step="30"
-                    min="10"
-                    value={reqTimeout}
-                    onChange={(e) => setReqTimeout(Number(e.target.value))}
-                  />
-                </Field>
-              </div>
-            )}
-
-            {/* test + active */}
-            <div className="flex items-center gap-3 border-t pt-3">
-              <Button variant="outline" size="sm" onClick={runTest} disabled={testing} className="gap-1.5">
-                {testing && <Loader2 className="size-4 animate-spin" />}
-                Test connection
-              </Button>
-              {test && (
-                <span
+          <div className="flex gap-8">
+            {/* ── section nav ── */}
+            <nav className="flex w-40 shrink-0 flex-col gap-0.5">
+              {SECTIONS.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSection(s.id)}
                   className={cn(
-                    "flex items-center gap-1 text-[12px]",
-                    test.ok ? "text-apply" : "text-rejected",
+                    "rounded-md px-2.5 py-2 text-left text-[13px] transition-colors",
+                    section === s.id
+                      ? "bg-card font-medium text-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
-                  {test.ok ? <Check className="size-4" /> : <X className="size-4" />}
-                  {test.detail}
-                </span>
-              )}
-              <span className="ml-auto font-mono text-[11px] text-muted-foreground">
-                active: {modelString}
-              </span>
-            </div>
-          </div>
-        </div>
+                  {s.label}
+                </button>
+              ))}
+            </nav>
 
-        {/* ── Search ── */}
-        <div className="mt-4 rounded-lg border bg-card p-5">
-          <div className="mb-4 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Search
-          </div>
-          <Field label="FTS limit" hint="Max full-text search results per query.">
-            <Input
-              type="number"
-              min="1"
-              value={ftsLimit}
-              onChange={(e) => setFtsLimit(Number(e.target.value))}
-              className="w-24"
-            />
-          </Field>
-        </div>
-
-        {/* ── Brain Configuration ── */}
-        <BrainSettings />
-
-        {/* ── Command-line tools ── */}
-        <div className="mt-4 rounded-lg border bg-card p-5">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            <Terminal className="size-3.5" /> Command-line tools
-          </div>
-          <p className="mb-3 text-[12px] text-muted-foreground">
-            Install the <code>wiki</code> command so you (and AI agents) can use
-            it from a terminal.
-          </p>
-          {cli && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-[13px]">
-                {cli.found_on_path ? (
-                  <>
-                    <Check className="size-4 text-apply" />
-                    <span>
-                      Installed — <code>wiki</code> v{cli.version}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="size-4 text-pending" />
-                    <span>Not installed</span>
-                  </>
-                )}
-              </div>
-              <div className="font-mono text-[11px] text-muted-foreground">{cli.path}</div>
-              {cli.installed && !cli.on_path && (
-                <div className="rounded-md border border-pending/30 bg-pending/10 px-3 py-2 text-[12px]">
-                  <AlertTriangle className="mr-1 inline size-3.5 text-pending" />
-                  <code>~/.local/bin</code> isn't on your <code>PATH</code>:
-                  <pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-[11px]">
-                    export PATH="$HOME/.local/bin:$PATH"
-                  </pre>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <Button size="sm" onClick={cliInstall} disabled={cliBusy} className="gap-1.5">
-                  {cliBusy && <Loader2 className="size-4 animate-spin" />}
-                  {cli.installed ? "Reinstall" : "Install"}
-                </Button>
-                {cli.installed && (
-                  <Button size="sm" variant="outline" onClick={cliUninstall} disabled={cliBusy}>
-                    Uninstall
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── Agent skills ── */}
-        <div className="mt-4 rounded-lg border bg-card p-5">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            <Terminal className="size-3.5" /> Agent skills
-          </div>
-          <p className="mb-3 text-[12px] text-muted-foreground">
-            Install skills (from the central store <code>~/.wiki/skills</code>, via
-            symlink) so your AI agents can use this wiki. Pick agents, scope, and method.
-          </p>
-          {skills && (
-            <div className="space-y-3">
-              {/* agents */}
-              <div className="space-y-1">
-                {skillAgents.map((a) => (
-                  <label key={a.name} className="flex items-center gap-2 text-[13px]">
-                    <Checkbox
-                      checked={selectedAgents.has(a.name)}
-                      onCheckedChange={(v) =>
-                        setSelectedAgents((prev) => {
-                          const n = new Set(prev)
-                          if (v) n.add(a.name)
-                          else n.delete(a.name)
-                          return n
-                        })
-                      }
-                    />
-                    {a.display}
-                    {a.detected && (
-                      <span className="text-[11px] text-apply">(detected)</span>
-                    )}
-                  </label>
-                ))}
-              </div>
-
-              {/* scope + method toggles */}
-              <div className="flex flex-wrap gap-4 text-[12px]">
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">Scope:</span>
-                  {(["local", "global", "both"] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSkillScope(s)}
-                      className={cn(
-                        "rounded px-2 py-0.5",
-                        skillScope === s ? "bg-primary text-primary-foreground" : "hover:bg-accent",
-                      )}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground">Method:</span>
-                  {(["symlink", "copy"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setSkillMethod(m)}
-                      className={cn(
-                        "rounded px-2 py-0.5",
-                        skillMethod === m ? "bg-primary text-primary-foreground" : "hover:bg-accent",
-                      )}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {skills.installs.length > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  Installed in {skills.installs.length} location(s) · {skills.available.length} skills
-                  in store
-                </p>
+            {/* ── content ── */}
+            <div className="min-w-0 flex-1 max-w-[600px]">
+              {/* ── General ── */}
+              {section === "general" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">General</div>
+                  <BrainSettings />
+                </>
               )}
 
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={installSkills}
-                  disabled={skillsBusy || selectedAgents.size === 0}
-                  className="gap-1.5"
-                >
-                  {skillsBusy && <Loader2 className="size-4 animate-spin" />}
-                  {skills.installs.length > 0 ? "Reinstall / update" : "Install"}
-                </Button>
-                {skills.installs.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={removeSkills}
-                    disabled={skillsBusy}
+              {/* ── Model ── */}
+              {section === "model" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Model</div>
+                  <Section
+                    title="LLM provider"
+                    desc="Which model powers ingest, ask, and lint"
                   >
-                    Remove all
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+                    <Row name="Provider" desc="Local providers run on your machine; others need an API key.">
+                      <div className="inline-flex rounded-md border p-0.5">
+                        {PROVIDERS.map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => switchProvider(p.id)}
+                            className={cn(
+                              "rounded px-3 py-1 text-[12px] font-medium transition-colors",
+                              provider === p.id
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </Row>
 
-        <p className="mt-4 text-center font-mono text-[11px] text-muted-foreground">
-          ~/.wiki/config.yaml · keys in OS keychain
-        </p>
+                    {isLocal ? (
+                      <Row
+                        name="Model"
+                        desc={ollama?.running ? "Used for wiki generation and Q&A." : "Ollama not detected — start it to list models."}
+                      >
+                        {ollama?.running && ollama.models.length > 0 ? (
+                          <select
+                            value={modelName}
+                            onChange={(e) => {
+                              setModelName(e.target.value)
+                              setTest(null)
+                            }}
+                            className="w-[220px] rounded-md border bg-background px-3 py-2 font-mono text-[13px]"
+                          >
+                            {[...new Set([...ollama.models, modelName])].map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            value={modelName}
+                            onChange={(e) => setModelName(e.target.value)}
+                            className="w-[220px] font-mono"
+                            placeholder="llama3.1"
+                          />
+                        )}
+                      </Row>
+                    ) : (
+                      <>
+                        <Row name="Model name" desc="Used for wiki generation and Q&A.">
+                          <Input
+                            value={modelName}
+                            onChange={(e) => {
+                              setModelName(e.target.value)
+                              setTest(null)
+                            }}
+                            placeholder={meta(provider).defaultModel}
+                            className="w-[220px] font-mono text-[12px]"
+                          />
+                        </Row>
+                        <Row name="API base URL" desc="Leave default for the provider. Set for self-hosted models.">
+                          <Input
+                            value={baseUrl}
+                            onChange={(e) => setBaseUrl(e.target.value)}
+                            placeholder={meta(provider).urlPlaceholder}
+                            className="w-[240px] font-mono text-[12px]"
+                          />
+                        </Row>
+                      </>
+                    )}
+
+                    <Row name="Temperature" desc="0 = deterministic, higher = more creative. Empty = provider default.">
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="2"
+                        value={temperature ?? ""}
+                        placeholder="default"
+                        onChange={(e) =>
+                          setTemperature(e.target.value === "" ? null : Number(e.target.value))
+                        }
+                        className="w-20"
+                      />
+                    </Row>
+
+                    {isLocal && (
+                      <>
+                        <Row name="Context window" desc="num_ctx — larger reads more, fuller answers (more RAM).">
+                          <Input
+                            type="number"
+                            step="1024"
+                            min="512"
+                            value={numCtx}
+                            onChange={(e) => setNumCtx(Number(e.target.value))}
+                            className="w-28"
+                          />
+                        </Row>
+                        <Row name="Request timeout (s)">
+                          <Input
+                            type="number"
+                            step="30"
+                            min="10"
+                            value={reqTimeout}
+                            onChange={(e) => setReqTimeout(Number(e.target.value))}
+                            className="w-28"
+                          />
+                        </Row>
+                      </>
+                    )}
+
+                    <Row name="Connection" desc={`active: ${modelString}`}>
+                      <div className="flex items-center gap-3">
+                        {test && (
+                          <span
+                            className={cn(
+                              "flex items-center gap-1 text-[12px]",
+                              test.ok ? "text-apply" : "text-rejected",
+                            )}
+                          >
+                            {test.ok ? <Check className="size-4" /> : <X className="size-4" />}
+                            {test.detail}
+                          </span>
+                        )}
+                        <Button variant="outline" size="sm" onClick={runTest} disabled={testing} className="gap-1.5">
+                          {testing && <Loader2 className="size-4 animate-spin" />}
+                          Test connection
+                        </Button>
+                      </div>
+                    </Row>
+                  </Section>
+                </>
+              )}
+
+              {/* ── Search ── */}
+              {section === "search" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Search</div>
+                  <Section title="Retrieval" desc="How wiki content is searched and retrieved">
+                    <Row name="FTS limit" desc="Max full-text search results per query.">
+                      <Input
+                        type="number"
+                        min="1"
+                        value={ftsLimit}
+                        onChange={(e) => setFtsLimit(Number(e.target.value))}
+                        className="w-24"
+                      />
+                    </Row>
+                  </Section>
+                </>
+              )}
+
+              {/* ── Security ── */}
+              {section === "security" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Security</div>
+                  <Section
+                    title="API key"
+                    desc="Stored in the OS keychain — never written to config files"
+                  >
+                    {isLocal ? (
+                      <Row name={`${meta(provider).label} key`} desc="Local providers don't need an API key.">
+                        <span className="text-[12px] text-muted-foreground">Not required</span>
+                      </Row>
+                    ) : (
+                      <Row
+                        name={`${meta(provider).label} key`}
+                        desc={hasKey ? "Key stored in keychain — type to replace." : "Paste your key to store it securely."}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="password"
+                            value={keyInput}
+                            onChange={(e) => setKeyInput(e.target.value)}
+                            placeholder={hasKey ? "•••••••••• (stored)" : "paste your key"}
+                            className="w-[220px] font-mono text-[12px]"
+                          />
+                          <Button size="sm" onClick={saveKey} disabled={!keyInput || keyBusy} className="gap-1.5">
+                            {keyBusy && <Loader2 className="size-3.5 animate-spin" />}
+                            Save
+                          </Button>
+                          {hasKey && (
+                            <Button size="sm" variant="outline" onClick={clearKey} disabled={keyBusy}>
+                              Clear
+                            </Button>
+                          )}
+                        </div>
+                      </Row>
+                    )}
+                    <Row name="Storage" desc="Keys live in your OS keychain, scoped to the selected provider.">
+                      <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                        {hasKey ? (
+                          <>
+                            <KeyRound className="size-3.5 text-apply" /> stored
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="size-3.5" /> keychain
+                          </>
+                        )}
+                      </span>
+                    </Row>
+                  </Section>
+                </>
+              )}
+
+              {/* ── Tools ── */}
+              {section === "tools" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Tools</div>
+
+                  <Section
+                    title="Command-line tools"
+                    desc="Install the wiki command so you (and AI agents) can use it from a terminal"
+                  >
+                    {cli && (
+                      <div className="space-y-3 p-4">
+                        <div className="flex items-center gap-2 text-[13px]">
+                          {cli.found_on_path ? (
+                            <>
+                              <Check className="size-4 text-apply" />
+                              <span>
+                                Installed — <code>wiki</code> v{cli.version}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="size-4 text-pending" />
+                              <span>Not installed</span>
+                            </>
+                          )}
+                        </div>
+                        <div className="font-mono text-[11px] text-muted-foreground">{cli.path}</div>
+                        {cli.installed && !cli.on_path && (
+                          <div className="rounded-md border border-pending/30 bg-pending/10 px-3 py-2 text-[12px]">
+                            <AlertTriangle className="mr-1 inline size-3.5 text-pending" />
+                            <code>~/.local/bin</code> isn't on your <code>PATH</code>:
+                            <pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-[11px]">
+                              export PATH="$HOME/.local/bin:$PATH"
+                            </pre>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={cliInstall} disabled={cliBusy} className="gap-1.5">
+                            {cliBusy && <Loader2 className="size-4 animate-spin" />}
+                            {cli.installed ? "Reinstall" : "Install"}
+                          </Button>
+                          {cli.installed && (
+                            <Button size="sm" variant="outline" onClick={cliUninstall} disabled={cliBusy}>
+                              Uninstall
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section
+                    title="Agent skills"
+                    desc="Install skills from ~/.wiki/skills so your AI agents can use this wiki"
+                  >
+                    {skills && (
+                      <div className="space-y-3 p-4">
+                        {/* agents */}
+                        <div className="space-y-1">
+                          {skillAgents.map((a) => (
+                            <label key={a.name} className="flex items-center gap-2 text-[13px]">
+                              <Checkbox
+                                checked={selectedAgents.has(a.name)}
+                                onCheckedChange={(v) =>
+                                  setSelectedAgents((prev) => {
+                                    const n = new Set(prev)
+                                    if (v) n.add(a.name)
+                                    else n.delete(a.name)
+                                    return n
+                                  })
+                                }
+                              />
+                              {a.display}
+                              {a.detected && (
+                                <span className="text-[11px] text-apply">(detected)</span>
+                              )}
+                            </label>
+                          ))}
+                        </div>
+
+                        {/* scope + method toggles */}
+                        <div className="flex flex-wrap gap-4 text-[12px]">
+                          <div className="flex items-center gap-1">
+                            <span className="text-muted-foreground">Scope:</span>
+                            {(["local", "global", "both"] as const).map((s) => (
+                              <button
+                                key={s}
+                                onClick={() => setSkillScope(s)}
+                                className={cn(
+                                  "rounded px-2 py-0.5",
+                                  skillScope === s ? "bg-primary text-primary-foreground" : "hover:bg-accent",
+                                )}
+                              >
+                                {s}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-muted-foreground">Method:</span>
+                            {(["symlink", "copy"] as const).map((m) => (
+                              <button
+                                key={m}
+                                onClick={() => setSkillMethod(m)}
+                                className={cn(
+                                  "rounded px-2 py-0.5",
+                                  skillMethod === m ? "bg-primary text-primary-foreground" : "hover:bg-accent",
+                                )}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {skills.installs.length > 0 && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Installed in {skills.installs.length} location(s) · {skills.available.length} skills
+                            in store
+                          </p>
+                        )}
+
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={installSkills}
+                            disabled={skillsBusy || selectedAgents.size === 0}
+                            className="gap-1.5"
+                          >
+                            {skillsBusy && <Loader2 className="size-4 animate-spin" />}
+                            {skills.installs.length > 0 ? "Reinstall / update" : "Install"}
+                          </Button>
+                          {skills.installs.length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={removeSkills}
+                              disabled={skillsBusy}
+                            >
+                              Remove all
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+
+                  <p className="mt-4 text-center font-mono text-[11px] text-muted-foreground">
+                    ~/.wiki/config.yaml · keys in OS keychain
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── sticky save bar ── */}
+      <div className="flex items-center gap-3 border-t bg-card px-9 py-3">
+        <span
+          className={cn(
+            "flex-1 text-[12.5px]",
+            dirty ? "text-pending" : "text-muted-foreground",
+          )}
+        >
+          {dirty ? "Unsaved changes" : ""}
+        </span>
+        <Button variant="outline" size="sm" onClick={discard} disabled={!dirty || saving}>
+          Discard
+        </Button>
+        <Button onClick={save} disabled={!dirty || saving} className="gap-1.5">
+          {saving && <Loader2 className="size-4 animate-spin" />}
+          Save changes
+        </Button>
       </div>
     </div>
   )
