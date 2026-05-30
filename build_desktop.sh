@@ -38,7 +38,7 @@ done
 rm -f ui/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
 
 cd ui
-npx tauri build
+npx tauri build --no-bundle dmg
 
 echo ""
 echo "=========================================================="
