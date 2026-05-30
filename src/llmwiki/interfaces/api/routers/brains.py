@@ -87,9 +87,11 @@ def create_and_init_brain(
             brain = reg.register_or_get(root, name=name, activate=activate)
         else:
             paths = scaffold_service.init_brain(root, git=False)
-            brain = get_brain(paths.brain_id or "")
+            brain = get_brain(paths.brain_id or "")  # type: ignore[assignment]
         if brain is None:
             raise HTTPException(status_code=500, detail="Brain registration failed.")
+        # brain is BrainInfo | None per above check
+        assert brain is not None  # help type narrowing
         updates: dict[str, str] = {}
         if name and brain.name != name:
             updates["name"] = name

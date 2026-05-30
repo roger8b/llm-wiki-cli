@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from ..core.config import load_config
 from ..core.paths import load_active_brain, resolve_input
@@ -68,7 +69,7 @@ class JobWorker(threading.Thread):
 
                     # 4. Execute job based on type
                     cfg = load_config(paths)
-                    result_data = None
+                    result_data: dict[str, Any] | None = None
 
                     try:
                         if job_type == "ingest":
@@ -101,8 +102,11 @@ class JobWorker(threading.Thread):
                             else:
                                 findings = lint_service.lint_structural(paths)
 
+                            findings_json: list[dict[str, Any]] = [
+                                f.model_dump(mode="json") for f in findings
+                            ]
                             result_data = {
-                                "findings": [f.model_dump(mode="json") for f in findings]
+                                "findings": findings_json
                             }
                             JobRepo(conn).complete(job_id, result=json.dumps(result_data))
 

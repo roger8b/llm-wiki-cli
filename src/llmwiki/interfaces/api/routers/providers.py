@@ -68,7 +68,9 @@ def providers_update(
         settings["model"] = model or None
     if settings:
         update_config({"providers": {provider: settings}})
-    return _provider_status()[provider]
+    all_status: dict[str, Any] = _provider_status()
+    result: dict[str, Any] = all_status[provider]
+    return result
 
 
 @router.delete("/{provider}/key")
@@ -79,7 +81,9 @@ def providers_delete_key(provider: str) -> dict[str, Any]:
     if provider not in _REMOTE_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider '{provider}'.")
     delete_api_key(provider)
-    return _provider_status()[provider]
+    all_status: dict[str, Any] = _provider_status()
+    result: dict[str, Any] = all_status[provider]
+    return result
 
 
 @router.post("/ollama/pull")

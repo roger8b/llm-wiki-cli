@@ -8,11 +8,11 @@ import typer
 
 from ....core import brains as brains_registry
 from ....core.errors import WikiError
-from ....core.paths import load_active_brain
+from ....core.paths import BrainPaths, load_active_brain
 from ....services import scaffold_service
 
 
-def _brain():
+def _brain() -> BrainPaths:
     try:
         return load_active_brain()
     except WikiError as exc:

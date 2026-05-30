@@ -11,7 +11,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from ....core.errors import WikiError
-from ....core.paths import load_active_brain
+from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import JobRepo
 from ....services import change_request_service
@@ -19,7 +19,7 @@ from ....services import change_request_service
 console = Console()
 
 
-def _brain():
+def _brain() -> BrainPaths:
     try:
         return load_active_brain()
     except WikiError as exc:

@@ -12,7 +12,7 @@ from rich.table import Table
 from ....core.config import load_config
 from ....core.errors import WikiError
 from ....core.models import Severity
-from ....core.paths import load_active_brain
+from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import PageFtsRepo
 from ....services import (
@@ -25,7 +25,7 @@ from ....services import (
 console = Console()
 
 
-def _brain():
+def _brain() -> BrainPaths:
     try:
         return load_active_brain()
     except WikiError as exc:

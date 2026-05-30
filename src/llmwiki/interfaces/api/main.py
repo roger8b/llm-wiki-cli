@@ -17,6 +17,7 @@ Router split:
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
@@ -46,7 +47,7 @@ from .routers import (
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from ...workers import start_worker, stop_worker
     start_worker()
     yield
@@ -65,7 +66,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def require_api_token(request: Request, call_next):
+async def require_api_token(request: Request, call_next: Any) -> Any:
     """Gate /api/* on a per-session token when WIKI_API_TOKEN is set.
 
     The desktop shell generates a random token, passes it to this sidecar via the

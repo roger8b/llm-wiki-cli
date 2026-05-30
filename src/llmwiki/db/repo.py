@@ -213,9 +213,10 @@ class JobRepo:
         return int(cur.lastrowid or 0)
 
     def get(self, job_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
+        row: sqlite3.Row | None = self.conn.execute(
             "SELECT * FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
+        return row
 
     def complete(self, job_id: int, result: str | None = None, error: str | None = None) -> None:
         status = "error" if error else "done"
@@ -312,9 +313,10 @@ class AskHistoryRepo:
         return int(cur.lastrowid or 0)
 
     def get(self, history_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
+        row: sqlite3.Row | None = self.conn.execute(
             "SELECT * FROM ask_history WHERE id = ?", (history_id,)
         ).fetchone()
+        return row
 
     def list(self, limit: int = 50) -> list[sqlite3.Row]:
         return self.conn.execute(

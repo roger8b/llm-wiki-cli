@@ -72,7 +72,8 @@ def _read_manifest() -> dict[str, Any]:
     if not _manifest_path().is_file():
         return {"version": __version__, "installs": {}}
     try:
-        data = json.loads(_manifest_path().read_text(encoding="utf-8"))
+        raw: Any = json.loads(_manifest_path().read_text(encoding="utf-8"))
+        data: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
         data.setdefault("installs", {})
         return data
     except (json.JSONDecodeError, OSError):

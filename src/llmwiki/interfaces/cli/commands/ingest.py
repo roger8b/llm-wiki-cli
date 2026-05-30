@@ -9,12 +9,12 @@ from rich.markup import escape as esc
 
 from ....core.config import load_config
 from ....core.errors import WikiError
-from ....core.paths import load_active_brain
+from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....services import ingest_service
 
 
-def _brain():
+def _brain() -> BrainPaths:
     try:
         return load_active_brain()
     except WikiError as exc:
