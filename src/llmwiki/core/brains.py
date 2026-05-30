@@ -21,7 +21,7 @@ import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -396,9 +396,10 @@ def _db_is_empty(db: Path) -> bool:
         return True
     try:
         conn = sqlite3.connect(db)
-        n = conn.execute(
+        row = conn.execute(
             "SELECT (SELECT COUNT(*) FROM sources) + (SELECT COUNT(*) FROM wiki_pages)"
-        ).fetchone()[0]
+        ).fetchone()
+        n = cast(int, row[0]) if row else 0
         conn.close()
         return n == 0
     except sqlite3.Error:

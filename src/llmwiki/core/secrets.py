@@ -10,6 +10,7 @@ env-based setups keep working.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 _SERVICE = "llm-wiki"
 
@@ -21,7 +22,7 @@ _ENV_VAR = {
 }
 
 
-def _keyring():  # type: ignore[no-untyped-def]
+def _keyring() -> Any:
     try:
         import keyring  # noqa: PLC0415
 
@@ -43,7 +44,7 @@ def get_api_key(provider: str) -> str | None:
     kr = _keyring()
     if kr is not None:
         try:
-            stored = kr.get_password(_SERVICE, provider)
+            stored: str | None = kr.get_password(_SERVICE, provider)
             if stored:
                 return stored
         except Exception:  # noqa: BLE001

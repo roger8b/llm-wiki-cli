@@ -28,6 +28,16 @@ test("lazy route loads on direct navigation (WebKit)", async ({ page }) => {
 })
 
 test("client-side navigation between routes works (WebKit)", async ({ page }) => {
+  // Skip onboarding so the Sidebar renders. On a fresh CI brain the real
+  // /api/onboarding returns needs_onboarding=true, which makes AppShell render
+  // OnboardingFlow instead of the nav — the "Wiki" link would never appear.
+  await page.route("**/api/onboarding", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ needs_onboarding: false }),
+    }),
+  )
   const errors = trackErrors(page)
   await page.goto("/")
   await page.getByRole("link", { name: "Wiki" }).click()

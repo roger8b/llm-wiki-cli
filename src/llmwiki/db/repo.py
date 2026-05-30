@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from typing import cast
 
 from ..core.misc import now_iso
 from ..core.models import Page, Source, SourceStatus
@@ -213,9 +214,10 @@ class JobRepo:
         return int(cur.lastrowid or 0)
 
     def get(self, job_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+        return cast(
+            "sqlite3.Row | None",
+            self.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone(),
+        )
 
     def complete(self, job_id: int, result: str | None = None, error: str | None = None) -> None:
         status = "error" if error else "done"
@@ -312,9 +314,12 @@ class AskHistoryRepo:
         return int(cur.lastrowid or 0)
 
     def get(self, history_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM ask_history WHERE id = ?", (history_id,)
-        ).fetchone()
+        return cast(
+            "sqlite3.Row | None",
+            self.conn.execute(
+                "SELECT * FROM ask_history WHERE id = ?", (history_id,)
+            ).fetchone(),
+        )
 
     def list(self, limit: int = 50) -> list[sqlite3.Row]:
         return self.conn.execute(

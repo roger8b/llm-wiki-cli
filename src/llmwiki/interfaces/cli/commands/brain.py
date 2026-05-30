@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from ....core.errors import WikiError
-from ....core.paths import BrainPaths
 from ....services import scaffold_service
+
+if TYPE_CHECKING:
+    from ....core.brains import BrainInfo
 
 brain_app = typer.Typer(
     help="Manage brains (registry shared with app/MCP).",
@@ -19,7 +22,7 @@ brain_app = typer.Typer(
 )
 
 
-def _resolve_brain_ref(ref: str):
+def _resolve_brain_ref(ref: str) -> BrainInfo | None:
     """Find a registered brain by id, path or name."""
     from ....core import brains as reg
 
@@ -114,7 +117,7 @@ def brain_add(
         )
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     typer.echo(f"[green]Registered + active:[/green] {b.name}  {b.path}")
 
 
@@ -142,5 +145,5 @@ def brain_rm(ref: str = typer.Argument(..., help="Name, ID, or path.")) -> None:
         reg.remove_brain(b.id)
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     typer.echo(f"[yellow]Removed from registry:[/yellow] {b.name}")

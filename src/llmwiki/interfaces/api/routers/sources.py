@@ -37,10 +37,10 @@ def list_sources() -> list[dict[str, Any]]:
 @router.post("/ingest")
 def ingest_source(path: str = Body(..., embed=True)) -> dict[str, Any]:
     """Ingest a source file (queued for background processing)."""
+    import json
+
     from ....core.paths import resolve_input
     from ....db.repo import JobRepo
-
-    import json
 
     paths = _ctx()
     target = resolve_input(path, paths.root)

@@ -453,7 +453,9 @@ class TestJobs:
         assert isinstance(r.json(), list)
 
         # Queue a query job
-        r = client.post("/api/query", json={"question": "What is attention?", "save_as_page": False})
+        r = client.post(
+            "/api/query", json={"question": "What is attention?", "save_as_page": False}
+        )
         assert r.status_code == 200
         body = r.json()
         assert "job_id" in body

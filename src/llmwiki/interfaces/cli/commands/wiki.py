@@ -12,7 +12,7 @@ from rich.table import Table
 from ....core.config import load_config
 from ....core.errors import WikiError
 from ....core.models import Severity
-from ....core.paths import load_active_brain
+from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import PageFtsRepo
 from ....services import (
@@ -25,12 +25,12 @@ from ....services import (
 console = Console()
 
 
-def _brain():
+def _brain() -> BrainPaths:
     try:
         return load_active_brain()
     except WikiError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def index() -> None:
@@ -83,7 +83,7 @@ def lint(
             findings = lint_service.lint_all(paths, cfg, semantic=True)
         except Exception as exc:  # noqa: BLE001
             typer.echo(f"[red]Semantic lint failed: {exc}[/red]", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     else:
         findings = lint_service.lint_structural(paths)
     if not findings:
@@ -112,7 +112,7 @@ def ask(
         result, cr = query_service.ask(question, paths, conn, cfg, save=save)
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"[red]Query failed: {exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
     finally:
         conn.close()
     Console(file=sys.stdout).print(result.answer, markup=False)
@@ -152,7 +152,7 @@ def maintain(
             typer.echo(f"[green]Applied {cr.id}.[/green]")
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"[red]Maintenance failed: {exc}[/red]", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     finally:
         conn.close()
 

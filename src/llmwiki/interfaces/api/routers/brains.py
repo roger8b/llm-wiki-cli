@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Body, HTTPException
 
 from ..deps import get_paths
+
+if TYPE_CHECKING:
+    from ....core.brains import BrainInfo
 
 router = APIRouter()
 
@@ -82,6 +85,7 @@ def create_and_init_brain(
     from ....services import scaffold_service
 
     root = Path(path).expanduser().resolve()
+    brain: BrainInfo | None
     try:
         if (root / ".llmwiki").exists():
             brain = reg.register_or_get(root, name=name, activate=activate)
