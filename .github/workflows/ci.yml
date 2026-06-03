@@ -94,6 +94,7 @@ jobs:
   build-desktop:
     name: Build macOS Desktop App (Tauri)
     runs-on: macos-latest
+    needs: [lint, test, frontend-unit, webkit-e2e]
     permissions:
       contents: write
     steps:

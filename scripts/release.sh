@@ -59,7 +59,14 @@ echo "==> New version:     $version  (tag $tag)"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repository"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
-[ "$branch" = "main" ] || echo "warning: not on main (on '$branch')" >&2
+[ "$branch" != "HEAD" ] || die "detached HEAD — checkout main before releasing"
+if [ "$branch" != "main" ]; then
+  if [ "${ALLOW_BRANCH:-0}" = "1" ]; then
+    warn "releasing from '$branch' (ALLOW_BRANCH=1)"
+  else
+    die "must release from main (on '$branch'); set ALLOW_BRANCH=1 to override"
+  fi
+fi
 
 if [ -n "$(git status --porcelain)" ]; then
   if [ "${DRY_RUN:-0}" = "1" ]; then
@@ -70,7 +77,10 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 if git rev-parse "$tag" >/dev/null 2>&1; then
-  die "tag $tag already exists"
+  die "tag $tag already exists locally"
+fi
+if [ -n "$(git ls-remote --tags "$REMOTE" "refs/tags/$tag" 2>/dev/null)" ]; then
+  die "tag $tag already exists on $REMOTE"
 fi
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
@@ -97,8 +107,9 @@ git commit -m "release: $version"
 git tag -a "$tag" -m "Release $version"
 
 echo "==> Pushing commit and tag to $REMOTE"
-git push "$REMOTE" "$branch"
-git push "$REMOTE" "$tag"
+# Push branch and tag together (atomic) so we never end up with the commit on
+# the remote but no tag, or vice versa.
+git push --atomic "$REMOTE" "$branch" "$tag"
 
 echo ""
 echo "=========================================================="

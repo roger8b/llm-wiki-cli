@@ -11,6 +11,8 @@
 # Options (env):
 #   VERSION=v2.1.0   install a specific tag instead of the latest release
 #   NO_LAUNCH=1      install but do not open the app afterwards
+#   ALLOW_ANY_ARCH=1 skip the Apple Silicon check (e.g. under a Rosetta shell
+#                    where `uname -m` misreports an arm64 Mac as x86_64)
 set -euo pipefail
 
 REPO="roger8b/llm-wiki-cli"
@@ -25,8 +27,9 @@ die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 [ "$(uname -s)" = "Darwin" ] || die "this installer is for macOS only"
 
 arch="$(uname -m)"
-if [ "$arch" != "arm64" ]; then
-  warn "this Mac is '$arch'; the release DMG targets Apple Silicon (arm64) and may not run."
+if [ "$arch" != "arm64" ] && [ "${ALLOW_ANY_ARCH:-0}" != "1" ]; then
+  die "this Mac is '$arch'; the release DMG targets Apple Silicon (arm64) only. \
+If this is an Apple Silicon Mac running under a Rosetta shell, re-run with ALLOW_ANY_ARCH=1."
 fi
 
 for bin in curl hdiutil ditto; do

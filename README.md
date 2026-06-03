@@ -560,7 +560,7 @@ launching (Gatekeeper quarantine). After copying the app to your Applications
 folder, remove the quarantine attribute:
 
 ```bash
-xattr -cr ~/Applications/llm-wiki.app
+xattr -cr /Applications/llm-wiki.app
 ```
 
 On first launch, macOS may still show a "cannot be opened because it is from
