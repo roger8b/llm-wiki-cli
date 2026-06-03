@@ -84,6 +84,35 @@ Available extras:
 | `mcp` | MCP server for agent integrations |
 | `pdf` | PDF source ingestion |
 
+### Desktop app (macOS)
+
+Prefer a clickable app over the CLI? (Apple Silicon only.)
+
+**One-line install** — downloads the latest release, installs it into
+`/Applications`, clears the Gatekeeper quarantine flag and launches it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/roger8b/llm-wiki-cli/main/install-desktop.sh | bash
+```
+
+Install a specific version with `VERSION=v2.1.0`, or skip auto-launch with
+`NO_LAUNCH=1`.
+
+**Manual install** — download the latest `.dmg` instead:
+
+**[Download latest macOS app →](https://github.com/roger8b/llm-wiki-cli/releases/latest)**
+
+1. Open the `.dmg` and drag **llm-wiki** into Applications.
+2. **First launch only:** the app is *not* code-signed (no Apple Developer
+   account), so macOS Gatekeeper blocks it. Right-click the app →
+   **Open** → **Open**. After that it launches normally.
+
+   If macOS still refuses ("app is damaged"), clear the quarantine flag:
+
+   ```bash
+   xattr -cr /Applications/llm-wiki.app
+   ```
+
 ### Dev install
 
 ```bash
