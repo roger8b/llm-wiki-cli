@@ -472,3 +472,34 @@ class TestJobs:
         # Verify it appears in the jobs list
         r = client.get("/api/jobs")
         assert any(j["id"] == job_id for j in r.json())
+
+
+class TestBatchIngest:
+    def _seed_raw(self, brain: BrainPaths, name: str) -> str:
+        p = brain.raw / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# {name}\nbody\n", encoding="utf-8")
+        return f"raw/{name}"
+
+    def test_batch_mixed_valid_invalid(self, client, brain: BrainPaths) -> None:
+        ok = self._seed_raw(brain, "a.md")
+        r = client.post("/api/sources/ingest", json={"paths": [ok, "raw/missing.md"]})
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["job_ids"]) == 1
+        assert [e["path"] for e in body["errors"]] == ["raw/missing.md"]
+
+    def test_batch_all_invalid_400(self, client, brain: BrainPaths) -> None:
+        r = client.post("/api/sources/ingest", json={"paths": ["raw/x.md", "raw/y.md"]})
+        assert r.status_code == 400
+
+    def test_single_path_backwards_compat(self, client, brain: BrainPaths) -> None:
+        ok = self._seed_raw(brain, "solo.md")
+        r = client.post("/api/sources/ingest", json={"path": ok})
+        assert r.status_code == 200
+        body = r.json()
+        assert "job_id" in body and "job_ids" not in body
+
+    def test_no_path_400(self, client) -> None:
+        r = client.post("/api/sources/ingest", json={})
+        assert r.status_code == 400

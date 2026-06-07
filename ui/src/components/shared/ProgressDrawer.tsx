@@ -6,11 +6,12 @@ import { cn } from "@/lib/utils"
 
 export function ProgressDrawer() {
   const navigate = useNavigate()
-  const { open, title, steps, status, crId, error, close } = useIngestStore()
+  const { open, title, steps, status, crId, error, close, items } = useIngestStore()
 
   if (!open) return null
 
   const running = status === "running"
+  const isBatch = items.length > 0
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-[440px] max-w-[calc(100vw-2rem)] rounded-lg border bg-card shadow-lg">
@@ -32,7 +33,34 @@ export function ProgressDrawer() {
       </div>
 
       <div className="max-h-[240px] space-y-1.5 overflow-y-auto px-4 py-3 font-mono text-[12px]">
-        {steps.map((s, i) => {
+        {isBatch
+          ? items.map((it) => (
+              <div key={it.name} className="flex items-center gap-2">
+                {it.status === "done" ? (
+                  <Check className="size-3.5 shrink-0 text-apply" />
+                ) : it.status === "error" ? (
+                  <X className="size-3.5 shrink-0 text-rejected" />
+                ) : it.status === "running" ? (
+                  <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+                ) : (
+                  <Loader2 className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span
+                  className={cn(
+                    "truncate",
+                    it.status === "error"
+                      ? "text-rejected"
+                      : it.status === "done"
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {it.name}
+                  {it.detail ? ` — ${it.detail}` : ""}
+                </span>
+              </div>
+            ))
+          : steps.map((s, i) => {
           const last = i === steps.length - 1
           const settled = !running || !last
           return (

@@ -112,12 +112,20 @@ export const api = {
       "/sources/ingest",
       { method: "POST", body: JSON.stringify({ path }) },
     ),
+  ingestSources: (paths: string[]) =>
+    request<{ job_ids: number[]; errors: { path: string; detail: string }[] }>(
+      "/sources/ingest",
+      { method: "POST", body: JSON.stringify({ paths }) },
+    ),
   uploadSource: async (file: File): Promise<Source> => {
     const form = new FormData()
     form.append("file", file)
     const res = await fetch(`${BASE}/sources/upload`, {
       method: "POST",
-      body: form, // let the browser set the multipart boundary
+      // Only the auth token — no Content-Type, so the browser sets the
+      // multipart boundary itself.
+      headers: { ...authHeaders() },
+      body: form,
     })
     if (!res.ok) {
       let detail = res.statusText

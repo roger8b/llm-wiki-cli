@@ -35,24 +35,54 @@ def list_sources() -> list[dict[str, Any]]:
 
 
 @router.post("/ingest")
-def ingest_source(path: str = Body(..., embed=True)) -> dict[str, Any]:
-    """Ingest a source file (queued for background processing)."""
+def ingest_source(
+    path: str | None = Body(default=None, embed=True),
+    paths_in: list[str] | None = Body(default=None, alias="paths", embed=True),  # noqa: B008
+) -> dict[str, Any]:
+    """Queue one or more source files for background ingestion.
+
+    Accepts either a single ``{"path": "..."}`` (kept for backwards
+    compatibility) or a batch ``{"paths": ["a.md", "b.md"]}``. Each path is
+    validated in isolation: invalid paths do not abort the batch. Returns the
+    created ``job_ids`` plus per-path ``errors``. Responds 400 only when no job
+    could be created.
+    """
     import json
 
     from ....core.paths import resolve_input
     from ....db.repo import JobRepo
 
+    targets = list(paths_in) if paths_in else ([path] if path else [])
+    if not targets:
+        raise HTTPException(status_code=400, detail="No path provided")
+
     paths = _ctx()
-    target = resolve_input(path, paths.root)
-    if not target.is_file():
-        raise HTTPException(status_code=400, detail=f"File not found: {path}")
+    job_ids: list[int] = []
+    errors: list[dict[str, str]] = []
     conn = open_conn(paths)
     try:
         job_repo = JobRepo(conn)
-        job_id = job_repo.create("ingest", json.dumps({"source": path}), status="queued")
+        for p in targets:
+            try:
+                target = resolve_input(p, paths.root)
+            except Exception as exc:  # path resolves outside brain, etc.
+                errors.append({"path": p, "detail": str(exc)})
+                continue
+            if not target.is_file():
+                errors.append({"path": p, "detail": f"File not found: {p}"})
+                continue
+            job_id = job_repo.create("ingest", json.dumps({"source": p}), status="queued")
+            job_ids.append(job_id)
     finally:
         conn.close()
-    return {"job_id": job_id}
+
+    if not job_ids:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+    # Backwards-compatible single-path response.
+    if path is not None and not paths_in:
+        return {"job_id": job_ids[0]}
+    return {"job_ids": job_ids, "errors": errors}
 
 
 def _register_temp_source(name: str, data: bytes) -> dict[str, Any]:

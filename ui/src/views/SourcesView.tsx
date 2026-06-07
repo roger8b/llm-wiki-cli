@@ -74,10 +74,12 @@ function AddSourceDialog({
   open,
   onOpenChange,
   onAdded,
+  onAddedMany,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onAdded: (s: Source, ingest: boolean) => void
+  onAddedMany: (sources: Source[], ingest: boolean) => void
 }) {
   const [tab, setTab] = useState<"file" | "text">("file")
   const [dragover, setDragover] = useState(false)
@@ -92,16 +94,25 @@ function AddSourceDialog({
       if (!files?.length) return
       setBusy(true)
       try {
-        const src = await api.uploadSource(files[0])
-        onAdded(src, ingestNow)
-        onOpenChange(false)
-      } catch (e) {
-        toast.error(`Upload failed: ${(e as Error).message}`)
+        const list = Array.from(files)
+        const uploaded: Source[] = []
+        const failed: string[] = []
+        for (const f of list) {
+          try {
+            uploaded.push(await api.uploadSource(f))
+          } catch (e) {
+            failed.push(`${f.name}: ${(e as Error).message}`)
+          }
+        }
+        if (failed.length) toast.error(`Upload failed — ${failed.join("; ")}`)
+        if (uploaded.length === 1) onAdded(uploaded[0], ingestNow)
+        else if (uploaded.length > 1) onAddedMany(uploaded, ingestNow)
+        if (uploaded.length) onOpenChange(false)
       } finally {
         setBusy(false)
       }
     },
-    [ingestNow, onAdded, onOpenChange],
+    [ingestNow, onAdded, onAddedMany, onOpenChange],
   )
 
   async function addText() {
@@ -163,7 +174,7 @@ function AddSourceDialog({
           >
             <Upload className="size-7 text-muted-foreground" />
             <div className="text-[13px] font-medium">
-              {busy ? "Uploading…" : "Drop a file here or click to browse"}
+              {busy ? "Uploading…" : "Drop files here or click to browse"}
             </div>
             <div className="text-[11px] text-muted-foreground">
               Supports .md .pdf .txt .html
@@ -171,6 +182,7 @@ function AddSourceDialog({
             <input
               ref={fileRef}
               type="file"
+              multiple
               accept=".md,.pdf,.txt,.html"
               className="hidden"
               onChange={(e) => handleFiles(e.target.files)}
@@ -217,6 +229,7 @@ export function SourcesView() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const runIngest = useIngestStore((s) => s.run)
+  const runBatch = useIngestStore((s) => s.runBatch)
   const refetchCrs = useCrStore((s) => s.fetch)
 
   const load = useCallback(async () => {
@@ -242,6 +255,17 @@ export function SourcesView() {
       await Promise.all([load(), refetchCrs()])
     },
     [runIngest, load, refetchCrs],
+  )
+
+  const ingestMany = useCallback(
+    async (srcs: Source[]) => {
+      await runBatch(
+        srcs.map((s) => ({ name: s.path.split("/").pop() || s.path, path: s.path })),
+        (paths) => api.ingestSources(paths),
+      )
+      await Promise.all([load(), refetchCrs()])
+    },
+    [runBatch, load, refetchCrs],
   )
 
   return (
@@ -276,6 +300,11 @@ export function SourcesView() {
           load()
           if (doIngest) ingest(src)
           else toast.success(`Added ${src.path.split("/").pop()}`)
+        }}
+        onAddedMany={(srcs, doIngest) => {
+          load()
+          if (doIngest) ingestMany(srcs)
+          else toast.success(`Added ${srcs.length} sources`)
         }}
       />
     </div>
