@@ -1,12 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { FileText, FileType, StickyNote, Upload, Plus } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  FileText,
+  FileType,
+  StickyNote,
+  Upload,
+  Plus,
+  Search,
+  RotateCw,
+} from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { timeAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { Source } from "@/types"
+import type { Source, SourceContent } from "@/types"
 import { useIngestStore } from "@/stores/ingest"
 import { useCrStore } from "@/stores/crs"
+import { MarkdownReader } from "@/components/shared/MarkdownReader"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -40,34 +49,15 @@ function statusBadge(status: Source["status"]) {
   )
 }
 
-function SourceCard({ source, onIngest }: { source: Source; onIngest: (s: Source) => void }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border bg-card px-4 py-3">
-      <div className="mt-0.5">{sourceIcon(source.type)}</div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">
-          {source.path.split("/").pop()}
-        </div>
-        {source.title && (
-          <div className="truncate text-[12px] text-muted-foreground">
-            {source.title}
-          </div>
-        )}
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-          {source.path.replace(/[^/]+$/, "")}
-          <span>·</span>
-          SHA {source.hash.slice(0, 6)}
-          <span>·</span>
-          {timeAgo(source.added_at)}
-          <span>·</span>
-          {statusBadge(source.status)}
-        </div>
-      </div>
-      <Button variant="outline" size="sm" onClick={() => onIngest(source)}>
-        {source.status === "processed" ? "Re-ingest" : "Ingest"}
-      </Button>
-    </div>
-  )
+export function groupBySourceDir(sources: Source[]): Record<string, Source[]> {
+  const groups: Record<string, Source[]> = {}
+  for (const s of sources) {
+    // raw/articles/x.md -> "articles"; raw/x.md -> "raw"
+    const m = /^raw\/([^/]+)\//.exec(s.path)
+    const dir = m ? m[1] : "raw"
+    ;(groups[dir] ??= []).push(s)
+  }
+  return groups
 }
 
 function AddSourceDialog({
@@ -228,23 +218,47 @@ export function SourcesView() {
   const [sources, setSources] = useState<Source[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [filter, setFilter] = useState("")
+  const [selected, setSelected] = useState<string | null>(null)
+  const [content, setContent] = useState<SourceContent | null>(null)
+  const [contentLoading, setContentLoading] = useState(false)
+  const [contentError, setContentError] = useState<string | null>(null)
   const runIngest = useIngestStore((s) => s.run)
   const runBatch = useIngestStore((s) => s.runBatch)
   const refetchCrs = useCrStore((s) => s.fetch)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const openSource = useCallback(async (path: string) => {
+    setSelected(path)
+    setContent(null)
+    setContentError(null)
+    setContentLoading(true)
     try {
-      setSources(await api.listSources())
+      setContent(await api.getSourceContent(path))
     } catch (e) {
-      toast.error((e as Error).message)
+      setContentError((e as Error).message)
     } finally {
-      setLoading(false)
+      setContentLoading(false)
     }
   }, [])
 
+  const load = useCallback(
+    async (selectFirst = false) => {
+      setLoading(true)
+      try {
+        const list = await api.listSources()
+        setSources(list)
+        if (selectFirst && list[0]) openSource(list[0].path)
+      } catch (e) {
+        toast.error((e as Error).message)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [openSource],
+  )
+
   useEffect(() => {
-    load()
+    load(true)
   }, [load])
 
   const ingest = useCallback(
@@ -268,30 +282,124 @@ export function SourcesView() {
     [runBatch, load, refetchCrs],
   )
 
+  const filtered = useMemo(
+    () =>
+      filter
+        ? sources.filter(
+            (s) =>
+              s.path.toLowerCase().includes(filter.toLowerCase()) ||
+              (s.title ?? "").toLowerCase().includes(filter.toLowerCase()),
+          )
+        : sources,
+    [sources, filter],
+  )
+  const groups = useMemo(() => groupBySourceDir(filtered), [filtered])
+  const current = sources.find((s) => s.path === selected) ?? null
+
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="mx-auto max-w-[820px]">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="font-display text-lg font-semibold">Sources</h1>
-          <Button onClick={() => setDialogOpen(true)} className="gap-1.5">
+    <div className="flex flex-1 overflow-hidden">
+      {/* file list */}
+      <aside className="flex w-[260px] shrink-0 flex-col overflow-hidden border-r-[1.5px]">
+        <div className="shrink-0 space-y-2 border-b-[1.5px] p-2">
+          <Button
+            onClick={() => setDialogOpen(true)}
+            size="sm"
+            className="w-full gap-1.5"
+          >
             <Plus className="size-4" /> Add source
           </Button>
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter sources…"
+              className="h-8 pl-7 text-[13px]"
+            />
+          </div>
         </div>
+        <div className="flex-1 overflow-y-auto py-1">
+          {Object.entries(groups).map(([dir, items]) => (
+            <div key={dir}>
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {dir} ({items.length})
+              </div>
+              {items.map((s) => (
+                <button
+                  key={s.path}
+                  onClick={() => openSource(s.path)}
+                  className={cn(
+                    "flex w-full items-center gap-1.5 px-2 py-1 pl-3 text-left text-[12.5px] transition-colors hover:bg-accent",
+                    selected === s.path && "bg-accent font-medium text-primary",
+                  )}
+                >
+                  <span className="shrink-0">{sourceIcon(s.type)}</span>
+                  <span className="truncate">{s.path.split("/").pop()}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+          {!loading && sources.length === 0 && (
+            <div className="px-3 py-3 text-[12px] text-muted-foreground">
+              No sources yet. Add one to get started.
+            </div>
+          )}
+        </div>
+      </aside>
 
-        {loading ? (
-          <div className="text-[13px] text-muted-foreground">Loading…</div>
-        ) : sources.length === 0 ? (
-          <div className="rounded-lg border border-dashed py-12 text-center text-[13px] text-muted-foreground">
-            No sources yet. Add one to get started.
+      {/* reader */}
+      <section className="flex-1 overflow-y-auto">
+        {current ? (
+          <div className="mx-auto max-w-[760px] p-6">
+            <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 text-[12px] text-muted-foreground">
+              <div className="min-w-0">
+                <span className="font-mono">{current.path}</span>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                  <span>SHA {current.hash.slice(0, 6)}</span>
+                  <span>{timeAgo(current.added_at)}</span>
+                  {statusBadge(current.status)}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                onClick={() => ingest(current)}
+              >
+                <RotateCw className="size-3.5" />
+                {current.status === "processed" ? "Re-ingest" : "Ingest"}
+              </Button>
+            </div>
+
+            {contentLoading ? (
+              <div className="text-[13px] text-muted-foreground">Loading…</div>
+            ) : contentError ? (
+              <div className="rounded-lg border border-dashed py-8 text-center text-[13px] text-rejected">
+                {contentError}
+              </div>
+            ) : content ? (
+              content.type === "md" ? (
+                <MarkdownReader content={content.content} />
+              ) : (
+                <>
+                  {content.type !== "text" && (
+                    <div className="mb-2 text-[11px] text-muted-foreground">
+                      Textual representation of a {content.type} source.
+                    </div>
+                  )}
+                  <pre className="whitespace-pre-wrap break-words rounded-lg border bg-card p-4 text-[12.5px]">
+                    {content.content}
+                  </pre>
+                </>
+              )
+            ) : null}
           </div>
         ) : (
-          <div className="space-y-2">
-            {sources.map((s) => (
-              <SourceCard key={s.path} source={s} onIngest={ingest} />
-            ))}
+          <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
+            {loading ? "Loading…" : "Select a source"}
           </div>
         )}
-      </div>
+      </section>
 
       <AddSourceDialog
         open={dialogOpen}
