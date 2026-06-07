@@ -44,6 +44,12 @@ export interface Source {
   status: SourceStatus
 }
 
+export interface SourceContent {
+  path: string
+  type: string
+  content: string
+}
+
 export interface PageMeta {
   path: string
   title: string

@@ -503,3 +503,27 @@ class TestBatchIngest:
     def test_no_path_400(self, client) -> None:
         r = client.post("/api/sources/ingest", json={})
         assert r.status_code == 400
+
+
+class TestSourceContent:
+    def _seed_raw(self, brain: BrainPaths, name: str, body: str) -> str:
+        p = brain.raw / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+        return f"raw/{name}"
+
+    def test_returns_content(self, client, brain: BrainPaths) -> None:
+        rel = self._seed_raw(brain, "note.md", "# Note\nhello world\n")
+        r = client.get("/api/sources/content", params={"path": rel})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["type"] == "md"
+        assert "hello world" in body["content"]
+
+    def test_missing_404(self, client) -> None:
+        r = client.get("/api/sources/content", params={"path": "raw/nope.md"})
+        assert r.status_code == 404
+
+    def test_outside_brain_400(self, client) -> None:
+        r = client.get("/api/sources/content", params={"path": "../../etc/passwd"})
+        assert r.status_code == 400

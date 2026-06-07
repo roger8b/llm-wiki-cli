@@ -34,6 +34,31 @@ def list_sources() -> list[dict[str, Any]]:
         conn.close()
 
 
+@router.get("/content")
+def get_source_content(path: str) -> dict[str, Any]:
+    """Return the textual content of a raw source for in-app reading.
+
+    Resolves the path inside the brain (rejecting traversal), extracts text via
+    the source extractors (md/txt; pdf/html fall back to a utf-8 read) and
+    returns it alongside the classified ``type``.
+    """
+    from ....core.paths import resolve_input
+    from ....sources.extractors import extract_text, source_type
+
+    paths = _ctx()
+    try:
+        target = resolve_input(path, paths.root)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail=f"Source not found: {path}")
+    try:
+        content = extract_text(target)
+    except Exception as exc:  # noqa: BLE001 — binary/undecodable source
+        content = f"[Could not render this source as text: {exc}]"
+    return {"path": path, "type": source_type(target), "content": content}
+
+
 @router.post("/ingest")
 def ingest_source(
     path: str | None = Body(default=None, embed=True),

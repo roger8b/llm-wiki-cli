@@ -22,6 +22,7 @@ import type {
   SearchResult,
   SkillsStatus,
   Source,
+  SourceContent,
   WorkspaceConfig,
   Job,
 } from "@/types"
@@ -107,6 +108,10 @@ export const api = {
 
   // ── sources ──
   listSources: () => request<Source[]>("/sources"),
+  getSourceContent: (path: string) =>
+    request<SourceContent>(
+      `/sources/content?path=${encodeURIComponent(path)}`,
+    ),
   ingestSource: (path: string) =>
     request<{ job_id: number }>(
       "/sources/ingest",
