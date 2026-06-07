@@ -112,6 +112,11 @@ export const api = {
       "/sources/ingest",
       { method: "POST", body: JSON.stringify({ path }) },
     ),
+  ingestSources: (paths: string[]) =>
+    request<{ job_ids: number[]; errors: { path: string; detail: string }[] }>(
+      "/sources/ingest",
+      { method: "POST", body: JSON.stringify({ paths }) },
+    ),
   uploadSource: async (file: File): Promise<Source> => {
     const form = new FormData()
     form.append("file", file)

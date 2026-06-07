@@ -22,29 +22,28 @@ def _brain() -> BrainPaths:
         raise typer.Exit(code=1) from None
 
 
-def ingest(file: str = typer.Argument(..., help="Source file to ingest.")) -> None:
-    """Read a source with the LLM and create a change request (does not write to the wiki).
+def _ingest_one(
+    file: str,
+    paths: BrainPaths,
+    cfg: object,
+    conn: object,
+) -> bool:
+    """Ingest a single file. Returns True on success, False on failure.
 
-    Accepts a path within the brain (e.g. raw/articles/x.md) or any
-    readable system file.
+    Failures are reported to stderr but do not raise, so a batch keeps going.
     """
-    paths = _brain()
     direct = Path(file)
     target = direct if direct.is_file() else (paths.root / file)
     if not target.is_file():
         typer.echo(f"[red]File not found: {file}[/red]", err=True)
-        raise typer.Exit(code=1)
+        return False
     target = target.resolve()
-    cfg = load_config(paths)
-    conn = get_connection(paths.db_path)
     try:
-        cr = ingest_service.ingest(target, paths, conn, cfg)
+        cr = ingest_service.ingest(target, paths, conn, cfg)  # type: ignore[arg-type]
     except Exception as exc:  # noqa: BLE001
-        typer.echo(f"[red]Ingestion failed: {exc}[/red]", err=True)
-        raise typer.Exit(code=1) from exc
-    finally:
-        conn.close()
-    typer.echo(f"[green]Source processed[/green] (model: {cfg.model}).")
+        typer.echo(f"[red]Ingestion failed for {file}: {exc}[/red]", err=True)
+        return False
+    typer.echo(f"[green]Source processed[/green] {esc(file)} (model: {cfg.model}).")  # type: ignore[attr-defined]
     for c in cr.changes:
         mark = "+" if c.operation == "create" else "~"
         typer.echo(f"  {mark} {esc(c.path)} ({c.operation})")
@@ -54,6 +53,36 @@ def ingest(file: str = typer.Argument(..., help="Source file to ingest.")) -> No
             f"(empty CR {cr.id}). Small models often fail at this — "
             f"use a model with good tool calling support."
         )
-        return
+        return True
     typer.echo(f"Change request created: [bold]{cr.id}[/bold] ({cr.files_changed} files)")
     typer.echo(f"Review with:  wiki review {cr.id}")
+    return True
+
+
+def ingest(
+    files: list[str] = typer.Argument(..., help="Source file(s) to ingest."),  # noqa: B008
+) -> None:
+    """Read one or more sources with the LLM and create change requests.
+
+    Does not write to the wiki. Accepts paths within the brain
+    (e.g. raw/articles/x.md), system files, or shell globs (e.g. raw/*.md).
+    A failure on one file does not abort the rest; the command exits non-zero
+    if any file failed.
+    """
+    paths = _brain()
+    cfg = load_config(paths)
+    conn = get_connection(paths.db_path)
+    ok = 0
+    failed = 0
+    try:
+        for file in files:
+            if _ingest_one(file, paths, cfg, conn):
+                ok += 1
+            else:
+                failed += 1
+    finally:
+        conn.close()
+    if len(files) > 1 or failed:
+        typer.echo(f"\nDone: {ok} ok, {failed} failed.")
+    if failed:
+        raise typer.Exit(code=1)
