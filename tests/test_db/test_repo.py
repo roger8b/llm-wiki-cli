@@ -22,7 +22,7 @@ class TestConnectionPragmas:
         c = get_connection(tmp_path / "db.sqlite")
         try:
             assert c.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-            assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+            assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 15000
             assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         finally:
             c.close()
