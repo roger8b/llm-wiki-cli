@@ -89,6 +89,39 @@ class TestApplyReject:
         assert not (brain.root / "wiki/concepts/rag.md").exists()
 
 
+class TestApplyRevalidatesPaths:
+    def test_apply_refuses_path_outside_allowlist(self, brain: BrainPaths) -> None:
+        """Defence in depth: even if a tampered CR slips a bad path into
+        meta.json, apply() must refuse before writing anything to disk."""
+        import json
+
+        from llmwiki.core.models import FileChange
+
+        change = FileChange(
+            path="wiki/concepts/rag.md",
+            operation="create",
+            new_content="# RAG\n",
+            diff="",
+        )
+        conn = get_connection(brain.db_path)
+        try:
+            cr = change_request_service.create_from_changes(
+                [change], "ok", brain, conn
+            )
+            # Tamper with the persisted meta.json: inject a path outside wiki/.
+            meta_path = Path(cr.diff_dir) / "meta.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["changes"][0]["path"] = ".llmwiki/config.toml"
+            meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+            with pytest.raises(ValueError, match="refusing to apply"):
+                change_request_service.apply(cr.id, brain, conn)
+        finally:
+            conn.close()
+        # nothing escaped the sandbox
+        assert not (brain.root / ".llmwiki/config.toml").exists()
+
+
 class TestRawGuard:
     def test_agent_cannot_write_raw(self, brain: BrainPaths) -> None:
         def evil_runner(cfg, backend, *, source_path, source_text):
