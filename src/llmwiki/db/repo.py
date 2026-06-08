@@ -13,6 +13,7 @@ from typing import cast
 
 from ..core.misc import now_iso
 from ..core.models import Page, Source, SourceStatus
+from .connection import retry_on_locked
 
 
 class SourceRepo:
@@ -206,12 +207,15 @@ class JobRepo:
         self.conn = conn
 
     def create(self, type_: str, payload: str | None = None, status: str = "queued") -> int:
-        cur = self.conn.execute(
-            "INSERT INTO jobs (type, status, payload, created_at) VALUES (?, ?, ?, ?)",
-            (type_, status, payload, now_iso()),
-        )
-        self.conn.commit()
-        return int(cur.lastrowid or 0)
+        def _do() -> int:
+            cur = self.conn.execute(
+                "INSERT INTO jobs (type, status, payload, created_at) VALUES (?, ?, ?, ?)",
+                (type_, status, payload, now_iso()),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid or 0)
+
+        return retry_on_locked(_do)
 
     def get(self, job_id: int) -> sqlite3.Row | None:
         return cast(
@@ -221,11 +225,16 @@ class JobRepo:
 
     def complete(self, job_id: int, result: str | None = None, error: str | None = None) -> None:
         status = "error" if error else "done"
-        self.conn.execute(
-            "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?",
-            (status, result, error, now_iso(), job_id),
-        )
-        self.conn.commit()
+
+        def _do() -> None:
+            self.conn.execute(
+                "UPDATE jobs SET status = ?, result = ?, error = ?, completed_at = ? "
+                "WHERE id = ?",
+                (status, result, error, now_iso(), job_id),
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)
 
     def list(self, limit: int = 50) -> list[sqlite3.Row]:
         return self.conn.execute(
@@ -253,15 +262,18 @@ class ChangeRequestRepo:
         diff_dir: str,
         job_id: int | None = None,
     ) -> None:
-        self.conn.execute(
-            """
-            INSERT INTO change_requests
-                (id, job_id, status, summary, files_changed, diff_dir, created_at)
-            VALUES (?, ?, 'pending_review', ?, ?, ?, ?)
-            """,
-            (cr_id, job_id, summary, files_changed, diff_dir, now_iso()),
-        )
-        self.conn.commit()
+        def _do() -> None:
+            self.conn.execute(
+                """
+                INSERT INTO change_requests
+                    (id, job_id, status, summary, files_changed, diff_dir, created_at)
+                VALUES (?, ?, 'pending_review', ?, ?, ?, ?)
+                """,
+                (cr_id, job_id, summary, files_changed, diff_dir, now_iso()),
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)
 
     def get(self, cr_id: str) -> sqlite3.Row | None:
         row: sqlite3.Row | None = self.conn.execute(

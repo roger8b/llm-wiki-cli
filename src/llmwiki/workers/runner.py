@@ -1,5 +1,6 @@
 import json
 import logging
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any
 
 from ..core.config import load_config
 from ..core.paths import load_active_brain, resolve_input
-from ..db.connection import get_connection
+from ..db.connection import get_connection, retry_on_locked
 from ..db.repo import AskHistoryRepo, JobRepo
 from ..services import ingest_service, lint_service, maintenance_service, query_service
 
@@ -23,26 +24,34 @@ class JobWorker(threading.Thread):
 
     def run(self) -> None:
         logger.info("Background job worker started.")
-        # Track which DBs already had their schema applied, so the idle poll loop
-        # opens lightweight connections instead of re-running schema.sql (and the
-        # FTS5 virtual-table creation) every second.
-        initialized: set[Path] = set()
-        while not self._stop_event.is_set():
-            try:
-                # 1. Load active brain
+        # Hold a single long-lived connection per brain instead of reopening one
+        # every poll. Constant connection churn re-runs the WAL pragmas and lets
+        # each close attempt a checkpoint, which used to collide with a
+        # concurrent CLI writer and surface as "database is locked".
+        conn: sqlite3.Connection | None = None
+        conn_db_path: Path | None = None
+        try:
+            while not self._stop_event.is_set():
                 try:
-                    paths = load_active_brain()
-                except Exception:
-                    # No active brain registered yet, wait and try again
-                    time.sleep(2)
-                    continue
+                    # 1. Load active brain
+                    try:
+                        paths = load_active_brain()
+                    except Exception:
+                        # No active brain registered yet, wait and try again
+                        time.sleep(2)
+                        continue
 
-                # 2. Open DB connection (apply schema once per DB path)
-                needs_schema = paths.db_path not in initialized
-                conn = get_connection(paths.db_path, apply_schema=needs_schema)
-                if needs_schema:
-                    initialized.add(paths.db_path)
-                try:
+                    # 2. (Re)open the connection only when the active brain
+                    #    changes; apply the schema once for that DB.
+                    if conn is None or conn_db_path != paths.db_path:
+                        if conn is not None:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
+                        conn = get_connection(paths.db_path, apply_schema=True)
+                        conn_db_path = paths.db_path
+
                     # Find first queued job
                     cur = conn.execute(
                         "SELECT id, type, payload FROM jobs "
@@ -50,7 +59,6 @@ class JobWorker(threading.Thread):
                     )
                     row = cur.fetchone()
                     if not row:
-                        conn.close()
                         time.sleep(1)
                         continue
 
@@ -59,11 +67,12 @@ class JobWorker(threading.Thread):
                     payload_str = row["payload"]
                     payload = json.loads(payload_str) if payload_str else {}
 
-                    # 3. Mark job as running
-                    conn.execute(
-                        "UPDATE jobs SET status = 'running' WHERE id = ?", (job_id,)
-                    )
-                    conn.commit()
+                    # 3. Mark job as running (retry on transient write locks)
+                    def _mark_running(c: sqlite3.Connection = conn, jid: int = job_id) -> None:
+                        c.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (jid,))
+                        c.commit()
+
+                    retry_on_locked(_mark_running)
 
                     logger.info(f"Processing job {job_id} of type '{job_type}'")
 
@@ -145,15 +154,24 @@ class JobWorker(threading.Thread):
                         except Exception:
                             logger.exception(f"Failed to mark job {job_id} as failed in DB")
 
-                finally:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-
-            except Exception:
-                logger.exception("Error in job worker loop")
-                time.sleep(2)
+                except Exception:
+                    logger.exception("Error in job worker loop")
+                    # Drop the possibly-broken connection so the next iteration
+                    # reopens a clean one.
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None
+                        conn_db_path = None
+                    time.sleep(2)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 _worker: JobWorker | None = None
 
