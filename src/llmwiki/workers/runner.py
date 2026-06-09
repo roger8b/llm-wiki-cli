@@ -117,6 +117,7 @@ class JobWorker(threading.Thread):
                             else:
                                 findings = lint_service.lint_structural(paths)
 
+                            JobRepo(conn).set_progress(job_id, "running_agent")
                             cr = maintenance_service.maintain(
                                 findings, paths, conn, cfg, cancel_check=_cancelled
                             )
@@ -149,6 +150,7 @@ class JobWorker(threading.Thread):
                             if not question:
                                 raise ValueError("Missing 'question' in ask payload")
                             save = payload.get("save", False)
+                            JobRepo(conn).set_progress(job_id, "running_agent")
                             res, cr = query_service.ask(
                                 question, paths, conn, cfg, save=save, cancel_check=_cancelled
                             )

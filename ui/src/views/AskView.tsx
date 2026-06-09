@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { AskHistoryItem, QueryResult } from "@/types"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
+import { IndeterminateBar } from "@/components/shared/IndeterminateBar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -257,6 +258,7 @@ export function AskView() {
                 </Button>
               )}
             </div>
+            <IndeterminateBar />
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-5/6" />

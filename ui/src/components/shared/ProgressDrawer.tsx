@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom"
 import { Check, Loader2, X, AlertCircle, Ban } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { IndeterminateBar } from "@/components/shared/IndeterminateBar"
 import { useIngestStore } from "@/stores/ingest"
 import { cn } from "@/lib/utils"
 
@@ -35,6 +36,8 @@ export function ProgressDrawer() {
           <X className="size-4" />
         </button>
       </div>
+
+      {running && <IndeterminateBar className="rounded-none" />}
 
       <div className="max-h-[240px] space-y-1.5 overflow-y-auto px-4 py-3 font-mono text-[12px]">
         {isBatch
