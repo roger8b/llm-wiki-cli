@@ -207,11 +207,19 @@ export const api = {
    * the X-Wiki-Token header is sent — EventSource can't). Resolves when the
    * stream ends. `onResult` receives the raw job.result string (or null).
    */
+  /** Request cooperative cancellation of a running job. */
+  cancelJob: (id: number) =>
+    request<{ job_id: number; status: string; cancel_requested: boolean }>(
+      `/jobs/${id}/cancel`,
+      { method: "POST" },
+    ),
   streamJob: async (
     id: number,
     h: {
       onStatus?: (status: string) => void
+      onProgress?: (step: string) => void
       onResult?: (result: string | null) => void
+      onCancelled?: (result: string | null) => void
       onError?: (message: string) => void
     },
   ): Promise<void> => {
@@ -246,12 +254,17 @@ export const api = {
         if (!data) continue
         const payload = JSON.parse(data) as {
           status?: string
+          progress?: string
           result?: string | null
           detail?: string
         }
         if (event === "status") h.onStatus?.(payload.status ?? "")
+        else if (event === "progress") h.onProgress?.(payload.progress ?? "")
         else if (event === "result") {
           h.onResult?.(payload.result ?? null)
+          return
+        } else if (event === "cancelled") {
+          h.onCancelled?.(payload.result ?? null)
           return
         } else if (event === "error") {
           h.onError?.(payload.detail ?? "Job failed.")
