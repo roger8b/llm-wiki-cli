@@ -6,6 +6,7 @@ transformed into a change request (never written directly).
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Callable
 
@@ -15,6 +16,8 @@ from ..core.config import WorkspaceConfig
 from ..core.models import ChangeRequest
 from ..core.paths import BrainPaths
 from .change_request_service import create_from_changes
+
+logger = logging.getLogger("llmwiki.services.query")
 
 # runner(cfg, backend, *, question, save) -> QueryResult
 Runner = Callable[..., QueryResult]
@@ -43,10 +46,18 @@ def ask(
 ) -> tuple[QueryResult, ChangeRequest | None]:
     """Answers the question. If ``save`` and there is a suggested page, creates a CR."""
     runner = runner or _default_runner
-    # Backend always present: scopes read_file to brain root.
-    # Agent writes go to staging and are discarded (read-only operation).
-    read_backend = ChangeRequestBackend(paths.root)
+    # Backend always present: scopes read_file to brain root. ``ask`` is a
+    # read-only operation, so the backend rejects writes and records any
+    # attempt in ``write_attempts`` (audited below) instead of silently
+    # dropping them.
+    read_backend = ChangeRequestBackend(paths.root, read_only=True)
     result = runner(cfg, read_backend, question=question, save=save)
+    if read_backend.write_attempts:
+        logger.warning(
+            "ask(): agent attempted %d write(s) during a read-only query: %s",
+            len(read_backend.write_attempts),
+            ", ".join(sorted(set(read_backend.write_attempts))),
+        )
 
     cr: ChangeRequest | None = None
     if save and result.suggested_page is not None:

@@ -122,6 +122,18 @@ def apply(
         raise ValueError(f"CR {cr_id} is already '{row['status']}'.")
 
     changes, source_path = _load_changes(row["diff_dir"])
+
+    # Defence in depth: re-validate every path against the write allow-list
+    # before touching the disk, so a malformed/malicious CR cannot escape the
+    # wiki/ sandbox even if it slipped past the backend. Atomic: validate all
+    # before writing any.
+    from ..agents.backend import validate_change_path
+
+    for change in changes:
+        err = validate_change_path(change.path)
+        if err is not None:
+            raise ValueError(f"CR {cr_id}: refusing to apply '{change.path}': {err}")
+
     for change in changes:
         target = paths.root / change.path
         if change.operation == "delete":
