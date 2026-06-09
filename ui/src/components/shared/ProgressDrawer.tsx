@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 
 export function ProgressDrawer() {
   const navigate = useNavigate()
-  const { open, title, steps, status, crId, error, close, items, jobIds, cancelling, cancel } =
+  const { open, title, steps, status, crId, error, close, clear, items, jobIds, cancelling, cancel } =
     useIngestStore()
 
   if (!open) return null
@@ -115,13 +115,13 @@ export function ProgressDrawer() {
                 <Button
                   size="sm"
                   onClick={() => {
-                    close()
+                    clear()
                     navigate("/review")
                   }}
                 >
                   Review now →
                 </Button>
-                <Button size="sm" variant="outline" onClick={close}>
+                <Button size="sm" variant="outline" onClick={clear}>
                   Close
                 </Button>
               </div>
@@ -136,7 +136,7 @@ export function ProgressDrawer() {
               {status === "cancelled" && (
                 <span className="text-[12px] text-muted-foreground">Cancelled.</span>
               )}
-              <Button size="sm" variant="outline" className="ml-auto" onClick={close}>
+              <Button size="sm" variant="outline" className="ml-auto" onClick={clear}>
                 Close
               </Button>
             </>

@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { ListTodo, Loader2, AlertCircle, RefreshCw } from "lucide-react"
+import { ListTodo, Loader2, AlertCircle, RefreshCw, Ban } from "lucide-react"
 import { useJobStore } from "@/stores/jobs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,11 +13,24 @@ import {
 } from "@/components/ui/table"
 
 export function JobsView() {
-  const { jobs, loading, error, fetch } = useJobStore()
+  const { jobs, loading, error, cancellingIds, fetch, cancel } = useJobStore()
 
   useEffect(() => {
     fetch()
   }, [fetch])
+
+  // Live-refresh while any job is active so progress/status update on screen.
+  const hasActive = jobs.some((j) => j.status === "running" || j.status === "queued")
+  useEffect(() => {
+    if (!hasActive) return
+    const t = setInterval(() => fetch(), 1500)
+    return () => clearInterval(t)
+  }, [hasActive, fetch])
+
+  const PROGRESS_LABELS: Record<string, string> = {
+    running_agent: "Agent working…",
+    creating_change_request: "Preparing change request…",
+  }
 
   function formatDuration(start: string, end?: string | null) {
     if (!end) return "Running..."
@@ -149,6 +162,7 @@ export function JobsView() {
                   <TableHead className="w-[100px]">Time</TableHead>
                   <TableHead className="w-[100px]">Duration</TableHead>
                   <TableHead>Result / Error</TableHead>
+                  <TableHead className="w-[90px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -181,6 +195,11 @@ export function JobsView() {
                           Failed
                         </Badge>
                       )}
+                      {job.status === "cancelled" && (
+                        <Badge variant="outline" className="bg-secondary/30 text-muted-foreground border-muted-foreground/20">
+                          Cancelled
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatDate(job.created_at)}
@@ -189,7 +208,28 @@ export function JobsView() {
                       {formatDuration(job.created_at, job.completed_at)}
                     </TableCell>
                     <TableCell className="max-w-[280px] truncate text-xs">
-                      {getJobResultSummary(job.type, job.result, job.error)}
+                      {job.status === "running" && job.progress ? (
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                          <Loader2 className="size-3.5 animate-spin" />
+                          {PROGRESS_LABELS[job.progress] ?? job.progress}
+                        </span>
+                      ) : (
+                        getJobResultSummary(job.type, job.result, job.error)
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {(job.status === "running" || job.status === "queued") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={cancellingIds.includes(job.id)}
+                          onClick={() => cancel(job.id)}
+                          className="h-7 gap-1.5 text-[12px] text-muted-foreground"
+                        >
+                          <Ban className="size-3.5" />
+                          {cancellingIds.includes(job.id) ? "…" : "Cancel"}
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

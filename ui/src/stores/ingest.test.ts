@@ -30,3 +30,29 @@ describe("useIngestStore.cancel", () => {
     expect(spy).not.toHaveBeenCalled()
   })
 })
+
+describe("useIngestStore minimize/reopen", () => {
+  it("close keeps the run state so it can be reopened", () => {
+    useIngestStore.setState({ open: true, status: "running", title: "Ingesting x", crId: null })
+    useIngestStore.getState().close()
+    let s = useIngestStore.getState()
+    expect(s.open).toBe(false)
+    expect(s.status).toBe("running") // state preserved
+    expect(s.title).toBe("Ingesting x")
+
+    useIngestStore.getState().reopen()
+    s = useIngestStore.getState()
+    expect(s.open).toBe(true)
+    expect(s.status).toBe("running")
+  })
+
+  it("clear fully resets the run", () => {
+    useIngestStore.setState({ open: true, status: "done", crId: "CR-1", jobIds: [9] })
+    useIngestStore.getState().clear()
+    const s = useIngestStore.getState()
+    expect(s.open).toBe(false)
+    expect(s.status).toBe("idle")
+    expect(s.crId).toBeNull()
+    expect(s.jobIds).toEqual([])
+  })
+})

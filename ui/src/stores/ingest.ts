@@ -42,7 +42,12 @@ interface IngestState {
   ) => Promise<void>
   /** Request cooperative cancellation of every running job in this run. */
   cancel: () => Promise<void>
+  /** Hide the drawer but KEEP the run state so it can be reopened. */
   close: () => void
+  /** Re-show the drawer for the current/last run. */
+  reopen: () => void
+  /** Fully discard the run state (hide + reset). */
+  clear: () => void
 }
 
 // Cosmetic steps shown until the backend reports a real progress step.
@@ -77,7 +82,7 @@ export const useIngestStore = create<IngestState>((set, get) => ({
   open: false,
   title: "",
   steps: [],
-  status: "running", // start in running state if open
+  status: "idle",
   crId: null,
   error: null,
   items: [],
@@ -231,6 +236,18 @@ export const useIngestStore = create<IngestState>((set, get) => ({
     await Promise.allSettled(ids.map((id) => api.cancelJob(id)))
   },
 
-  close: () =>
-    set({ open: false, status: "idle", items: [], jobIds: [], cancelling: false }),
+  // Hide but keep state so the run can be reopened (and a finished run reviewed).
+  close: () => set({ open: false }),
+  reopen: () => set({ open: true }),
+  clear: () =>
+    set({
+      open: false,
+      status: "idle",
+      steps: [],
+      crId: null,
+      error: null,
+      items: [],
+      jobIds: [],
+      cancelling: false,
+    }),
 }))
