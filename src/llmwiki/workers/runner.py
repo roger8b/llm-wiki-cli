@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.config import load_config
+from ..core.errors import SourceAlreadyProcessedError
 from ..core.paths import load_active_brain, resolve_input
 from ..db.connection import get_connection, retry_on_locked
 from ..db.repo import AskHistoryRepo, JobRepo
@@ -86,8 +87,18 @@ class JobWorker(threading.Thread):
                             if not source_path:
                                 raise ValueError("Missing 'source' path in ingest payload")
                             target = resolve_input(source_path, paths.root)
+                            force = payload.get("force", False)
                             # Run ingest service. It handles its own job completion using job_id.
-                            ingest_service.ingest(target, paths, conn, cfg, job_id=job_id)
+                            try:
+                                ingest_service.ingest(
+                                    target, paths, conn, cfg, job_id=job_id, force=force
+                                )
+                            except SourceAlreadyProcessedError as exc:
+                                # Not an error: the content was already applied.
+                                JobRepo(conn).complete(
+                                    job_id,
+                                    result=json.dumps({"skipped": True, "reason": str(exc)}),
+                                )
 
                         elif job_type == "maintain":
                             semantic = payload.get("semantic", False)

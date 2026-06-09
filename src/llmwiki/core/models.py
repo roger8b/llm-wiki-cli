@@ -72,6 +72,9 @@ class FileChange(BaseModel):
     operation: str  # create|update|delete
     diff: str
     new_content: str | None = None
+    # Review aids, derived at capture time (optional / backward-compatible):
+    category: str | None = None  # new|edited|removed (review grouping)
+    confidence: str | None = None  # low|medium|high, from the page frontmatter
 
 
 class ChangeRequest(BaseModel):

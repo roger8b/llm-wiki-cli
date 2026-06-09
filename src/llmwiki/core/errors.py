@@ -25,3 +25,12 @@ class PageExistsError(WikiError):
 
 class InvalidFrontmatterError(WikiError):
     """Missing or invalid YAML frontmatter where it is required."""
+
+
+class SourceAlreadyProcessedError(WikiError):
+    """Source with this content hash was already ingested and applied.
+
+    Raised before any LLM call so re-ingesting identical content does not waste
+    a model invocation or create a duplicate change request. Pass ``force=True``
+    to ingest anyway.
+    """
