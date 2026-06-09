@@ -220,7 +220,7 @@ export function JobsView() {
             )}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border bg-card">
+          <div className="overflow-hidden rounded-lg border bg-card px-4">
             <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
