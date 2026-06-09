@@ -250,6 +250,47 @@ class JobRepo:
 
         retry_on_locked(_do)
 
+    def cancel(self, job_id: int, result: str | None = None) -> None:
+        """Mark a job as cancelled (terminal, not an error)."""
+
+        def _do() -> None:
+            self.conn.execute(
+                "UPDATE jobs SET status = 'cancelled', result = ?, completed_at = ? "
+                "WHERE id = ?",
+                (result, now_iso(), job_id),
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)
+
+    def set_progress(self, job_id: int, step: str) -> None:
+        """Record a coarse progress step for a running job (best-effort)."""
+
+        def _do() -> None:
+            self.conn.execute(
+                "UPDATE jobs SET progress = ? WHERE id = ?", (step, job_id)
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)
+
+    def request_cancel(self, job_id: int) -> None:
+        """Flag a job for cooperative cancellation (read by the running agent)."""
+
+        def _do() -> None:
+            self.conn.execute(
+                "UPDATE jobs SET cancel_requested = 1 WHERE id = ?", (job_id,)
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)
+
+    def is_cancel_requested(self, job_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT cancel_requested FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return bool(row["cancel_requested"]) if row else False
+
     def list(self, limit: int = 50) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)

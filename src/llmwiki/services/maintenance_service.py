@@ -38,12 +38,14 @@ def maintain(
     cfg: WorkspaceConfig,
     *,
     runner: Runner | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ChangeRequest | None:
     """Runs the maintenance agent on the findings and creates a CR (or None if nothing changes)."""
     if not findings:
         return None
     runner = runner or _default_runner
     backend = ChangeRequestBackend(paths.root)
+    backend.cancel_check = cancel_check
     result = runner(cfg, backend, findings_text=_format_findings(findings))
     changes = backend.collect_changes()
     if not changes:

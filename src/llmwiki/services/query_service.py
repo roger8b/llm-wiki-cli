@@ -43,6 +43,7 @@ def ask(
     *,
     save: bool = False,
     runner: Runner | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[QueryResult, ChangeRequest | None]:
     """Answers the question. If ``save`` and there is a suggested page, creates a CR."""
     runner = runner or _default_runner
@@ -51,6 +52,7 @@ def ask(
     # attempt in ``write_attempts`` (audited below) instead of silently
     # dropping them.
     read_backend = ChangeRequestBackend(paths.root, read_only=True)
+    read_backend.cancel_check = cancel_check
     result = runner(cfg, read_backend, question=question, save=save)
     if read_backend.write_attempts:
         logger.warning(

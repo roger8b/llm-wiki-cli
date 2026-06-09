@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.config import load_config
-from ..core.errors import SourceAlreadyProcessedError
+from ..core.errors import JobCancelledError, SourceAlreadyProcessedError
 from ..core.paths import load_active_brain, resolve_input
 from ..db.connection import get_connection, retry_on_locked
 from ..db.repo import AskHistoryRepo, JobRepo
@@ -84,6 +84,12 @@ class JobWorker(threading.Thread):
                     cfg = load_config(paths)
                     result_data: dict[str, Any] | None = None
 
+                    # Cooperative-cancellation probe for the agent: reads the
+                    # cancel_requested flag for THIS job (set by API/CLI on
+                    # another connection; WAL makes the committed flag visible).
+                    def _cancelled(c: sqlite3.Connection = conn, jid: int = job_id) -> bool:
+                        return JobRepo(c).is_cancel_requested(jid)
+
                     try:
                         if job_type == "ingest":
                             source_path = payload.get("source")
@@ -94,7 +100,8 @@ class JobWorker(threading.Thread):
                             # Run ingest service. It handles its own job completion using job_id.
                             try:
                                 ingest_service.ingest(
-                                    target, paths, conn, cfg, job_id=job_id, force=force
+                                    target, paths, conn, cfg, job_id=job_id,
+                                    force=force, cancel_check=_cancelled,
                                 )
                             except SourceAlreadyProcessedError as exc:
                                 # Not an error: the content was already applied.
@@ -110,7 +117,9 @@ class JobWorker(threading.Thread):
                             else:
                                 findings = lint_service.lint_structural(paths)
 
-                            cr = maintenance_service.maintain(findings, paths, conn, cfg)
+                            cr = maintenance_service.maintain(
+                                findings, paths, conn, cfg, cancel_check=_cancelled
+                            )
                             result_data = {
                                 "change_request_id": cr.id if cr else None,
                                 "files_changed": cr.files_changed if cr else 0,
@@ -140,7 +149,9 @@ class JobWorker(threading.Thread):
                             if not question:
                                 raise ValueError("Missing 'question' in ask payload")
                             save = payload.get("save", False)
-                            res, cr = query_service.ask(question, paths, conn, cfg, save=save)
+                            res, cr = query_service.ask(
+                                question, paths, conn, cfg, save=save, cancel_check=_cancelled
+                            )
 
                             result_data = res.model_dump(mode="json")
                             result_data["change_request_id"] = cr.id if cr else None
@@ -161,6 +172,19 @@ class JobWorker(threading.Thread):
                             raise ValueError(f"Unknown job type: {job_type}")
 
                         logger.info(f"Job {job_id} completed successfully")
+
+                    except JobCancelledError:
+                        logger.info(f"Job {job_id} cancelled by user")
+                        # ingest_service self-cancels; for worker-owned jobs
+                        # (ask/maintain) mark the terminal state here if needed.
+                        try:
+                            row = JobRepo(conn).get(job_id)
+                            if row is None or row["status"] not in ("cancelled", "done", "error"):
+                                JobRepo(conn).cancel(
+                                    job_id, result=json.dumps({"cancelled": True})
+                                )
+                        except Exception:
+                            logger.exception(f"Failed to mark job {job_id} cancelled")
 
                     except Exception as exc:
                         logger.exception(f"Error processing job {job_id}")

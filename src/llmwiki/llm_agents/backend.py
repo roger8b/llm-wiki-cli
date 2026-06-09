@@ -28,6 +28,7 @@ returns a list of ``FileChange`` (with diffs) that becomes the change request.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from fnmatch import fnmatch
 from pathlib import Path, PurePosixPath
 
@@ -91,6 +92,9 @@ class ChangeRequestBackend(FilesystemBackend):
         self.write_attempts: list[str] = []
         # Execution telemetry for the run, set by the factory after invoke.
         self.execution_meta: ExecutionMeta | None = None
+        # Optional cooperative-cancellation probe; when it returns True the agent
+        # aborts at the next model-call boundary. Set by services.
+        self.cancel_check: Callable[[], bool] | None = None
 
     # --- normalization --------------------------------------------------
     @staticmethod

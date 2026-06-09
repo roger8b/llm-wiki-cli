@@ -232,6 +232,7 @@ fts_limit: 20               # max full-text search results
 num_ctx: 8192               # Ollama context window
 temperature: null           # null = provider default
 request_timeout: 300        # seconds
+agent_max_retries: 2        # agent.invoke attempts on transient errors (1 = no retry)
 onboarded: true             # completed first-run setup
 providers:                  # per-provider base_url + model (NOT the key)
   openai:
@@ -366,7 +367,11 @@ The richest data is written to disk — no log level needed:
   tool calls, latency, whether the structured-output fallback fired). See the
   example under [Directory layout](#global-data-directory-never-committed).
 - **Per job** — the same telemetry is stored in the job `result` (visible via
-  `wiki jobs` / the `/api/jobs` endpoint and the desktop app).
+  `wiki jobs` / the `/api/jobs` endpoint and the desktop app). Long jobs also
+  expose a coarse `progress` step and can be **cancelled** cooperatively
+  (`POST /api/jobs/{id}/cancel`) — the agent stops at the next step and the job
+  ends in the `cancelled` state. Progress/cancel events are pushed over the
+  job SSE stream (`/api/jobs/{id}/events`).
 
 ```bash
 # Inspect the telemetry of the latest change request

@@ -34,3 +34,7 @@ class SourceAlreadyProcessedError(WikiError):
     a model invocation or create a duplicate change request. Pass ``force=True``
     to ingest anyway.
     """
+
+
+class JobCancelledError(WikiError):
+    """A running agent job was cancelled cooperatively by the user."""

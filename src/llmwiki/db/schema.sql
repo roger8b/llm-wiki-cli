@@ -41,14 +41,16 @@ CREATE TABLE IF NOT EXISTS claims (
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  type         TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'queued',
-  payload      TEXT,
-  result       TEXT,
-  error        TEXT,
-  created_at   TEXT NOT NULL,
-  completed_at TEXT
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  type             TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'queued',
+  payload          TEXT,
+  result           TEXT,
+  error            TEXT,
+  progress         TEXT,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  created_at       TEXT NOT NULL,
+  completed_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS change_requests (

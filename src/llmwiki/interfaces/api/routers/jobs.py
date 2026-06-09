@@ -60,6 +60,30 @@ def get_job(job_id: int) -> dict[str, Any]:
         conn.close()
 
 
+@router.post("/{job_id}/cancel")
+def cancel_job(job_id: int) -> dict[str, Any]:
+    """Request cooperative cancellation of a running job.
+
+    Sets the ``cancel_requested`` flag; the worker's agent aborts at the next
+    model-call boundary and the job ends in the ``cancelled`` state.
+    """
+    from ....db.repo import JobRepo
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        repo = JobRepo(conn)
+        job = repo.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+        if job["status"] in ("done", "error", "cancelled"):
+            return {"job_id": job_id, "status": job["status"], "cancel_requested": False}
+        repo.request_cancel(job_id)
+        return {"job_id": job_id, "status": job["status"], "cancel_requested": True}
+    finally:
+        conn.close()
+
+
 def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
     """Server-Sent Events for a job's lifecycle.
 
@@ -78,6 +102,7 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
             return
 
         last_status: str | None = None
+        last_progress: str | None = None
         deadline = time.monotonic() + _STREAM_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             row = repo.get(job_id)
@@ -85,11 +110,20 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
                 yield _sse("error", {"detail": "Job disappeared."})
                 return
             status = row["status"]
+            progress = row["progress"] if "progress" in row.keys() else None
+            if progress != last_progress:
+                last_progress = progress
+                if progress:
+                    yield _sse("progress", {"progress": progress})
             if status != last_status:
                 last_status = status
                 yield _sse("status", {"status": status})
             if status == "done":
                 yield _sse("result", {"result": row["result"]})
+                yield _sse("end", {})
+                return
+            if status == "cancelled":
+                yield _sse("cancelled", {"result": row["result"]})
                 yield _sse("end", {})
                 return
             if status == "error":
