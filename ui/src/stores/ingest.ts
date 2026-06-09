@@ -1,8 +1,8 @@
 import { create } from "zustand"
 import { api } from "@/lib/api"
 
-type IngestStatus = "idle" | "running" | "done" | "error"
-type FileStatus = "queued" | "running" | "done" | "error"
+type IngestStatus = "idle" | "running" | "done" | "error" | "cancelled"
+type FileStatus = "queued" | "running" | "done" | "error" | "cancelled"
 
 export interface BatchItem {
   name: string
@@ -19,6 +19,10 @@ interface IngestState {
   error: string | null
   /** Per-file progress for batch ingests (empty for single-file runs). */
   items: BatchItem[]
+  /** Job ids backing the current run (1 for single, N for batch) — for cancel. */
+  jobIds: number[]
+  /** True once the user has requested cancellation of the current run. */
+  cancelling: boolean
   /** Run an ingest-like task while showing an animated progress drawer. */
   run: (
     title: string,
@@ -36,15 +40,28 @@ interface IngestState {
       errors: { path: string; detail: string }[]
     }>,
   ) => Promise<void>
+  /** Request cooperative cancellation of every running job in this run. */
+  cancel: () => Promise<void>
   close: () => void
 }
 
-// Cosmetic steps revealed while the (synchronous or asynchronous) backend call runs.
+// Cosmetic steps shown until the backend reports a real progress step.
 const FAKE_STEPS = [
   "Reading source…",
   "Searching existing wiki for context…",
   "Agent writing pages…",
 ]
+
+// Human labels for the backend's coarse progress steps.
+const PROGRESS_LABELS: Record<string, string> = {
+  running_agent: "Agent reading & writing pages…",
+  creating_change_request: "Preparing the change request…",
+}
+
+function progressLabel(step: string | null | undefined): string | null {
+  if (!step) return null
+  return PROGRESS_LABELS[step] ?? step
+}
 
 function parseCrId(result: string | null | undefined): string | null {
   if (!result) return null
@@ -64,6 +81,8 @@ export const useIngestStore = create<IngestState>((set, get) => ({
   crId: null,
   error: null,
   items: [],
+  jobIds: [],
+  cancelling: false,
 
   run: async (title, task) => {
     set({
@@ -74,15 +93,19 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       crId: null,
       error: null,
       items: [],
+      jobIds: [],
+      cancelling: false,
     })
 
-    // staggered reveal of cosmetic steps
+    // staggered reveal of cosmetic steps (until a real progress step arrives)
     let i = 0
     const timer = setInterval(() => {
       if (get().status !== "running" || i >= FAKE_STEPS.length) {
         clearInterval(timer)
         return
       }
+      // Don't keep adding cosmetic steps once the backend reports real progress.
+      if (get().jobIds.length > 0 && get().steps.length > 0) return
       set({ steps: [...get().steps, FAKE_STEPS[i]] })
       i++
     }, 800)
@@ -92,12 +115,24 @@ export const useIngestStore = create<IngestState>((set, get) => ({
 
       if (res && typeof res === "object" && "job_id" in res) {
         const jobId = res.job_id
-        // Poll job status
+        set({ jobIds: [jobId] })
+        let lastProgress: string | null = null
+        // Poll job status + real progress
         while (true) {
           const job = await api.getJob(jobId)
+          const label = progressLabel(job.progress)
+          if (label && label !== lastProgress) {
+            lastProgress = label
+            clearInterval(timer)
+            set({ steps: [label] })
+          }
           if (job.status === "done") {
             clearInterval(timer)
             set({ status: "done", crId: parseCrId(job.result) })
+            break
+          } else if (job.status === "cancelled") {
+            clearInterval(timer)
+            set({ status: "cancelled" })
             break
           } else if (job.status === "error") {
             clearInterval(timer)
@@ -126,6 +161,8 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       crId: null,
       error: null,
       items: files.map((f) => ({ name: f.name, status: "queued" as FileStatus })),
+      jobIds: [],
+      cancelling: false,
     })
 
     const setItem = (name: string, patch: Partial<BatchItem>) => {
@@ -158,15 +195,19 @@ export const useIngestStore = create<IngestState>((set, get) => ({
     queuedFiles.forEach((f, idx) => {
       if (idx < res.job_ids.length) jobOf.set(f.name, res.job_ids[idx])
     })
+    set({ jobIds: [...jobOf.values()] })
 
     await Promise.all(
       [...jobOf.entries()].map(async ([name, jobId]) => {
         while (true) {
           const job = await api.getJob(jobId)
           if (job.status === "running") {
-            setItem(name, { status: "running" })
+            setItem(name, { status: "running", detail: progressLabel(job.progress) })
           } else if (job.status === "done") {
             setItem(name, { status: "done", detail: parseCrId(job.result) })
+            break
+          } else if (job.status === "cancelled") {
+            setItem(name, { status: "cancelled", detail: "cancelled" })
             break
           } else if (job.status === "error") {
             setItem(name, { status: "error", detail: job.error || "Job failed" })
@@ -178,8 +219,18 @@ export const useIngestStore = create<IngestState>((set, get) => ({
     )
 
     const anyError = get().items.some((it) => it.status === "error")
-    set({ status: anyError ? "error" : "done" })
+    const allCancelled =
+      get().items.length > 0 && get().items.every((it) => it.status === "cancelled")
+    set({ status: anyError ? "error" : allCancelled ? "cancelled" : "done" })
   },
 
-  close: () => set({ open: false, status: "idle", items: [] }),
+  cancel: async () => {
+    const ids = get().jobIds
+    if (ids.length === 0) return
+    set({ cancelling: true })
+    await Promise.allSettled(ids.map((id) => api.cancelJob(id)))
+  },
+
+  close: () =>
+    set({ open: false, status: "idle", items: [], jobIds: [], cancelling: false }),
 }))

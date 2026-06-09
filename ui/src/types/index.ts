@@ -234,10 +234,11 @@ export interface BrainSettings {
 export interface Job {
   id: number
   type: string
-  status: "queued" | "running" | "done" | "error"
+  status: "queued" | "running" | "done" | "error" | "cancelled"
   payload?: string | null
   result?: string | null
   error?: string | null
+  progress?: string | null
   created_at: string
   completed_at?: string | null
 }
