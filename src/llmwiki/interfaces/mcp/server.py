@@ -66,9 +66,13 @@ def _ingest(path: str) -> str:
     target = resolve_input(path, paths.root)
     if not target.is_file():
         return f"File not found: {path}"
+    from ...core.errors import SourceAlreadyProcessedError
+
     conn = get_connection(paths.db_path)
     try:
         cr = ingest_service.ingest(target, paths, conn, cfg)
+    except SourceAlreadyProcessedError as exc:
+        return f"Skipped: {exc}"
     finally:
         conn.close()
     return f"Change request {cr.id} created ({cr.files_changed} files). Review before applying."

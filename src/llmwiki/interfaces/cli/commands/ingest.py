@@ -8,7 +8,7 @@ import typer
 from rich.markup import escape as esc
 
 from ....core.config import load_config
-from ....core.errors import WikiError
+from ....core.errors import SourceAlreadyProcessedError, WikiError
 from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....services import ingest_service
@@ -27,10 +27,13 @@ def _ingest_one(
     paths: BrainPaths,
     cfg: object,
     conn: object,
+    *,
+    force: bool = False,
 ) -> bool:
     """Ingest a single file. Returns True on success, False on failure.
 
     Failures are reported to stderr but do not raise, so a batch keeps going.
+    An already-processed source is skipped (not a failure).
     """
     direct = Path(file)
     target = direct if direct.is_file() else (paths.root / file)
@@ -39,7 +42,11 @@ def _ingest_one(
         return False
     target = target.resolve()
     try:
-        cr = ingest_service.ingest(target, paths, conn, cfg)  # type: ignore[arg-type]
+        cr = ingest_service.ingest(target, paths, conn, cfg, force=force)  # type: ignore[arg-type]
+    except SourceAlreadyProcessedError as exc:
+        typer.echo(f"[yellow]Skipped (already processed):[/yellow] {esc(file)} — {exc} "
+                   "Pass --force to re-ingest.")
+        return True
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"[red]Ingestion failed for {file}: {exc}[/red]", err=True)
         return False
@@ -61,13 +68,16 @@ def _ingest_one(
 
 def ingest(
     files: list[str] = typer.Argument(..., help="Source file(s) to ingest."),  # noqa: B008
+    force: bool = typer.Option(  # noqa: B008
+        False, "--force", "-f", help="Re-ingest even if the content was already processed."
+    ),
 ) -> None:
     """Read one or more sources with the LLM and create change requests.
 
     Does not write to the wiki. Accepts paths within the brain
     (e.g. raw/articles/x.md), system files, or shell globs (e.g. raw/*.md).
     A failure on one file does not abort the rest; the command exits non-zero
-    if any file failed.
+    if any file failed. Already-processed sources are skipped unless --force.
     """
     paths = _brain()
     cfg = load_config(paths)
@@ -76,7 +86,7 @@ def ingest(
     failed = 0
     try:
         for file in files:
-            if _ingest_one(file, paths, cfg, conn):
+            if _ingest_one(file, paths, cfg, conn, force=force):
                 ok += 1
             else:
                 failed += 1

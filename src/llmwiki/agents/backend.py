@@ -288,6 +288,20 @@ class ChangeRequestBackend(FilesystemBackend):
         return self.grep(pattern, path, glob)
 
     # --- collect changes ------------------------------------------------
+    _CATEGORY = {"create": "new", "update": "edited", "delete": "removed"}
+
+    @staticmethod
+    def _confidence_of(content: str) -> str | None:
+        """Best-effort extraction of the ``confidence`` frontmatter field."""
+        from ..core import frontmatter  # noqa: PLC0415
+
+        try:
+            meta, _ = frontmatter.parse(content)
+        except Exception:  # noqa: BLE001
+            return None
+        value = meta.get("confidence") if meta else None
+        return str(value) if value is not None else None
+
     def collect_changes(self) -> list[FileChange]:
         """Compares staging with the disk and returns a list of FileChange (with diffs)."""
         changes: list[FileChange] = []
@@ -303,6 +317,8 @@ class ChangeRequestBackend(FilesystemBackend):
                     operation=operation,
                     new_content=new_content,
                     diff=make_diff(old or "", new_content, norm),
+                    category=self._CATEGORY.get(operation),
+                    confidence=self._confidence_of(new_content),
                 )
             )
         return changes
