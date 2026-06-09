@@ -65,11 +65,13 @@ def ask(
         backend.write(result.suggested_page.path, result.suggested_page.content)
         changes = backend.collect_changes()
         if changes:
+            meta = read_backend.execution_meta
             cr = create_from_changes(
                 changes,
                 f"Saved answer: {question[:60]}",
                 paths,
                 conn,
+                execution=meta.to_dict() if meta is not None else None,
             )
     return result, cr
 

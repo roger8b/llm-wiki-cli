@@ -48,4 +48,11 @@ def maintain(
     changes = backend.collect_changes()
     if not changes:
         return None
-    return create_from_changes(changes, result.summary, paths, conn)
+    meta = backend.execution_meta
+    return create_from_changes(
+        changes,
+        result.summary,
+        paths,
+        conn,
+        execution=meta.to_dict() if meta is not None else None,
+    )

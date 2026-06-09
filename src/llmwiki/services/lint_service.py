@@ -150,3 +150,29 @@ def lint_all(
         runner = semantic_runner or _default_semantic_runner
         findings = findings + runner(cfg)
     return findings
+
+
+def annotate_with_pending_crs(
+    findings: list[LintFinding], conn: sqlite3.Connection
+) -> list[LintFinding]:
+    """Attach ``related_cr`` to findings whose page already has a pending fix.
+
+    Lets a report say "broken_link … (CR-0042 already open fixes this)" so the
+    user doesn't open a duplicate correction. Mutates and returns ``findings``.
+    """
+    from . import change_request_service
+
+    page_to_cr: dict[str, str] = {}
+    for cr in change_request_service.list_crs(conn, status="pending_review"):
+        full = change_request_service.get(cr.id, conn)
+        if full is None:
+            continue
+        for change in full.changes:
+            page_to_cr.setdefault(change.path, cr.id)
+
+    for finding in findings:
+        for page in finding.pages:
+            if page in page_to_cr:
+                finding.related_cr = page_to_cr[page]
+                break
+    return findings

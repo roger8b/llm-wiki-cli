@@ -122,6 +122,8 @@ class JobWorker(threading.Thread):
                             else:
                                 findings = lint_service.lint_structural(paths)
 
+                            # Annotate findings already covered by a pending CR.
+                            findings = lint_service.annotate_with_pending_crs(findings, conn)
                             findings_json: list[dict[str, Any]] = [
                                 f.model_dump(mode="json") for f in findings
                             ]

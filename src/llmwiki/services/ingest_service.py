@@ -126,6 +126,8 @@ def ingest(
         result = runner(cfg, backend, source_path=rel, source_text=text)
         changes = backend.collect_changes()
         _audit_result(result, changes, rel)
+        meta = backend.execution_meta
+        execution = meta.to_dict() if meta is not None else None
         cr = create_from_changes(
             changes,
             result.summary,
@@ -133,8 +135,14 @@ def ingest(
             conn,
             job_id=job_id,
             source_path=rel if rel.startswith("raw/") else None,
+            execution=execution,
         )
-        job_repo.complete(job_id, result=json.dumps({"cr": cr.id, "files": cr.files_changed}))
+        job_repo.complete(
+            job_id,
+            result=json.dumps(
+                {"cr": cr.id, "files": cr.files_changed, "execution": execution}
+            ),
+        )
         return cr
     except Exception as exc:  # noqa: BLE001
         job_repo.complete(job_id, error=str(exc))

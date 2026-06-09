@@ -28,8 +28,13 @@ def create_from_changes(
     *,
     job_id: int | None = None,
     source_path: str | None = None,
+    execution: dict[str, object] | None = None,
 ) -> ChangeRequest:
-    """Creates a CR from captured changes. Initial status: pending_review."""
+    """Creates a CR from captured changes. Initial status: pending_review.
+
+    ``execution`` carries optional agent telemetry (model, tokens, latency,
+    tool calls, fallback) persisted into ``meta.json`` for later auditing.
+    """
     repo = ChangeRequestRepo(conn)
     cr_id = repo.next_id()
     diff_dir = paths.change_requests / cr_id
@@ -45,6 +50,7 @@ def create_from_changes(
         "summary": summary,
         "source_path": source_path,
         "created_at": created,
+        "execution": execution,
         "changes": [c.model_dump() for c in changes],
     }
     (diff_dir / "meta.json").write_text(

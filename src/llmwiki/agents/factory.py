@@ -10,6 +10,8 @@ Importa DeepAgents de forma preguiçosa para que o core/CLI funcione sem o extra
 
 from __future__ import annotations
 
+import logging
+import time
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 
@@ -17,10 +19,13 @@ from pydantic import BaseModel
 
 from ..core.config import WorkspaceConfig
 from .models import IngestionResult, LintReport, MaintenanceResult, QueryResult
+from .telemetry import ExecutionMeta, extract_meta
 from .tools import make_search_pages
 
 if TYPE_CHECKING:
     from .backend import ChangeRequestBackend
+
+logger = logging.getLogger("llmwiki.agents.factory")
 
 
 def _prompt(name: str) -> str:
@@ -182,6 +187,56 @@ def _fallback[T: BaseModel](schema: type[T], text: str) -> T:
         ) from exc
 
 
+def _had_structured(state: dict[str, Any], schema: type[BaseModel]) -> bool:
+    resp = state.get("structured_response")
+    return isinstance(resp, schema | dict)
+
+
+def _invoke[T: BaseModel](
+    agent: Any,
+    message: str,
+    schema: type[T],
+    cfg: WorkspaceConfig,
+    backend: ChangeRequestBackend | None = None,
+) -> T:
+    """Run the agent, time it, log structured-output fallback, capture telemetry.
+
+    Telemetry is stashed on ``backend.execution_meta`` (when a backend is
+    present) so services can persist it into the change request / job result.
+    """
+    start = time.perf_counter()
+    state = agent.invoke({"messages": [{"role": "user", "content": message}]})
+    latency_ms = int((time.perf_counter() - start) * 1000)
+
+    used_fallback = not _had_structured(state, schema)
+    if used_fallback:
+        logger.warning(
+            "agent did not return structured_response for %s; using text fallback "
+            "(model=%s, latency=%dms) — weak tool-calling model?",
+            schema.__name__,
+            cfg.model,
+            latency_ms,
+        )
+
+    result = _structured(state, schema)
+    meta: ExecutionMeta = extract_meta(
+        state, model=cfg.model, latency_ms=latency_ms, used_fallback=used_fallback
+    )
+    logger.info(
+        "agent run %s: model=%s tokens_in=%d tokens_out=%d tool_calls=%d latency=%dms fallback=%s",
+        schema.__name__,
+        meta.model,
+        meta.tokens_in,
+        meta.tokens_out,
+        meta.tool_calls,
+        meta.latency_ms,
+        meta.used_fallback,
+    )
+    if backend is not None:
+        backend.execution_meta = meta
+    return result
+
+
 def run_ingestion(
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend,
@@ -203,8 +258,7 @@ def run_ingestion(
         f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
         "Integre esta fonte na wiki seguindo o protocolo."
     )
-    state = agent.invoke({"messages": [{"role": "user", "content": message}]})
-    return _structured(state, IngestionResult)
+    return _invoke(agent, message, IngestionResult, cfg, backend)
 
 
 def run_query(
@@ -226,10 +280,7 @@ def run_query(
         kwargs["backend"] = backend
     agent = create_deep_agent(**kwargs)
     suffix = " Gere também suggested_page para salvar a resposta." if save else ""
-    state = agent.invoke(
-        {"messages": [{"role": "user", "content": question + suffix}]}
-    )
-    return _structured(state, QueryResult)
+    return _invoke(agent, question + suffix, QueryResult, cfg, backend)
 
 
 def run_lint(cfg: WorkspaceConfig) -> LintReport:
@@ -241,10 +292,7 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
         system_prompt=_prompt("lint.md"),
         response_format=_response_format(LintReport),
     )
-    state = agent.invoke(
-        {"messages": [{"role": "user", "content": "Audite a wiki e liste os problemas."}]}
-    )
-    return _structured(state, LintReport)
+    return _invoke(agent, "Audite a wiki e liste os problemas.", LintReport, cfg)
 
 
 def run_maintenance(
@@ -263,5 +311,4 @@ def run_maintenance(
         response_format=_response_format(MaintenanceResult),
     )
     message = f"Problemas detectados:\n{findings_text}\n\nProponha correções."
-    state = agent.invoke({"messages": [{"role": "user", "content": message}]})
-    return _structured(state, MaintenanceResult)
+    return _invoke(agent, message, MaintenanceResult, cfg, backend)
