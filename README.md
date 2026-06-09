@@ -188,6 +188,29 @@ my-brain/
     └── <uuid>/              # per-brain data, keyed by UUID (not dirname)
         ├── metadata.db      # SQLite: pages, sources, jobs, change requests
         └── change_requests/  # staged diffs (JSON) — applied or rejected
+            └── CR-2026-0001/
+                ├── meta.json        # summary, changes, + execution telemetry
+                └── 000-*.diff       # per-file unified diffs
+```
+
+Each change request's **`meta.json`** records how the agent run went, under the
+`execution` block — handy for auditing model quality and cost over time:
+
+```json
+{
+  "id": "CR-2026-0001",
+  "summary": "Created RAG concept page",
+  "execution": {
+    "model": "ollama:llama3.1",
+    "tokens_in": 3120,
+    "tokens_out": 845,
+    "tool_calls": 4,
+    "latency_ms": 18342,
+    "used_fallback": false
+  },
+  "changes": [{ "path": "wiki/concepts/rag.md", "operation": "create",
+                "category": "new", "confidence": "medium", "diff": "…" }]
+}
 ```
 
 Config lives **outside** the brain repo so it is never accidentally committed
@@ -327,6 +350,54 @@ Install extra: `pip install "llm-wiki[google]"`
 | Anthropic | `anthropic:<model>` | `anthropic:claude-sonnet-4-5` |
 | OpenAI | `openai:<model>` | `openai:gpt-4o` |
 | Google | `google:<model>` | `google:gemini-2.0-flash` |
+
+---
+
+## Logs & telemetry
+
+Every agent run records how it went. There are **two ways** to access it:
+
+### 1. Structured telemetry (persisted, queryable)
+
+The richest data is written to disk — no log level needed:
+
+- **Per change request** — the `execution` block in
+  `~/.wiki/brains/<uuid>/change_requests/CR-…/meta.json` (model, tokens in/out,
+  tool calls, latency, whether the structured-output fallback fired). See the
+  example under [Directory layout](#global-data-directory-never-committed).
+- **Per job** — the same telemetry is stored in the job `result` (visible via
+  `wiki jobs` / the `/api/jobs` endpoint and the desktop app).
+
+```bash
+# Inspect the telemetry of the latest change request
+cat ~/.wiki/brains/*/change_requests/CR-2026-0001/meta.json | jq .execution
+```
+
+### 2. Runtime logs (stderr / file)
+
+Logs go to **stderr** by default. Two environment variables control them:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `LLMWIKI_LOG_LEVEL` | `WARNING` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`. Use `INFO` to see the per-run telemetry line (`model / tokens / latency / tool_calls / fallback`). |
+| `LLMWIKI_LOG_FILE` | _(unset)_ | When set, logs are **also** appended to this file. |
+
+At the default `WARNING` level you already see the important audit events:
+structured-output **fallback** (weak model), **write attempts during a read-only
+`ask`**, **phantom change requests** (the model promised pages but wrote none),
+and declared/written **mismatches**.
+
+```bash
+# See the full per-run telemetry line in the terminal
+LLMWIKI_LOG_LEVEL=INFO wiki ingest raw/articles/architecture.md
+
+# Persist everything to a file (e.g. for the background worker / API server)
+LLMWIKI_LOG_LEVEL=INFO LLMWIKI_LOG_FILE=~/.wiki/wiki.log wiki serve
+```
+
+> The background job worker and the API server pick up the same variables — set
+> them in the environment before `wiki serve` (or the desktop app launch) to
+> capture ingestion/maintenance telemetry from long-running jobs.
 
 ---
 

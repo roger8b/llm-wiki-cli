@@ -53,6 +53,14 @@ app.add_typer(brain_app, name="brain")
 app.add_typer(skills_app, name="skills")
 
 
+@app.callback()
+def _main() -> None:
+    """Configure logging once per CLI invocation (honours LLMWIKI_LOG_LEVEL)."""
+    from ...core.logging import configure_logging
+
+    configure_logging()
+
+
 @app.command()
 def version() -> None:
     """Show the version."""

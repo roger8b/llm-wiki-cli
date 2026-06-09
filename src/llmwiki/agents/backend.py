@@ -46,6 +46,7 @@ from deepagents.backends.protocol import (
 
 from ..core.diff import make_diff
 from ..core.models import FileChange
+from .telemetry import ExecutionMeta
 
 logger = logging.getLogger("llmwiki.agents.backend")
 
@@ -88,6 +89,8 @@ class ChangeRequestBackend(FilesystemBackend):
         self.read_only = read_only
         # Paths the agent tried to write while blocked (read-only audit trail).
         self.write_attempts: list[str] = []
+        # Execution telemetry for the run, set by the factory after invoke.
+        self.execution_meta: ExecutionMeta | None = None
 
     # --- normalization --------------------------------------------------
     @staticmethod

@@ -93,3 +93,5 @@ class LintFinding(BaseModel):
     severity: Severity = Severity.warn
     message: str
     pages: list[str] = Field(default_factory=list)
+    # Id of a pending change request that already fixes one of ``pages`` (if any).
+    related_cr: str | None = None
