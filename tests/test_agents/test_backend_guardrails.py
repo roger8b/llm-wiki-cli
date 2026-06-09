@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from llmwiki.agents.backend import ChangeRequestBackend, validate_change_path
+from llmwiki.llm_agents.backend import ChangeRequestBackend, validate_change_path
 
 
 @pytest.fixture

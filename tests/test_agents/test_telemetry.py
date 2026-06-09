@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from llmwiki.agents import factory
-from llmwiki.agents.backend import ChangeRequestBackend
-from llmwiki.agents.models import IngestionResult
-from llmwiki.agents.telemetry import extract_meta
 from llmwiki.core.config import WorkspaceConfig
+from llmwiki.llm_agents import factory
+from llmwiki.llm_agents.backend import ChangeRequestBackend
+from llmwiki.llm_agents.models import IngestionResult
+from llmwiki.llm_agents.telemetry import extract_meta
 
 
 def _ai(content="", usage=None, tool_calls=None):
@@ -68,7 +68,7 @@ class TestInvoke:
         backend = ChangeRequestBackend(tmp_path)
         state = {"messages": [_ai(content="plain text answer")]}  # no structured_response
         cfg = WorkspaceConfig(brain_root=tmp_path)
-        with caplog.at_level(logging.WARNING, logger="llmwiki.agents.factory"):
+        with caplog.at_level(logging.WARNING, logger="llmwiki.llm_agents.factory"):
             factory._invoke(_FakeAgent(state), "msg", IngestionResult, cfg, backend)
         assert "fallback" in caplog.text
         assert backend.execution_meta is not None

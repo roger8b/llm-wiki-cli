@@ -34,7 +34,7 @@ def test_writes_to_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     monkeypatch.setenv("LLMWIKI_LOG_LEVEL", "INFO")
     monkeypatch.setenv("LLMWIKI_LOG_FILE", str(log_file))
     wiki_logging.configure_logging(force=True)
-    logging.getLogger("llmwiki.agents.factory").info("hello telemetry")
+    logging.getLogger("llmwiki.llm_agents.factory").info("hello telemetry")
     assert log_file.exists()
     assert "hello telemetry" in log_file.read_text(encoding="utf-8")
 

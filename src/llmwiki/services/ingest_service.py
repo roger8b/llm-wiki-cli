@@ -12,14 +12,14 @@ import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
-from ..agents.backend import ChangeRequestBackend
-from ..agents.models import IngestionResult
 from ..core.config import WorkspaceConfig
 from ..core.errors import SourceAlreadyProcessedError
 from ..core.misc import sha256
 from ..core.models import ChangeRequest, FileChange, SourceStatus
 from ..core.paths import BrainPaths
 from ..db.repo import JobRepo, SourceRepo
+from ..llm_agents.backend import ChangeRequestBackend
+from ..llm_agents.models import IngestionResult
 from . import change_request_service
 from .change_request_service import create_from_changes
 
@@ -86,7 +86,7 @@ def _default_runner(
     source_path: str,
     source_text: str,
 ) -> IngestionResult:
-    from ..agents.factory import run_ingestion
+    from ..llm_agents.factory import run_ingestion
 
     return run_ingestion(cfg, backend, source_path=source_path, source_text=source_text)
 

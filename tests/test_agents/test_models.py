@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from llmwiki.agents import factory
-from llmwiki.agents.models import (
+from llmwiki.llm_agents import factory
+from llmwiki.llm_agents.models import (
     Citation,
     IngestionResult,
     LintFindingOut,

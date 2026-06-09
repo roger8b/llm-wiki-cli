@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from llmwiki.agents.backend import ChangeRequestBackend
-from llmwiki.agents.models import IngestionResult
 from llmwiki.core.config import WorkspaceConfig
 from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection
+from llmwiki.llm_agents.backend import ChangeRequestBackend
+from llmwiki.llm_agents.models import IngestionResult
 from llmwiki.services import change_request_service, ingest_service
 
 

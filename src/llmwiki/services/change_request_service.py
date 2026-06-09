@@ -133,7 +133,7 @@ def apply(
     # before touching the disk, so a malformed/malicious CR cannot escape the
     # wiki/ sandbox even if it slipped past the backend. Atomic: validate all
     # before writing any.
-    from ..agents.backend import validate_change_path
+    from ..llm_agents.backend import validate_change_path
 
     for change in changes:
         err = validate_change_path(change.path)

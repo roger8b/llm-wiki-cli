@@ -10,11 +10,11 @@ import logging
 import sqlite3
 from collections.abc import Callable
 
-from ..agents.backend import ChangeRequestBackend
-from ..agents.models import QueryResult
 from ..core.config import WorkspaceConfig
 from ..core.models import ChangeRequest
 from ..core.paths import BrainPaths
+from ..llm_agents.backend import ChangeRequestBackend
+from ..llm_agents.models import QueryResult
 from .change_request_service import create_from_changes
 
 logger = logging.getLogger("llmwiki.services.query")
@@ -30,7 +30,7 @@ def _default_runner(
     question: str,
     save: bool,
 ) -> QueryResult:
-    from ..agents.factory import run_query
+    from ..llm_agents.factory import run_query
 
     return run_query(cfg, backend, question=question, save=save)
 

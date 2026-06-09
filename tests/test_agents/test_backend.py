@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from llmwiki.agents.backend import ChangeRequestBackend
+from llmwiki.llm_agents.backend import ChangeRequestBackend
 
 
 @pytest.fixture

@@ -6,10 +6,10 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from llmwiki.agents.backend import ChangeRequestBackend
 from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection
 from llmwiki.interfaces.cli.main import app
+from llmwiki.llm_agents.backend import ChangeRequestBackend
 from llmwiki.services import change_request_service, scaffold_service
 
 runner = CliRunner()

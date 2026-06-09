@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from llmwiki.agents.tools import (
+from llmwiki.core.paths import BrainPaths
+from llmwiki.db.connection import get_connection
+from llmwiki.db.repo import LinkRepo
+from llmwiki.llm_agents.tools import (
     make_get_backlinks,
     make_read_metadata,
     make_search_by_type,
     make_search_pages,
 )
-from llmwiki.core.paths import BrainPaths
-from llmwiki.db.connection import get_connection
-from llmwiki.db.repo import LinkRepo
 from llmwiki.services import index_service
 
 

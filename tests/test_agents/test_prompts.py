@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from llmwiki.agents import factory
+from llmwiki.llm_agents import factory
 
 _PROMPTS = ["ingestion.md", "query.md", "lint.md", "maintenance.md"]
 
