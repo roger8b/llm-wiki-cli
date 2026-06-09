@@ -103,6 +103,12 @@ class PageRepo:
         )
         self.conn.commit()
 
+    def by_type(self, ptype: str) -> list[Page]:
+        rows = self.conn.execute(
+            "SELECT * FROM wiki_pages WHERE type = ? ORDER BY path", (ptype,)
+        ).fetchall()
+        return [_row_to_page(r) for r in rows]
+
     def list(self) -> list[Page]:
         rows = self.conn.execute(
             "SELECT * FROM wiki_pages ORDER BY type, path"
@@ -133,6 +139,14 @@ class LinkRepo:
             "SELECT from_page, to_page, link_type FROM links"
         ).fetchall()
         return [(r["from_page"], r["to_page"], r["link_type"]) for r in rows]
+
+    def backlinks(self, to_page: str) -> list[str]:
+        """Pages that link TO ``to_page`` (incoming links / impact set)."""
+        rows = self.conn.execute(
+            "SELECT from_page FROM links WHERE to_page = ? ORDER BY from_page",
+            (to_page,),
+        ).fetchall()
+        return [r["from_page"] for r in rows]
 
     def clear(self) -> None:
         self.conn.execute("DELETE FROM links")
