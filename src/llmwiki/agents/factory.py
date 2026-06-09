@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from ..core.config import WorkspaceConfig
+from .middleware import ExcludeToolsMiddleware
 from .models import IngestionResult, LintReport, MaintenanceResult, QueryResult
 from .telemetry import ExecutionMeta, extract_meta
-from .tools import make_search_pages
+from .tools import domain_tools
 
 if TYPE_CHECKING:
     from .backend import ChangeRequestBackend
@@ -248,9 +249,10 @@ def run_ingestion(
 
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=[make_search_pages(cfg.paths)],
+        tools=domain_tools(cfg.paths),
         system_prompt=_prompt("ingestion.md"),
         backend=backend,
+        middleware=[ExcludeToolsMiddleware()],
         response_format=_response_format(IngestionResult),
     )
     message = (
@@ -272,8 +274,9 @@ def run_query(
 
     kwargs: dict[str, Any] = {
         "model": _build_model(cfg),
-        "tools": [make_search_pages(cfg.paths)],
+        "tools": domain_tools(cfg.paths),
         "system_prompt": _prompt("query.md"),
+        "middleware": [ExcludeToolsMiddleware()],
         "response_format": _response_format(QueryResult),
     }
     if backend is not None:
@@ -288,8 +291,9 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
 
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=[make_search_pages(cfg.paths)],
+        tools=domain_tools(cfg.paths),
         system_prompt=_prompt("lint.md"),
+        middleware=[ExcludeToolsMiddleware()],
         response_format=_response_format(LintReport),
     )
     return _invoke(agent, "Audite a wiki e liste os problemas.", LintReport, cfg)
@@ -305,9 +309,10 @@ def run_maintenance(
 
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=[make_search_pages(cfg.paths)],
+        tools=domain_tools(cfg.paths),
         system_prompt=_prompt("maintenance.md"),
         backend=backend,
+        middleware=[ExcludeToolsMiddleware()],
         response_format=_response_format(MaintenanceResult),
     )
     message = f"Problemas detectados:\n{findings_text}\n\nProponha correções."

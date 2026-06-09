@@ -102,3 +102,16 @@ class TestBuildModel:
     ) -> None:
         monkeypatch.setattr(factory, "_build_remote", lambda *a, **k: None)
         assert factory._build_model(_cfg(tmp_path, "openai:gpt-4o")) == "openai:gpt-4o"
+
+    def test_ollama_does_not_read_api_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Lazy key lookup (#147): the local Ollama path must not touch the keychain."""
+        import llmwiki.core.secrets as secrets
+
+        def _boom(provider: str) -> str:
+            raise AssertionError(f"get_api_key should not be called for ollama (got {provider})")
+
+        monkeypatch.setattr(secrets, "get_api_key", _boom)
+        model = factory._build_model(_cfg(tmp_path, "ollama:llama3.1"))
+        assert not isinstance(model, str)
