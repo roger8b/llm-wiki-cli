@@ -72,7 +72,7 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
-/** Compact one-line outcome for the table. */
+/** Compact one-line outcome for the table / modal. */
 function resultSummary(job: Job) {
   if (job.error) return <span className="text-rejected">{job.error}</span>
   if (job.status === "running")
@@ -107,6 +107,56 @@ function resultSummary(job: Job) {
   return <span className="text-muted-foreground">Completed</span>
 }
 
+/** Plain-text outcome (for the semaphore tooltip). */
+function outcomeText(job: Job): string {
+  if (job.error) return job.error
+  if (job.status === "running")
+    return job.progress ? (PROGRESS_LABELS[job.progress] ?? job.progress) : "Working…"
+  if (job.status === "queued") return "Queued"
+  const r = safeParse(job.result)
+  if (r?.skipped) return "Skipped — already processed"
+  if (job.status === "cancelled" || r?.cancelled) return "Cancelled"
+  if (job.type === "ingest") {
+    const cr = r?.cr as string | null
+    return cr ? `CR ${cr} · ${String(r?.files ?? 0)} files` : "No changes proposed"
+  }
+  if (job.type === "ask") return `Answered${r?.change_request_id ? ` · CR ${r.change_request_id}` : ""}`
+  if (job.type === "maintain")
+    return r?.change_request_id ? `Fixes ${String(r.change_request_id)}` : "No fixes needed"
+  if (job.type === "lint") return `${Array.isArray(r?.findings) ? r.findings.length : 0} issues`
+  return "Completed"
+}
+
+/**
+ * Outcome traffic-light. Encodes the *result* (not just status): green = produced
+ * output, amber = skipped/no-op, red = failed, gray = cancelled/queued, blue = running.
+ */
+function Semaphore({ job }: { job: Job }) {
+  // Default (cancelled / unknown) is neutral gray.
+  let color = "bg-muted-foreground/40"
+  let pulse = false
+  if (job.status === "running" || job.status === "queued") {
+    color = "bg-primary"
+    pulse = job.status === "running"
+  } else if (job.status === "error") {
+    color = "bg-rejected"
+  } else if (job.status === "done") {
+    // distinguish "produced something" from "no-op / skipped"
+    const r = safeParse(job.result)
+    const noop =
+      r?.skipped ||
+      (job.type === "ingest" && !r?.cr) ||
+      (job.type === "maintain" && !r?.change_request_id)
+    color = noop ? "bg-amber-500" : "bg-apply"
+  }
+  return (
+    <span
+      title={outcomeText(job)}
+      className={`inline-block size-2.5 rounded-full ${color} ${pulse ? "animate-pulse" : ""}`}
+    />
+  )
+}
+
 export function JobsView() {
   const { jobs, loading, error, cancellingIds, fetch, cancel } = useJobStore()
   const [selected, setSelected] = useState<Job | null>(null)
@@ -127,7 +177,7 @@ export function JobsView() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <div className="mx-auto max-w-[960px]">
+      <div className="mx-auto max-w-[720px]">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="flex items-center gap-2 font-display text-lg font-semibold">
             <ListTodo className="size-5 text-primary" /> Background jobs
@@ -136,6 +186,14 @@ export function JobsView() {
             <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
+        </div>
+
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2 rounded-full bg-apply" /> Produced output</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2 rounded-full bg-amber-500" /> Skipped / no-op</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2 rounded-full bg-rejected" /> Failed</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2 rounded-full bg-primary" /> Running</span>
+          <span className="ml-auto">Click a row for details</span>
         </div>
 
         {error && (
@@ -166,12 +224,11 @@ export function JobsView() {
             <Table className="w-full table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[44px]">ID</TableHead>
                   <TableHead>Job</TableHead>
-                  <TableHead className="w-[104px]">Status</TableHead>
-                  <TableHead className="w-[78px]">Duration</TableHead>
-                  <TableHead className="w-[230px]">Result</TableHead>
-                  <TableHead className="w-[76px] text-right">Actions</TableHead>
+                  <TableHead className="w-[112px]">Status</TableHead>
+                  <TableHead className="w-[80px]">Duration</TableHead>
+                  <TableHead className="w-[64px] text-center">Result</TableHead>
+                  <TableHead className="w-[84px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -183,7 +240,6 @@ export function JobsView() {
                       onClick={() => setSelected(job)}
                       className="cursor-pointer"
                     >
-                      <TableCell className="font-mono text-xs text-muted-foreground">#{job.id}</TableCell>
                       <TableCell className="truncate text-xs font-medium" title={describe(job.type, job.payload)}>
                         {describe(job.type, job.payload)}
                       </TableCell>
@@ -191,7 +247,7 @@ export function JobsView() {
                       <TableCell className="text-xs text-muted-foreground">
                         {formatDuration(job.created_at, job.completed_at)}
                       </TableCell>
-                      <TableCell className="truncate text-xs">{resultSummary(job)}</TableCell>
+                      <TableCell className="text-center"><Semaphore job={job} /></TableCell>
                       <TableCell className="text-right">
                         {active && (
                           <Button
