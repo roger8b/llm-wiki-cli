@@ -124,7 +124,7 @@ SemanticRunner = Callable[[WorkspaceConfig], list[LintFinding]]
 
 
 def _default_semantic_runner(cfg: WorkspaceConfig) -> list[LintFinding]:
-    from ..agents.factory import run_lint
+    from ..llm_agents.factory import run_lint
 
     report = run_lint(cfg)
     out: list[LintFinding] = []

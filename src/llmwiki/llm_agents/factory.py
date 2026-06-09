@@ -26,12 +26,12 @@ from .tools import domain_tools
 if TYPE_CHECKING:
     from .backend import ChangeRequestBackend
 
-logger = logging.getLogger("llmwiki.agents.factory")
+logger = logging.getLogger("llmwiki.llm_agents.factory")
 
 
 def _prompt(name: str) -> str:
     return (
-        resources.files("llmwiki.agents").joinpath("prompts", name).read_text(encoding="utf-8")
+        resources.files("llmwiki.llm_agents").joinpath("prompts", name).read_text(encoding="utf-8")
     )
 
 

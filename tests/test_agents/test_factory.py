@@ -12,10 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from llmwiki.agents import factory
-from llmwiki.agents.models import IngestionResult, QueryResult
 from llmwiki.core.config import WorkspaceConfig
 from llmwiki.core.models import FileChange
+from llmwiki.llm_agents import factory
+from llmwiki.llm_agents.models import IngestionResult, QueryResult
 
 
 def _cfg(tmp_path: Path, model: str = "ollama:llama3.1") -> WorkspaceConfig:

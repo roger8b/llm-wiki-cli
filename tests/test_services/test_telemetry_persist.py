@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from llmwiki.agents.backend import ChangeRequestBackend
-from llmwiki.agents.models import IngestionResult
-from llmwiki.agents.telemetry import ExecutionMeta
 from llmwiki.core.config import WorkspaceConfig
 from llmwiki.core.models import FileChange, LintFinding
 from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection
+from llmwiki.llm_agents.backend import ChangeRequestBackend
+from llmwiki.llm_agents.models import IngestionResult
+from llmwiki.llm_agents.telemetry import ExecutionMeta
 from llmwiki.services import change_request_service, ingest_service, lint_service
 
 

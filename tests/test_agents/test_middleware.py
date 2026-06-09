@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from llmwiki.agents.middleware import EXCLUDED_TOOLS, ExcludeToolsMiddleware
+from llmwiki.llm_agents.middleware import EXCLUDED_TOOLS, ExcludeToolsMiddleware
 
 
 class _Req:

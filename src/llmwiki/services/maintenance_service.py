@@ -5,11 +5,11 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-from ..agents.backend import ChangeRequestBackend
-from ..agents.models import MaintenanceResult
 from ..core.config import WorkspaceConfig
 from ..core.models import ChangeRequest, LintFinding
 from ..core.paths import BrainPaths
+from ..llm_agents.backend import ChangeRequestBackend
+from ..llm_agents.models import MaintenanceResult
 from .change_request_service import create_from_changes
 
 # runner(cfg, backend, *, findings_text) -> MaintenanceResult
@@ -19,7 +19,7 @@ Runner = Callable[..., MaintenanceResult]
 def _default_runner(
     cfg: WorkspaceConfig, backend: ChangeRequestBackend, *, findings_text: str
 ) -> MaintenanceResult:
-    from ..agents.factory import run_maintenance
+    from ..llm_agents.factory import run_maintenance
 
     return run_maintenance(cfg, backend, findings_text=findings_text)
 

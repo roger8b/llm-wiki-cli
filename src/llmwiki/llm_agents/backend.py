@@ -48,7 +48,7 @@ from ..core.diff import make_diff
 from ..core.models import FileChange
 from .telemetry import ExecutionMeta
 
-logger = logging.getLogger("llmwiki.agents.backend")
+logger = logging.getLogger("llmwiki.llm_agents.backend")
 
 _RAW_PREFIX = "raw/"
 _WIKI_PREFIX = "wiki/"

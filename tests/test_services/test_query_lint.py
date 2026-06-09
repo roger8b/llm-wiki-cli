@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from llmwiki.agents.backend import ChangeRequestBackend
-from llmwiki.agents.models import MaintenanceResult, QueryResult, SuggestedPage
 from llmwiki.core.config import WorkspaceConfig
 from llmwiki.core.models import LintFinding, Severity
 from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection
+from llmwiki.llm_agents.backend import ChangeRequestBackend
+from llmwiki.llm_agents.models import MaintenanceResult, QueryResult, SuggestedPage
 from llmwiki.services import lint_service, maintenance_service, query_service
 
 
