@@ -50,7 +50,10 @@ from .routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from ...core.logging import configure_logging
     from ...workers import start_worker, stop_worker
+
+    configure_logging()
     start_worker()
     yield
     stop_worker()

@@ -24,6 +24,9 @@ class JobWorker(threading.Thread):
         self._stop_event.set()
 
     def run(self) -> None:
+        from ..core.logging import configure_logging
+
+        configure_logging()
         logger.info("Background job worker started.")
         # Hold a single long-lived connection per brain instead of reopening one
         # every poll. Constant connection churn re-runs the WAL pragmas and lets
