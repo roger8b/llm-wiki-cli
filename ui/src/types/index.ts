@@ -29,6 +29,8 @@ export interface ChangeRequest {
   created_at: string
   applied_at?: string | null
   changes: FileChange[]
+  /** True once a reviewer manually edited a file before apply (#183). */
+  edited_by_reviewer?: boolean
 }
 
 export type SourceStatus = "pending" | "processing" | "processed" | "error"

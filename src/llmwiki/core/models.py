@@ -86,6 +86,8 @@ class ChangeRequest(BaseModel):
     created_at: datetime
     applied_at: datetime | None = None
     changes: list[FileChange] = Field(default_factory=list)
+    # True once a reviewer manually edited a file's content before apply (#183).
+    edited_by_reviewer: bool = False
 
 
 class LintFinding(BaseModel):

@@ -12,12 +12,34 @@ import json
 import sqlite3
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
+from ..core.diff import make_diff
 from ..core.misc import now_iso, today
 from ..core.models import ChangeRequest, FileChange
 from ..core.paths import BrainPaths
 from ..db.repo import ChangeRequestRepo, SourceRepo
 from . import index_service
+
+
+class CRNotFoundError(ValueError):
+    """The change request does not exist (HTTP 404)."""
+
+
+class CRPathNotFoundError(ValueError):
+    """The requested path is not part of the change request (HTTP 404)."""
+
+
+class CRStatusError(ValueError):
+    """The change request is not editable in its current status (HTTP 409)."""
+
+
+class CRInvalidPathError(ValueError):
+    """The path is outside the writable wiki/ allow-list (HTTP 400)."""
+
+
+class CREmptyError(ValueError):
+    """The edit would leave the CR with no changes — reject it instead (HTTP 409)."""
 
 
 def create_from_changes(
@@ -69,11 +91,20 @@ def create_from_changes(
 
 
 def _load_changes(diff_dir: str) -> tuple[list[FileChange], str | None]:
-    from pathlib import Path
-
     meta = json.loads((Path(diff_dir) / "meta.json").read_text(encoding="utf-8"))
     changes = [FileChange.model_validate(c) for c in meta.get("changes", [])]
     return changes, meta.get("source_path")
+
+
+def _edited_by_reviewer(diff_dir: str) -> bool:
+    meta_file = Path(diff_dir) / "meta.json"
+    if not meta_file.is_file():
+        return False
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(meta.get("edited_by_reviewer", False))
 
 
 def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
@@ -90,6 +121,7 @@ def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
         created_at=datetime.fromisoformat(row["created_at"]),
         applied_at=datetime.fromisoformat(row["applied_at"]) if row["applied_at"] else None,
         changes=changes,
+        edited_by_reviewer=_edited_by_reviewer(row["diff_dir"]),
     )
 
 
@@ -159,6 +191,99 @@ def apply(
 
     if git_commit:
         _git_commit(paths, cr_id)
+
+    cr = get(cr_id, conn)
+    assert cr is not None
+    return cr
+
+
+def _confidence_of(content: str) -> str | None:
+    """Best-effort ``confidence`` frontmatter field (mirrors the backend)."""
+    from ..core import frontmatter
+
+    try:
+        meta, _ = frontmatter.parse(content)
+    except Exception:  # noqa: BLE001
+        return None
+    value = meta.get("confidence") if meta else None
+    return str(value) if value is not None else None
+
+
+def _rewrite_diff_files(diff_dir: Path, changes: list[FileChange]) -> None:
+    """Replace the per-file ``.diff`` artifacts to match ``changes`` exactly."""
+    for stale in diff_dir.glob("*.diff"):
+        stale.unlink()
+    for i, change in enumerate(changes):
+        safe = change.path.replace("/", "__")
+        (diff_dir / f"{i:03d}-{safe}.diff").write_text(change.diff, encoding="utf-8")
+
+
+def update_change(
+    cr_id: str,
+    path: str,
+    new_content: str,
+    conn: sqlite3.Connection,
+    paths: BrainPaths,
+) -> ChangeRequest:
+    """Edit one file's proposed content before the CR is applied (issue #183).
+
+    Re-validates the path, regenerates the diff against the current disk
+    content, recomputes ``confidence``, and marks the CR ``edited_by_reviewer``.
+    An edit that matches the disk content removes the change (no-op); a CR left
+    with zero changes is refused (reject it instead). The CR stays
+    ``pending_review`` so a later apply writes the EDITED content.
+    """
+    from ..llm_agents.backend import validate_change_path
+
+    repo = ChangeRequestRepo(conn)
+    row = repo.get(cr_id)
+    if row is None:
+        raise CRNotFoundError(f"Change request not found: {cr_id}")
+    if row["status"] != "pending_review":
+        raise CRStatusError(f"CR {cr_id} is '{row['status']}', not editable.")
+
+    norm = path.lstrip("/")
+    err = validate_change_path(norm)
+    if err is not None:
+        raise CRInvalidPathError(f"refusing to edit '{path}': {err}")
+
+    diff_dir = Path(row["diff_dir"])
+    meta = json.loads((diff_dir / "meta.json").read_text(encoding="utf-8"))
+    changes = [FileChange.model_validate(c) for c in meta.get("changes", [])]
+
+    idx = next((i for i, c in enumerate(changes) if c.path == norm), None)
+    if idx is None:
+        raise CRPathNotFoundError(f"path '{path}' is not part of {cr_id}.")
+
+    disk = paths.root / norm
+    old = disk.read_text(encoding="utf-8") if disk.is_file() else ""
+
+    if new_content == old:
+        # The edit reverts the page to its on-disk state — drop the change.
+        changes.pop(idx)
+        if not changes:
+            raise CREmptyError(
+                f"editing '{path}' would empty {cr_id}; reject it instead."
+            )
+    else:
+        operation = "update" if disk.is_file() else "create"
+        changes[idx] = FileChange(
+            path=norm,
+            operation=operation,
+            new_content=new_content,
+            diff=make_diff(old, new_content, norm),
+            category=changes[idx].category,
+            confidence=_confidence_of(new_content),
+        )
+
+    _rewrite_diff_files(diff_dir, changes)
+    meta["changes"] = [c.model_dump() for c in changes]
+    meta["edited_by_reviewer"] = True
+    meta["edited_at"] = now_iso()
+    (diff_dir / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    repo.set_files_changed(cr_id, len(changes))
 
     cr = get(cr_id, conn)
     assert cr is not None

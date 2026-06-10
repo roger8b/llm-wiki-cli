@@ -105,6 +105,11 @@ export const api = {
       `/change-requests/${id}/reject`,
       { method: "POST" },
     ),
+  updateCrFile: (crId: string, path: string, newContent: string) =>
+    request<ChangeRequest>(`/change-requests/${crId}/files`, {
+      method: "PATCH",
+      body: JSON.stringify({ path, new_content: newContent }),
+    }),
 
   // ── sources ──
   listSources: () => request<Source[]>("/sources"),

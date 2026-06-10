@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { Check, X, Pencil, Plus, FilePen, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -14,6 +14,7 @@ import type { ChangeRequest, FileChange } from "@/types"
 import { DiffPanel } from "@/components/shared/DiffPanel"
 import { diffValues } from "@/lib/diff"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 
 function opIcon(op: FileChange["operation"]) {
   if (op === "delete") return <Trash2 className="size-3.5 text-rejected" />
@@ -116,11 +117,45 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
   const apply = useCrStore((s) => s.apply)
   const reject = useCrStore((s) => s.reject)
   const busyId = useCrStore((s) => s.busyId)
+  const editing = useCrStore((s) => s.editing)
+  const setEditing = useCrStore((s) => s.setEditing)
+  const updateFile = useCrStore((s) => s.updateFile)
 
   const change = cr.changes[fileIdx] ?? cr.changes[0]
   const isPending = cr.status === "pending_review"
   const busy = busyId === cr.id
   const disabled = !isPending || busy
+
+  const [draft, setDraft] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  // Seed the editor whenever edit mode is (re)entered — works for both the
+  // Edit button and the ⌘E shortcut handled in the parent view.
+  useEffect(() => {
+    if (editing && change) setDraft(diffValues(change).newValue)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing])
+
+  function startEditing() {
+    if (!change) return
+    setTab("after")
+    setEditing(true)
+  }
+
+  async function handleSave() {
+    if (!change) return
+    setSaving(true)
+    try {
+      await updateFile(cr.id, change.path, draft)
+      setEditing(false)
+      setTab("diff")
+      toast.success(`${change.path} updated`)
+    } catch (e) {
+      toast.error(`Edit failed: ${(e as Error).message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function handleApply() {
     try {
@@ -147,6 +182,11 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
         <span className="rounded border bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
           {crKind(cr)}
         </span>
+        {cr.edited_by_reviewer && (
+          <span className="rounded border border-pending/40 bg-pending/10 px-1.5 py-0.5 text-[11px] text-pending">
+            edited
+          </span>
+        )}
         <span className="ml-auto text-[11px] text-muted-foreground">
           {timeAgo(cr.created_at)}
         </span>
@@ -196,7 +236,45 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
         </div>
 
         {change ? (
-          tab === "diff" ? (
+          editing && tab === "after" ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+              <Textarea
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault()
+                    setEditing(false)
+                    setTab("diff")
+                  }
+                }}
+                className="h-full flex-1 resize-none font-mono text-[12px] leading-relaxed"
+                spellCheck={false}
+              />
+              <div className="flex shrink-0 items-center gap-2">
+                <Button onClick={handleSave} disabled={saving} className="gap-1.5">
+                  {saving ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Check className="size-4" />
+                  )}
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(false)
+                    setTab("diff")
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                  <kbd className="ml-1 font-mono text-[10px] opacity-65">Esc</kbd>
+                </Button>
+              </div>
+            </div>
+          ) : tab === "diff" ? (
             <DiffPanel change={change} />
           ) : (
             <MonoBlock
@@ -237,7 +315,12 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
           <X className="size-4" /> Reject
           <kbd className="ml-0.5 font-mono text-[10px] opacity-65">⌘⌫</kbd>
         </Button>
-        <Button variant="outline" disabled={disabled} className="gap-1.5">
+        <Button
+          variant="outline"
+          disabled={disabled || editing || !change}
+          onClick={startEditing}
+          className="gap-1.5"
+        >
           <Pencil className="size-4" /> Edit before apply
           <kbd className="ml-0.5 font-mono text-[10px] opacity-65">⌘E</kbd>
         </Button>
@@ -259,13 +342,24 @@ export function ReviewView() {
     fetch()
   }, [fetch])
 
-  // keyboard shortcuts (apply / reject the selected pending CR)
+  // keyboard shortcuts (apply / reject / edit the selected pending CR)
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.metaKey || e.ctrlKey)) return
       const state = useCrStore.getState()
       const current = selectedCr(state)
       if (!current || current.status !== "pending_review" || state.busyId) return
+      if (e.key.toLowerCase() === "e") {
+        // ⌘E toggles edit mode on the "after" pane.
+        e.preventDefault()
+        if (!state.editing && current.changes.length > 0) {
+          state.setTab("after")
+          state.setEditing(true)
+        }
+        return
+      }
+      // Apply/reject must not fire while editing content.
+      if (state.editing) return
       if (e.key === "Enter") {
         e.preventDefault()
         apply(current.id)
