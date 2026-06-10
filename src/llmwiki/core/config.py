@@ -26,6 +26,7 @@ _CONFIG_KEYS = (
     "num_ctx",
     "temperature",
     "request_timeout",
+    "agent_max_retries",
     "onboarded",
     "providers",
 )
@@ -37,6 +38,7 @@ _DEFAULTS: dict[str, object] = {
     "num_ctx": 8192,
     "temperature": None,
     "request_timeout": 300,
+    "agent_max_retries": 2,
     "onboarded": False,
     "providers": {},
 }
@@ -57,6 +59,8 @@ class WorkspaceConfig(BaseModel):
     num_ctx: int = 8192  # context window in tokens
     temperature: float | None = None  # None = provider default
     request_timeout: int = 300  # seconds
+    # Total agent.invoke attempts on transient errors (1 = no retry).
+    agent_max_retries: int = 2
     # True once the user has completed the first-run onboarding flow.
     onboarded: bool = False
     # Per-provider settings keyed by provider name (openai|anthropic|google).

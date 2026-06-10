@@ -4,6 +4,7 @@ import { TopBar } from "./TopBar"
 import { Sidebar } from "./Sidebar"
 import { CommandPalette } from "./CommandPalette"
 import { ProgressDrawer } from "@/components/shared/ProgressDrawer"
+import { ProgressReopener } from "@/components/shared/ProgressReopener"
 import { OnboardingFlow } from "@/views/OnboardingFlow"
 import { api } from "@/lib/api"
 import { useAppStore } from "@/stores/app"
@@ -64,6 +65,7 @@ export function AppShell() {
         </main>
       </div>
       <ProgressDrawer />
+      <ProgressReopener />
       <CommandPalette />
     </div>
   )

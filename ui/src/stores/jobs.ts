@@ -7,7 +7,9 @@ interface JobState {
   jobs: Job[]
   loading: boolean
   error: string | null
+  cancellingIds: number[]
   fetch: () => Promise<void>
+  cancel: (id: number) => Promise<void>
 }
 
 function syncActiveJobsBadge(jobs: Job[]) {
@@ -17,10 +19,11 @@ function syncActiveJobsBadge(jobs: Job[]) {
   useAppStore.getState().setActiveJobs(activeCount)
 }
 
-export const useJobStore = create<JobState>((set) => ({
+export const useJobStore = create<JobState>((set, get) => ({
   jobs: [],
   loading: false,
   error: null,
+  cancellingIds: [],
 
   fetch: async () => {
     set({ loading: true, error: null })
@@ -30,6 +33,18 @@ export const useJobStore = create<JobState>((set) => ({
       set({ jobs, loading: false })
     } catch (e) {
       set({ loading: false, error: (e as Error).message })
+    }
+  },
+
+  cancel: async (id) => {
+    set({ cancellingIds: [...get().cancellingIds, id] })
+    try {
+      await api.cancelJob(id)
+      await get().fetch()
+    } catch (e) {
+      set({ error: (e as Error).message })
+    } finally {
+      set({ cancellingIds: get().cancellingIds.filter((x) => x !== id) })
     }
   },
 }))

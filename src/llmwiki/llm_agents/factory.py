@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from ..core.config import WorkspaceConfig
-from .middleware import ExcludeToolsMiddleware
 from .models import IngestionResult, LintReport, MaintenanceResult, QueryResult
 from .telemetry import ExecutionMeta, extract_meta
 from .tools import domain_tools
@@ -193,6 +192,51 @@ def _had_structured(state: dict[str, Any], schema: type[BaseModel]) -> bool:
     return isinstance(resp, schema | dict)
 
 
+def _agent_middleware(backend: ChangeRequestBackend | None) -> list[Any]:
+    """Middleware stack: always hide ``execute``; add cancellation if requested."""
+    from .middleware import CancellationMiddleware, ExcludeToolsMiddleware
+
+    mw: list[Any] = [ExcludeToolsMiddleware()]
+    if backend is not None and backend.cancel_check is not None:
+        mw.append(CancellationMiddleware(backend.cancel_check))
+    return mw
+
+
+def _invoke_with_retry(agent: Any, message: str, cfg: WorkspaceConfig) -> dict[str, Any]:
+    """Call ``agent.invoke`` with bounded retry+backoff on transient errors.
+
+    A flaky provider call (network blip, 5xx) re-attempts instead of failing the
+    whole job. ``JobCancelledError`` is never retried — cancellation is final.
+    """
+    from ..core.errors import JobCancelledError
+
+    attempts = max(1, cfg.agent_max_retries)
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            state: dict[str, Any] = agent.invoke(
+                {"messages": [{"role": "user", "content": message}]}
+            )
+            return state
+        except JobCancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt >= attempts:
+                break
+            backoff = min(2.0 ** (attempt - 1), 8.0)
+            logger.warning(
+                "agent.invoke failed (attempt %d/%d): %s — retrying in %.1fs",
+                attempt,
+                attempts,
+                exc,
+                backoff,
+            )
+            time.sleep(backoff)
+    assert last_exc is not None
+    raise last_exc
+
+
 def _invoke[T: BaseModel](
     agent: Any,
     message: str,
@@ -206,7 +250,7 @@ def _invoke[T: BaseModel](
     present) so services can persist it into the change request / job result.
     """
     start = time.perf_counter()
-    state = agent.invoke({"messages": [{"role": "user", "content": message}]})
+    state = _invoke_with_retry(agent, message, cfg)
     latency_ms = int((time.perf_counter() - start) * 1000)
 
     used_fallback = not _had_structured(state, schema)
@@ -252,7 +296,7 @@ def run_ingestion(
         tools=domain_tools(cfg.paths),
         system_prompt=_prompt("ingestion.md"),
         backend=backend,
-        middleware=[ExcludeToolsMiddleware()],
+        middleware=_agent_middleware(backend),
         response_format=_response_format(IngestionResult),
     )
     message = (
@@ -276,7 +320,7 @@ def run_query(
         "model": _build_model(cfg),
         "tools": domain_tools(cfg.paths),
         "system_prompt": _prompt("query.md"),
-        "middleware": [ExcludeToolsMiddleware()],
+        "middleware": _agent_middleware(backend),
         "response_format": _response_format(QueryResult),
     }
     if backend is not None:
@@ -293,7 +337,7 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
         model=_build_model(cfg),
         tools=domain_tools(cfg.paths),
         system_prompt=_prompt("lint.md"),
-        middleware=[ExcludeToolsMiddleware()],
+        middleware=_agent_middleware(None),
         response_format=_response_format(LintReport),
     )
     return _invoke(agent, "Audite a wiki e liste os problemas.", LintReport, cfg)
@@ -312,7 +356,7 @@ def run_maintenance(
         tools=domain_tools(cfg.paths),
         system_prompt=_prompt("maintenance.md"),
         backend=backend,
-        middleware=[ExcludeToolsMiddleware()],
+        middleware=_agent_middleware(backend),
         response_format=_response_format(MaintenanceResult),
     )
     message = f"Problemas detectados:\n{findings_text}\n\nProponha correções."

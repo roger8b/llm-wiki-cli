@@ -252,3 +252,25 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
+
+/* Indeterminate progress bar (coarse, step-based jobs have no percentage). */
+@keyframes indeterminate {
+  0% { left: -40%; width: 40%; }
+  50% { left: 25%; width: 50%; }
+  100% { left: 100%; width: 40%; }
+}
+.bar-indeterminate {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--primary) 20%, transparent);
+}
+.bar-indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--primary);
+  border-radius: 9999px;
+  animation: indeterminate 1.2s infinite ease-in-out;
+}

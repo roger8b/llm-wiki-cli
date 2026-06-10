@@ -232,6 +232,7 @@ fts_limit: 20               # max full-text search results
 num_ctx: 8192               # Ollama context window
 temperature: null           # null = provider default
 request_timeout: 300        # seconds
+agent_max_retries: 2        # agent.invoke attempts on transient errors (1 = no retry)
 onboarded: true             # completed first-run setup
 providers:                  # per-provider base_url + model (NOT the key)
   openai:
@@ -366,7 +367,11 @@ The richest data is written to disk — no log level needed:
   tool calls, latency, whether the structured-output fallback fired). See the
   example under [Directory layout](#global-data-directory-never-committed).
 - **Per job** — the same telemetry is stored in the job `result` (visible via
-  `wiki jobs` / the `/api/jobs` endpoint and the desktop app).
+  `wiki jobs` / the `/api/jobs` endpoint and the desktop app). Long jobs also
+  expose a coarse `progress` step and can be **cancelled** cooperatively
+  (`POST /api/jobs/{id}/cancel`) — the agent stops at the next step and the job
+  ends in the `cancelled` state. Progress/cancel events are pushed over the
+  job SSE stream (`/api/jobs/{id}/events`).
 
 ```bash
 # Inspect the telemetry of the latest change request
@@ -576,6 +581,9 @@ client-side SPA routes. Non-API paths fall through to the SPA shell.
 | `POST` | `/api/change-requests/{id}/apply` | Apply a CR |
 | `POST` | `/api/change-requests/{id}/reject` | Reject a CR |
 | `POST` | `/api/lint` | Run lint (structural or `{semantic:true}`) |
+| `GET` | `/api/jobs` / `/api/jobs/{id}` | List jobs / get one (incl. `progress`) |
+| `GET` | `/api/jobs/{id}/events` | SSE stream: `status` / `progress` / `result` / `cancelled` |
+| `POST` | `/api/jobs/{id}/cancel` | Request cooperative cancellation |
 | `GET` | `/api/graph` | Page graph (nodes + edges) |
 | `GET`/`PATCH` | `/api/config` | Read / update global config |
 | `GET` | `/api/brains` | List registered brains |
@@ -610,19 +618,35 @@ the React app works unchanged.
 
 ### Build
 
+> ⚠️ **The desktop app runs a compiled Python backend (the "sidecar"), not your
+> working tree.** `tauri build` only rebuilds the SPA — it does **not** recompile
+> the sidecar. After changing any Python code you must rebuild the sidecar, or
+> the app will keep running the old backend. Use `npm run build:app` (below),
+> which chains both, to avoid shipping a stale backend.
+
 ```bash
 rustup default stable
 npm --prefix ui install
-npm --prefix ui run build                 # build the SPA
-
-./scripts/build_sidecar.sh                 # PyInstaller → self-contained backend
-                                           # → ui/src-tauri/binaries/wiki-backend-<triple>
-
 cd ui && cargo tauri icon path/to/icon.png # generate icons (once)
-cd ui && cargo tauri build                 # → target/release/bundle/{macos,dmg}/
+
+# One command: rebuild the sidecar (PyInstaller) THEN the Tauri app.
+npm --prefix ui run build:app              # → target/release/bundle/{macos,dmg}/
 ```
 
+`build:app` runs `build:sidecar` (→ `ui/src-tauri/binaries/wiki-backend-<triple>`)
+and then `tauri build`. It uses the project venv at `../.venv` by default;
+override with `PYTHON=/path/to/python npm --prefix ui run build:app`.
+
 Output: `llm-wiki.app` and `llm-wiki_<version>_aarch64.dmg`.
+
+**Fast iteration (no rebuild):** run the backend from your venv and the SPA in
+dev mode — Vite proxies `/api` → `localhost:8000`, so you hit your working-tree
+backend directly:
+
+```bash
+.venv/bin/wiki serve            # backend on :8000 (your current code)
+npm --prefix ui run dev         # SPA with hot reload → http://localhost:5173
+```
 
 ### Running without an Apple Developer account
 

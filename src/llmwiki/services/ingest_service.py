@@ -100,12 +100,15 @@ def ingest(
     runner: Runner | None = None,
     job_id: int | None = None,
     force: bool = False,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> ChangeRequest:
     """Reads a source, runs the ingestion agent, and creates a change request.
 
     Raises ``SourceAlreadyProcessedError`` (before any LLM call) when the source
     content was already ingested and applied, unless ``force`` is set.
+    ``cancel_check`` is polled by the agent to abort cooperatively.
     """
+    from ..core.errors import JobCancelledError
     from ..sources.extractors import extract_text
 
     runner = runner or _default_runner
@@ -122,8 +125,11 @@ def ingest(
     if job_id is None:
         job_id = job_repo.create("ingest", json.dumps({"source": rel}), status="running")
     try:
+        job_repo.set_progress(job_id, "running_agent")
         backend = ChangeRequestBackend(paths.root)
+        backend.cancel_check = cancel_check
         result = runner(cfg, backend, source_path=rel, source_text=text)
+        job_repo.set_progress(job_id, "creating_change_request")
         changes = backend.collect_changes()
         _audit_result(result, changes, rel)
         meta = backend.execution_meta
@@ -144,6 +150,9 @@ def ingest(
             ),
         )
         return cr
+    except JobCancelledError as exc:
+        job_repo.cancel(job_id, result=json.dumps({"cancelled": True, "reason": str(exc)}))
+        raise
     except Exception as exc:  # noqa: BLE001
         job_repo.complete(job_id, error=str(exc))
         raise

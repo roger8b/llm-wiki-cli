@@ -154,6 +154,27 @@ class TestCrossCheck:
         assert "did not declare" in caplog.text
 
 
+class TestCancellation:
+    def test_ingest_marks_job_cancelled(self, brain: BrainPaths) -> None:
+        from llmwiki.core.errors import JobCancelledError
+        from llmwiki.db.repo import JobRepo
+
+        def cancelling_runner(cfg, backend, *, source_path, source_text):
+            raise JobCancelledError("user cancelled")
+
+        src = _make_source(brain)
+        conn = get_connection(brain.db_path)
+        try:
+            jid = JobRepo(conn).create("ingest", status="running")
+            with pytest.raises(JobCancelledError):
+                ingest_service.ingest(
+                    src, brain, conn, _cfg(brain), runner=cancelling_runner, job_id=jid
+                )
+            assert JobRepo(conn).get(jid)["status"] == "cancelled"
+        finally:
+            conn.close()
+
+
 class TestCategoryConfidence:
     def test_create_category_and_confidence(self, brain: BrainPaths) -> None:
         src = _make_source(brain)

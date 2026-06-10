@@ -85,5 +85,19 @@ def get_connection(db_path: Path, apply_schema: bool = True) -> sqlite3.Connecti
                 "Please install a Python version with SQLite+FTS5."
             ) from exc
         raise
+    _apply_migrations(conn)
     conn.commit()
     return conn
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Additive, idempotent column migrations for already-created databases.
+
+    ``CREATE TABLE IF NOT EXISTS`` never adds columns to an existing table, so
+    new columns are introduced here, guarded by a ``table_info`` check.
+    """
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "progress" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN progress TEXT")
+    if "cancel_requested" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")

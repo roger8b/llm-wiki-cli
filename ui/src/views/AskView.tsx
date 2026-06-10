@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { AskHistoryItem, QueryResult } from "@/types"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
+import { IndeterminateBar } from "@/components/shared/IndeterminateBar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -35,6 +36,8 @@ export function AskView() {
   const [save, setSave] = useState(false)
   const [promoting, setPromoting] = useState(false)
   const [history, setHistory] = useState<AskHistoryItem[]>([])
+  const [jobId, setJobId] = useState<number | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
   const refetchCrs = useCrStore((s) => s.fetch)
   const [params] = useSearchParams()
   const askRef = useRef(false)
@@ -57,16 +60,19 @@ export function AskView() {
     setLoading(true)
     setResult(null)
     setActiveId(null)
+    setProgress(null)
     try {
       const startRes = await api.ask(query, save)
-      const jobId = (startRes as { job_id?: number }).job_id
-      if (typeof jobId !== "number") {
+      const startedJobId = (startRes as { job_id?: number }).job_id
+      if (typeof startedJobId !== "number") {
         toast.error("Backend did not queue the question")
         return
       }
+      setJobId(startedJobId)
       // Stream the job over SSE — the answer lands the instant the worker
       // finishes (no 1s polling granularity).
-      await api.streamJob(jobId, {
+      await api.streamJob(startedJobId, {
+        onProgress: (step) => setProgress(step),
         onResult: async (result) => {
           if (!result) {
             toast.error("No result returned from job")
@@ -81,13 +87,31 @@ export function AskView() {
           }
           await loadHistory()
         },
+        onCancelled: () => toast.info("Question cancelled"),
         onError: (msg) => toast.error(msg || "Ask job failed"),
       })
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
       setLoading(false)
+      setJobId(null)
+      setProgress(null)
     }
+  }
+
+  async function cancelAsk() {
+    if (jobId == null) return
+    try {
+      await api.cancelJob(jobId)
+      toast.info("Cancelling…")
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  const PROGRESS_LABELS: Record<string, string> = {
+    running_agent: "Agent reading the wiki…",
+    creating_change_request: "Preparing the change request…",
   }
 
   /** Show a previously-asked answer from history without re-running the LLM. */
@@ -218,7 +242,23 @@ export function AskView() {
         <hr className="my-5 border-border" />
 
         {loading && (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] text-muted-foreground">
+                {progress ? (PROGRESS_LABELS[progress] ?? progress) : "Thinking…"}
+              </span>
+              {jobId != null && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={cancelAsk}
+                  className="h-7 gap-1.5 text-[12px] text-muted-foreground"
+                >
+                  <X className="size-3.5" /> Cancel
+                </Button>
+              )}
+            </div>
+            <IndeterminateBar />
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-5/6" />

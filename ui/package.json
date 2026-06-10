@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:sidecar": "PYTHON=\"${PYTHON:-../.venv/bin/python}\" ../scripts/build_sidecar.sh",
+    "build:app": "npm run build:sidecar && tauri build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
