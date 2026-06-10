@@ -15,7 +15,10 @@ following the protocol below.
 - Place the page in the correct type directory: `wiki/concepts/`, `wiki/entities/`,
   `wiki/synthesis/`, `wiki/decisions/`, `wiki/projects/`, `wiki/research/`.
 - Use internal links `[[Page Title]]` to connect related concepts.
-- Always cite the source in the `sources` frontmatter field.
+- Always cite the source in the `sources` frontmatter field. When the message
+  provides a `METADADOS:` line, use its `url` (if present) or `título` to make
+  the `sources` entry precise — prefer the original URL over the `raw/...` path
+  for web captures.
 - If you find a contradiction with existing content, mark it explicitly in the
   page body.
 

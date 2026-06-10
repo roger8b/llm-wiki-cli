@@ -25,7 +25,9 @@ from llmwiki.llm_agents.models import IngestionResult
 from llmwiki.services import ingest_service
 
 
-def _runner_writes_rag(cfg, backend: ChangeRequestBackend, *, source_path, source_text):
+def _runner_writes_rag(
+    cfg, backend: ChangeRequestBackend, *, source_path, source_text, source_meta=None
+):
     backend.write(
         "wiki/concepts/rag.md",
         "---\ntitle: RAG\ntype: concept\nconfidence: high\n---\n# RAG\nBody.\n",
@@ -62,7 +64,7 @@ class TestDedup:
             )
             calls = {"n": 0}
 
-            def counting_runner(cfg, backend, *, source_path, source_text):
+            def counting_runner(cfg, backend, *, source_path, source_text, source_meta=None):
                 calls["n"] += 1
                 return _runner_writes_rag(
                     cfg, backend, source_path=source_path, source_text=source_text
@@ -121,7 +123,7 @@ class TestCrossCheck:
     ) -> None:
         """LLM declares pages but writes nothing → warning, empty CR."""
 
-        def liar(cfg, backend, *, source_path, source_text):
+        def liar(cfg, backend, *, source_path, source_text, source_meta=None):
             return IngestionResult(summary="lied", new_pages=["wiki/concepts/ghost.md"])
 
         src = _make_source(brain)
@@ -140,7 +142,7 @@ class TestCrossCheck:
     ) -> None:
         """LLM writes a page it did not declare → warning."""
 
-        def sneaky(cfg, backend, *, source_path, source_text):
+        def sneaky(cfg, backend, *, source_path, source_text, source_meta=None):
             backend.write("wiki/concepts/rag.md", "---\ntitle: RAG\n---\n# RAG\n")
             return IngestionResult(summary="ok", new_pages=[])
 
@@ -159,7 +161,7 @@ class TestCancellation:
         from llmwiki.core.errors import JobCancelledError
         from llmwiki.db.repo import JobRepo
 
-        def cancelling_runner(cfg, backend, *, source_path, source_text):
+        def cancelling_runner(cfg, backend, *, source_path, source_text, source_meta=None):
             raise JobCancelledError("user cancelled")
 
         src = _make_source(brain)
@@ -193,7 +195,7 @@ class TestCategoryConfidence:
         page.parent.mkdir(parents=True, exist_ok=True)
         page.write_text("---\ntitle: RAG\nconfidence: low\n---\n# RAG\nold\n", encoding="utf-8")
 
-        def updater(cfg, backend, *, source_path, source_text):
+        def updater(cfg, backend, *, source_path, source_text, source_meta=None):
             backend.write(
                 "wiki/concepts/rag.md",
                 "---\ntitle: RAG\nconfidence: medium\n---\n# RAG\nnew body\n",
