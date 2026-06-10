@@ -38,3 +38,19 @@ class SourceAlreadyProcessedError(WikiError):
 
 class JobCancelledError(WikiError):
     """A running agent job was cancelled cooperatively by the user."""
+
+
+class ExtractorUnavailableError(WikiError):
+    """An extractor's optional dependency is not installed.
+
+    The message instructs the user which extra to install
+    (e.g. ``pip install 'llm-wiki[pdf]'``).
+    """
+
+
+class EmptyExtractionError(WikiError):
+    """An extractor produced no usable text from the source.
+
+    Raised, for example, for a scanned PDF with no text layer. Prevents an
+    empty/garbage source from reaching the LLM. OCR is out of scope.
+    """
