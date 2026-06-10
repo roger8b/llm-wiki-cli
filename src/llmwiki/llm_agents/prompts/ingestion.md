@@ -10,6 +10,8 @@ following the protocol below.
 - Create/edit pages only inside `wiki/` using `write_file` / `edit_file`.
 - Every page MUST have YAML frontmatter: `title`, `type`, `tags`, `sources`,
   `updated_at`, `confidence`.
+- For `updated_at`, use EXACTLY the date given as `DATA DE HOJE` in the message.
+  Never invent or copy a date from this prompt.
 - `type` must be one of: concept, entity, source_summary, synthesis, decision,
   project, research.
 - Place the page in the correct type directory: `wiki/concepts/`, `wiki/entities/`,
@@ -56,7 +58,7 @@ fold it into the parent page as a section rather than a separate stub.
   the claim (low / medium / high).
 
 Example of a required write:
-`write_file("wiki/concepts/rag.md", "---\ntitle: RAG\ntype: concept\ntags: [rag]\nsources: [raw/articles/x.md]\nupdated_at: 2026-05-21\nconfidence: medium\n---\n# RAG\n\n## Definition\n...")`
+`write_file("wiki/concepts/rag.md", "---\ntitle: RAG\ntype: concept\ntags: [rag]\nsources: [raw/articles/x.md]\nupdated_at: <DATA DE HOJE>\nconfidence: medium\n---\n# RAG\n\n## Definition\n...")`
 
 Do not invent sources. At least one file write is expected for any source with
 real content. Aim for the maximum number of meaningful, non-trivial pages.

@@ -10,6 +10,7 @@ from llmwiki.llm_agents.tools import (
     make_read_metadata,
     make_search_by_type,
     make_search_pages,
+    wiki_stats,
 )
 from llmwiki.services import index_service
 
@@ -59,6 +60,25 @@ class TestSearchByType:
     def test_empty_type(self, brain: BrainPaths) -> None:
         out = make_search_by_type(brain)("research")
         assert "Nenhuma página do tipo 'research'" in out
+
+
+class TestWikiStats:
+    def test_empty_wiki(self, brain: BrainPaths) -> None:
+        assert "wiki vazia" in wiki_stats(brain)
+
+    def test_counts_by_type(self, brain: BrainPaths) -> None:
+        _add_page(brain, "concepts/rag.md", "RAG", "body")
+        _add_page(brain, "concepts/emb.md", "Embeddings", "body")
+        _add_page(brain, "entities/google.md", "Google", "body", ptype="entity")
+        conn = get_connection(brain.db_path)
+        try:
+            index_service.reindex(brain, conn)
+        finally:
+            conn.close()
+        out = wiki_stats(brain)
+        assert "3 páginas" in out
+        assert "concept: 2" in out
+        assert "entity: 1" in out
 
 
 class TestGetBacklinks:

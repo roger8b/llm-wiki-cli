@@ -6,9 +6,33 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..core import frontmatter
+from ..core.models import PageType
 from ..core.paths import BrainPaths
 from ..db.connection import get_connection
 from ..db.repo import LinkRepo, PageFtsRepo, PageRepo
+
+
+def wiki_stats(paths: BrainPaths) -> str:
+    """One-line summary of the wiki's current state, for the agent's message.
+
+    Counts indexed pages per type via a short-lived connection (same pattern as
+    the domain tools). An empty wiki returns an explicit hint so the agent knows
+    every page it writes will be new.
+    """
+    conn = get_connection(paths.db_path)
+    try:
+        pages = PageRepo(conn).list()
+    finally:
+        conn.close()
+    if not pages:
+        return "wiki vazia — todas as páginas serão novas"
+    counts: dict[str, int] = {}
+    for page in pages:
+        counts[page.type.value] = counts.get(page.type.value, 0) + 1
+    ordered = [
+        f"{t.value}: {counts[t.value]}" for t in PageType if counts.get(t.value)
+    ]
+    return f"{len(pages)} páginas — " + ", ".join(ordered)
 
 
 def make_search_pages(paths: BrainPaths) -> Callable[[str], str]:

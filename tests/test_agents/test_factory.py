@@ -22,6 +22,25 @@ def _cfg(tmp_path: Path, model: str = "ollama:llama3.1") -> WorkspaceConfig:
     return WorkspaceConfig(brain_root=tmp_path, model=model)
 
 
+class TestIngestionMessage:
+    def test_includes_today_and_wiki_state(self, tmp_path: Path) -> None:
+        from llmwiki.core.misc import today
+
+        cfg = _cfg(tmp_path)
+        msg = factory._ingestion_message(
+            cfg, source_path="raw/articles/x.md", source_text="hello"
+        )
+        assert f"DATA DE HOJE: {today()}" in msg
+        assert "ESTADO DA WIKI:" in msg
+        assert "FONTE: raw/articles/x.md" in msg
+        assert "hello" in msg
+
+    def test_empty_wiki_does_not_break(self, tmp_path: Path) -> None:
+        cfg = _cfg(tmp_path)
+        msg = factory._ingestion_message(cfg, source_path="raw/x.md", source_text="t")
+        assert "wiki vazia" in msg
+
+
 class TestResponseFormat:
     def test_returns_tool_strategy(self) -> None:
         from langchain.agents.structured_output import ToolStrategy
