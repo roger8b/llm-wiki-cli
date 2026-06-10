@@ -725,36 +725,45 @@ Available MCP tools:
 
 ## Evaluation harness
 
-The eval harness runs ingestion against a test corpus and scores output quality.
-Useful for tuning prompts or comparing models.
+`wiki evals run` measures the **ingestion agent** reproducibly: it ingests a
+versioned dataset of test sources into a throwaway brain (never touching your
+`~/.wiki` or active brain) and scores each case against an `expected.json`.
+Run it **before and after** any prompt/model/tool change to catch silent
+regressions.
 
 ```bash
-# Single run
-python scripts/eval_ingestion.py --model ollama:gemma4:31b-cloud
+# Run with the configured model (writes evals/results/<ts>-<model>.json)
+wiki evals run
 
-# Multiple rounds (measures variance)
-python scripts/eval_ingestion.py --rounds 3
+# Machine-readable output (stdout = JSON only; everything else → stderr)
+wiki evals run --json
 
-# Custom source
-python scripts/eval_ingestion.py --source my-doc.md
-
-# Compare last two result files
-python scripts/eval_ingestion.py --compare
+# Use a different dataset, or keep the temp brain for debugging
+wiki evals run --dataset path/to/dataset --keep-brain
 ```
 
-**Scored metrics (weighted composite):**
+**Dataset** (`tests/evals/dataset/`, versioned): a short single concept, a rich
+multi-concept source, a long source (>30k chars, exercises chunking), a
+duplicate of the short concept (expects an **edit**, not a new page), and an
+entities source. Each `NN-*.md` is paired with `NN-*.expected.json`
+(`min_pages`, `max_pages`, `expected_titles_any`, `expected_types`, `must_link`,
+`expect_edit`).
+
+**Per-case score (weighted 0–100):**
 
 | Metric | Weight | Description |
 |--------|--------|-------------|
-| `frontmatter_complete` | 2.0 | All required fields present |
-| `has_sources` | 2.0 | At least one source cited |
-| `body_substantial` | 2.0 | Body ≥ 200 characters |
-| `granularity` | 2.5 | ≥ 5 pages = 100% (encourages concept decomposition) |
-| `type_valid` | 1.5 | Valid page type |
-| `correct_dir` | 1.5 | Page in correct type directory |
-| `has_internal_links` | 1.5 | At least one `[[link]]` |
-| `confidence_valid` | 1.0 | Valid confidence value |
-| `has_headings` | 1.0 | At least one heading |
+| page count in `[min,max]` | 30 | Correct concept decomposition |
+| expected title produced | 20 | At least one expected title appears |
+| expected types | 15 | Enough pages of each expected type |
+| `must_link` satisfied | 15 | Required wikilinks present |
+| wikilink resolution | 10 | Fraction of `[[links]]` that resolve |
+| frontmatter validity | 10 | Fraction of pages with valid frontmatter |
+
+A case that creates a **duplicate** (when an edit was expected) is hard-capped
+at 25. Telemetry (tokens, latency, fallback) comes from `ExecutionMeta`.
+Compare two `evals/results/*.json` files to A/B prompts or models. CI exercises
+the harness mechanics with a fake runner (no network); real runs are local.
 
 ---
 

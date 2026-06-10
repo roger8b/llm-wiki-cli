@@ -24,6 +24,7 @@ from .commands import (
     apply,
     ask,
     brain_app,
+    evals_app,
     index,
     ingest,
     jobs,
@@ -51,6 +52,7 @@ app.add_typer(source_app, name="source")
 app.add_typer(page_app, name="page")
 app.add_typer(brain_app, name="brain")
 app.add_typer(skills_app, name="skills")
+app.add_typer(evals_app, name="evals")
 
 
 @app.callback()
