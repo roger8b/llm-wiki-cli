@@ -15,7 +15,9 @@ from llmwiki.llm_agents.telemetry import ExecutionMeta
 from llmwiki.services import change_request_service, ingest_service, lint_service
 
 
-def _runner_with_meta(cfg, backend: ChangeRequestBackend, *, source_path, source_text):
+def _runner_with_meta(
+    cfg, backend: ChangeRequestBackend, *, source_path, source_text, source_meta=None
+):
     backend.write("wiki/concepts/rag.md", "---\ntitle: RAG\n---\n# RAG\nbody\n")
     backend.execution_meta = ExecutionMeta(
         model="ollama:test", tokens_in=120, tokens_out=45, tool_calls=2, latency_ms=999

@@ -282,12 +282,26 @@ def _invoke[T: BaseModel](
     return result
 
 
+def _metadata_line(source_meta: dict[str, str | None] | None) -> str:
+    """Render a ``METADADOS:`` line with only the present provenance fields."""
+    if not source_meta:
+        return ""
+    labels = {"title": "título", "author": "autor", "date": "data", "url": "url"}
+    parts = [
+        f"{labels[k]}={v}"
+        for k, v in source_meta.items()
+        if k in labels and v
+    ]
+    return f"METADADOS: {', '.join(parts)}\n" if parts else ""
+
+
 def run_ingestion(
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend,
     *,
     source_path: str,
     source_text: str,
+    source_meta: dict[str, str | None] | None = None,
 ) -> IngestionResult:
     from deepagents import create_deep_agent
 
@@ -300,7 +314,8 @@ def run_ingestion(
         response_format=_response_format(IngestionResult),
     )
     message = (
-        f"FONTE: {source_path}\n\n"
+        f"FONTE: {source_path}\n"
+        f"{_metadata_line(source_meta)}\n"
         f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
         "Integre esta fonte na wiki seguindo o protocolo."
     )

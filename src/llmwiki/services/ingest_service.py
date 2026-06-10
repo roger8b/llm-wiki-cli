@@ -25,7 +25,8 @@ from .change_request_service import create_from_changes
 
 logger = logging.getLogger("llmwiki.services.ingest")
 
-# runner(cfg, backend, *, source_path, source_text) -> IngestionResult
+# runner(cfg, backend, *, source_path, source_text, source_meta) -> IngestionResult
+# ``source_meta`` carries optional provenance (title/author/date/url) — #163.
 Runner = Callable[..., IngestionResult]
 
 
@@ -85,10 +86,17 @@ def _default_runner(
     *,
     source_path: str,
     source_text: str,
+    source_meta: dict[str, str | None] | None = None,
 ) -> IngestionResult:
     from ..llm_agents.factory import run_ingestion
 
-    return run_ingestion(cfg, backend, source_path=source_path, source_text=source_text)
+    return run_ingestion(
+        cfg,
+        backend,
+        source_path=source_path,
+        source_text=source_text,
+        source_meta=source_meta,
+    )
 
 
 def ingest(
@@ -109,7 +117,7 @@ def ingest(
     ``cancel_check`` is polled by the agent to abort cooperatively.
     """
     from ..core.errors import JobCancelledError
-    from ..sources.extractors import extract_text
+    from ..sources.extractors import extract
 
     runner = runner or _default_runner
     inside_brain = paths.root in source_file.resolve().parents
@@ -119,7 +127,14 @@ def ingest(
     if not force:
         _check_already_processed(source_file, conn)
 
-    text = extract_text(source_file)
+    extracted = extract(source_file)
+    text = extracted.text
+    source_meta: dict[str, str | None] = {
+        "title": extracted.title,
+        "author": extracted.author,
+        "date": extracted.date,
+        "url": extracted.url,
+    }
 
     job_repo = JobRepo(conn)
     if job_id is None:
@@ -128,7 +143,9 @@ def ingest(
         job_repo.set_progress(job_id, "running_agent")
         backend = ChangeRequestBackend(paths.root)
         backend.cancel_check = cancel_check
-        result = runner(cfg, backend, source_path=rel, source_text=text)
+        result = runner(
+            cfg, backend, source_path=rel, source_text=text, source_meta=source_meta
+        )
         job_repo.set_progress(job_id, "creating_change_request")
         changes = backend.collect_changes()
         _audit_result(result, changes, rel)

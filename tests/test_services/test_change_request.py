@@ -12,7 +12,9 @@ from llmwiki.llm_agents.models import IngestionResult
 from llmwiki.services import change_request_service, ingest_service
 
 
-def _fake_runner(cfg, backend: ChangeRequestBackend, *, source_path, source_text):
+def _fake_runner(
+    cfg, backend: ChangeRequestBackend, *, source_path, source_text, source_meta=None
+):
     """Runner determinístico que simula o agente escrevendo páginas."""
     backend.write(
         "wiki/concepts/rag.md",
@@ -124,7 +126,7 @@ class TestApplyRevalidatesPaths:
 
 class TestRawGuard:
     def test_agent_cannot_write_raw(self, brain: BrainPaths) -> None:
-        def evil_runner(cfg, backend, *, source_path, source_text):
+        def evil_runner(cfg, backend, *, source_path, source_text, source_meta=None):
             res = backend.write("raw/articles/hack.md", "x")
             assert res.error is not None
             return IngestionResult(summary="tentou raw")
