@@ -138,3 +138,26 @@ class TestRawGuard:
         finally:
             conn.close()
         assert cr.files_changed == 0
+
+
+class TestQualityPersistence:
+    def test_quality_round_trips_through_meta(self, brain: BrainPaths) -> None:
+        cr = _ingest(brain)
+        conn = get_connection(brain.db_path)
+        try:
+            reloaded = change_request_service.get(cr.id, conn)
+        finally:
+            conn.close()
+        assert reloaded is not None
+        change = reloaded.changes[0]
+        assert change.quality_score is not None
+        assert isinstance(change.quality_flags, list)
+
+    def test_old_change_without_quality_loads(self) -> None:
+        from llmwiki.core.models import FileChange
+
+        # A CR persisted before #168 has no quality fields.
+        legacy = {"path": "wiki/x.md", "operation": "create", "diff": "+x"}
+        change = FileChange.model_validate(legacy)
+        assert change.quality_score is None
+        assert change.quality_flags == []
