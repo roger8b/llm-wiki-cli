@@ -83,6 +83,7 @@ Available extras:
 | `api` | FastAPI web UI + REST API |
 | `mcp` | MCP server for agent integrations |
 | `pdf` | PDF source ingestion |
+| `html` | HTML source ingestion (boilerplate removal) |
 
 ### Desktop app (macOS)
 
