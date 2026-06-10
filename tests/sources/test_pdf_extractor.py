@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,13 @@ import pytest
 from llmwiki.core.errors import EmptyExtractionError, ExtractorUnavailableError
 from llmwiki.sources.extractors import extract_text
 from llmwiki.sources.extractors import pdf as pdf_extractor
+
+# Tests that actually parse a PDF need the optional [pdf] extra. The core must
+# work without it, so they skip when pypdf is absent (CI installs the extra).
+_HAS_PYPDF = importlib.util.find_spec("pypdf") is not None
+requires_pypdf = pytest.mark.skipif(
+    not _HAS_PYPDF, reason="pypdf not installed (the [pdf] extra)"
+)
 
 
 def _make_pdf(pages: list[str]) -> bytes:
@@ -51,6 +59,7 @@ def _make_pdf(pages: list[str]) -> bytes:
     return out
 
 
+@requires_pypdf
 def test_extract_multipage_preserves_paragraphs(tmp_path: Path) -> None:
     doc = tmp_path / "doc.pdf"
     doc.write_bytes(
@@ -68,6 +77,7 @@ def test_extract_multipage_preserves_paragraphs(tmp_path: Path) -> None:
     assert "\n\n" in text
 
 
+@requires_pypdf
 def test_extract_text_dispatches_to_pdf(tmp_path: Path) -> None:
     doc = tmp_path / "x.pdf"
     doc.write_bytes(
@@ -76,11 +86,14 @@ def test_extract_text_dispatches_to_pdf(tmp_path: Path) -> None:
     assert "Dispatch through the extractor registry" in extract_text(doc)
 
 
+def test_hyphenation_postprocess() -> None:
+    # The post-processor is pure — no pypdf needed.
+    assert pdf_extractor._postprocess("conti-\nnuation of word") == "continuation of word"
+
+
+@requires_pypdf
 def test_hyphenation_is_mended(tmp_path: Path) -> None:
     doc = tmp_path / "hyph.pdf"
-    # The extractor mends "conti-\nnuation"; render it as two lines via two Td blocks
-    # is overkill, so test the post-processor directly.
-    assert pdf_extractor._postprocess("conti-\nnuation of word") == "continuation of word"
     doc.write_bytes(_make_pdf(["plain text without any hyphen breaks at all in this line."]))
     assert "hyphen" in pdf_extractor.extract(doc)
 
@@ -89,6 +102,7 @@ def test_collapses_excess_blank_lines() -> None:
     assert pdf_extractor._postprocess("a\n\n\n\nb") == "a\n\nb"
 
 
+@requires_pypdf
 def test_scanned_pdf_raises_empty(tmp_path: Path) -> None:
     doc = tmp_path / "scan.pdf"
     doc.write_bytes(_make_pdf(["hi"]))  # < 50 chars of text
