@@ -10,3 +10,10 @@ dist/
 build/
 *.egg-info/
 .build-sidecar/
+ROADMAP.md
+
+# graphify state (machine-specific, not data)
+graphify-out/.ast_log.txt
+graphify-out/.ast_pid
+graphify-out/.graphify_python
+graphify-out/.graphify_root
