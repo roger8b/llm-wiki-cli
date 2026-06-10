@@ -33,10 +33,14 @@ def extract(path: Path) -> str:
     """
     try:
         from pypdf import PdfReader
-    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
-        raise ExtractorUnavailableError(
-            "PDF support requires pypdf. Install it with: pip install 'llm-wiki[pdf]'"
-        ) from exc
+    except ImportError as exc:
+        # Only treat a *missing pypdf* as "install the extra". Re-raise any other
+        # import failure (e.g. a broken pypdf dependency) so it isn't masked.
+        if getattr(exc, "name", None) == "pypdf" or "pypdf" in str(exc):
+            raise ExtractorUnavailableError(
+                "PDF support requires pypdf. Install it with: pip install 'llm-wiki[pdf]'"
+            ) from exc
+        raise
 
     reader = PdfReader(str(path))
     pages = [page.extract_text() or "" for page in reader.pages]
