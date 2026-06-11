@@ -358,6 +358,13 @@ class ChangeRequestRepo:
             )
         self.conn.commit()
 
+    def set_files_changed(self, cr_id: str, files_changed: int) -> None:
+        self.conn.execute(
+            "UPDATE change_requests SET files_changed = ? WHERE id = ?",
+            (files_changed, cr_id),
+        )
+        self.conn.commit()
+
 
 class AskHistoryRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:

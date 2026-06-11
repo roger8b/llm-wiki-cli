@@ -47,6 +47,30 @@ def get_cr(cr_id: str) -> dict[str, Any]:
     return cr.model_dump(mode="json")
 
 
+@router.patch("/{cr_id}/files")
+def update_cr_file(
+    cr_id: str,
+    path: str = Body(..., embed=True),
+    new_content: str = Body(..., embed=True),
+) -> dict[str, Any]:
+    """Edit one file's proposed content before the CR is applied (#183)."""
+    from ....services import change_request_service as crs
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        cr = crs.update_change(cr_id, path, new_content, conn, paths)
+    except (crs.CRNotFoundError, crs.CRPathNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except crs.CRInvalidPathError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (crs.CRStatusError, crs.CREmptyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        conn.close()
+    return cr.model_dump(mode="json")
+
+
 @router.post("/{cr_id}/apply")
 def apply_cr(cr_id: str, commit: bool = Body(False, embed=True)) -> dict[str, Any]:
     """Apply a change request to the wiki."""

@@ -14,13 +14,18 @@ interface CrState {
   tab: DiffTab
   /** CR id currently being applied/rejected (drives button spinners). */
   busyId: string | null
+  /** Whether the "after" pane is in edit mode (#183). */
+  editing: boolean
 
   fetch: () => Promise<void>
   select: (id: string) => void
   selectFile: (idx: number) => void
   setTab: (tab: DiffTab) => void
+  setEditing: (editing: boolean) => void
   apply: (id: string) => Promise<void>
   reject: (id: string) => Promise<void>
+  /** Edit one file's proposed content before apply (#183). */
+  updateFile: (id: string, path: string, newContent: string) => Promise<void>
   /** Hydrate a CR's full `changes` (the list endpoint omits them). */
   ensureDetail: (id: string) => Promise<void>
 }
@@ -41,6 +46,7 @@ export const useCrStore = create<CrState>((set, get) => ({
   selectedFileIdx: 0,
   tab: "diff",
   busyId: null,
+  editing: false,
 
   fetch: async () => {
     set({ loading: true, error: null })
@@ -59,11 +65,12 @@ export const useCrStore = create<CrState>((set, get) => ({
   },
 
   select: (id) => {
-    set({ selectedId: id, selectedFileIdx: 0, tab: "diff" })
+    set({ selectedId: id, selectedFileIdx: 0, tab: "diff", editing: false })
     void get().ensureDetail(id)
   },
-  selectFile: (idx) => set({ selectedFileIdx: idx }),
+  selectFile: (idx) => set({ selectedFileIdx: idx, editing: false }),
   setTab: (tab) => set({ tab }),
+  setEditing: (editing) => set({ editing }),
 
   ensureDetail: async (id) => {
     const cr = get().crs.find((c) => c.id === id)
@@ -99,6 +106,14 @@ export const useCrStore = create<CrState>((set, get) => ({
       set({ busyId: null })
     }
   },
+
+  updateFile: async (id, path, newContent) => {
+    const updated = await api.updateCrFile(id, path, newContent)
+    set({
+      crs: get().crs.map((c) => (c.id === id ? { ...c, ...updated } : c)),
+    })
+    syncPendingBadge(get().crs)
+  },
 }))
 
 /** Mark a CR as applied/rejected, sync the badge, auto-select the next pending. */
@@ -125,6 +140,7 @@ function settleCr(
     selectedId: nextId,
     selectedFileIdx: 0,
     tab: "diff",
+    editing: false,
   })
   // hydrate the newly selected CR's diffs (list endpoint omits `changes`)
   if (nextId !== id) void get().ensureDetail(nextId)
