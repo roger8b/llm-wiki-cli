@@ -1,0 +1,8 @@
+{
+  "min_pages": 1,
+  "max_pages": 2,
+  "expected_titles_any": ["Vector Embeddings", "Embeddings", "Embedding"],
+  "expected_types": {"concept": 1},
+  "must_link": [],
+  "expect_edit": false
+}
