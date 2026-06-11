@@ -17,6 +17,28 @@ from . import markdown
 _MAX_SLUG_DISTANCE = 2
 
 
+def _norm_token(token: str) -> str:
+    """Crudely singularise a slug token (drop one trailing 's')."""
+    return token[:-1] if len(token) > 3 and token.endswith("s") else token
+
+
+def _token_set(slug: str) -> frozenset[str]:
+    """Normalised significant tokens of a slug (≥ 3 chars, singularised)."""
+    return frozenset(_norm_token(t) for t in slug.split("-") if len(t) >= 3)
+
+
+def _same_concept_tokens(a: frozenset[str], b: frozenset[str]) -> bool:
+    """True if two token sets describe the same concept regardless of word order.
+
+    Equal sets (e.g. ``{vector, embedding}`` from "Vector Embeddings" and
+    "Embedding Vectors") or differing by at most one token, requiring ≥ 2 tokens
+    on both sides — conservative, to avoid false positives.
+    """
+    if len(a) < 2 or len(b) < 2:
+        return False
+    return a == b or len(a ^ b) <= 1
+
+
 def _levenshtein(a: str, b: str) -> int:
     """Plain iterative Levenshtein distance (no dependency)."""
     if a == b:
@@ -55,13 +77,22 @@ def find_similar_pages(
     if not target:
         return []
     target_tokens = {t for t in target.split("-") if t}
+    target_token_set = _token_set(target)
 
     out: dict[str, tuple[str, str, str]] = {}
 
-    # Match A: slug identical or within a small edit distance.
+    # Match A: slug identical, within a small edit distance, or the same set of
+    # significant tokens regardless of word order / plural (e.g.
+    # "Embedding Vectors" ~ "Vector Embeddings").
     for page in PageRepo(conn).list():
         for slug in (markdown.slugify(page.title), markdown.slugify(_stem(page.path))):
-            if slug and (slug == target or _levenshtein(slug, target) <= _MAX_SLUG_DISTANCE):
+            if not slug:
+                continue
+            if (
+                slug == target
+                or _levenshtein(slug, target) <= _MAX_SLUG_DISTANCE
+                or _same_concept_tokens(_token_set(slug), target_token_set)
+            ):
                 out.setdefault(page.path, (page.path, page.title, "slug match"))
                 break
 
