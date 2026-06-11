@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...core.errors import EmptyExtractionError, ExtractorUnavailableError
+from .base import ExtractedSource
 
 
 def _load_trafilatura() -> object:
@@ -47,7 +48,7 @@ def extract(path: Path) -> str:
 
 
 def extract_metadata(path: Path) -> dict[str, str | None]:
-    """Best-effort source metadata for #163: title, author, date, url.
+    """Best-effort source metadata: title, author, date, url.
 
     Never raises for missing fields — absent values come back as ``None``.
     """
@@ -62,3 +63,28 @@ def extract_metadata(path: Path) -> dict[str, str | None]:
         "date": getattr(meta, "date", None),
         "url": getattr(meta, "url", None),
     }
+
+
+def extract_source(path: Path) -> ExtractedSource:
+    """Main-content text plus provenance metadata (issue #163)."""
+    trafilatura = _load_trafilatura()
+    html = path.read_text(encoding="utf-8", errors="replace")
+    text: str | None = trafilatura.extract(  # type: ignore[attr-defined]
+        html,
+        output_format="markdown",
+        include_links=True,
+        include_tables=True,
+    )
+    if not text or not text.strip():
+        raise EmptyExtractionError(
+            f"No main content detected in {path.name} "
+            "(empty page, paywall, or JavaScript-rendered content)."
+        )
+    meta = trafilatura.extract_metadata(html)  # type: ignore[attr-defined]
+    return ExtractedSource(
+        text=text.strip(),
+        title=getattr(meta, "title", None) if meta is not None else None,
+        author=getattr(meta, "author", None) if meta is not None else None,
+        date=getattr(meta, "date", None) if meta is not None else None,
+        url=getattr(meta, "url", None) if meta is not None else None,
+    )

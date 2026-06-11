@@ -27,6 +27,7 @@ def _fake_runner(
     *,
     source_path: str,
     source_text: str,
+    source_meta: dict[str, str | None] | None = None,
 ) -> IngestionResult:
     """Deterministic stand-in for the ingestion agent.
 

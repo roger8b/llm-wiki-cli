@@ -1,4 +1,10 @@
-"""Registry of extractors: extension -> function returning plain text."""
+"""Registry of extractors: extension -> function returning text + metadata.
+
+An extractor may return a plain ``str`` (legacy) or an ``ExtractedSource``
+(text + provenance metadata, issue #163). ``extract()`` normalises both into an
+``ExtractedSource``; ``extract_text()`` stays as a ``str`` wrapper for
+backward compatibility.
+"""
 
 from __future__ import annotations
 
@@ -8,26 +14,33 @@ from pathlib import Path
 from . import html as _html
 from . import markdown as _markdown
 from . import pdf as _pdf
+from .base import ExtractedSource
 
-Extractor = Callable[[Path], str]
+# An extractor returns either plain text (legacy) or an ExtractedSource.
+Extractor = Callable[[Path], "str | ExtractedSource"]
 
 _REGISTRY: dict[str, Extractor] = {
-    ".md": _markdown.extract,
-    ".markdown": _markdown.extract,
-    ".txt": _markdown.extract,
+    ".md": _markdown.extract_source,
+    ".markdown": _markdown.extract_source,
+    ".txt": _markdown.extract_source,
     ".pdf": _pdf.extract,
-    ".html": _html.extract,
-    ".htm": _html.extract,
+    ".html": _html.extract_source,
+    ".htm": _html.extract_source,
 }
 
 
-def extract_text(path: Path) -> str:
-    """Extracts text from a source based on its extension.
+def extract(path: Path) -> ExtractedSource:
+    """Extract text + provenance metadata, normalising legacy ``str`` results."""
+    extractor = _REGISTRY.get(path.suffix.lower(), _markdown.extract_source)
+    result = extractor(path)
+    if isinstance(result, ExtractedSource):
+        return result
+    return ExtractedSource(text=result)
 
-    Unknown extensions fallback to the plain text extractor (reads as utf-8).
-    """
-    extractor = _REGISTRY.get(path.suffix.lower(), _markdown.extract)
-    return extractor(path)
+
+def extract_text(path: Path) -> str:
+    """Backward-compatible wrapper: just the text of the extracted source."""
+    return extract(path).text
 
 
 def source_type(path: Path) -> str:
@@ -41,3 +54,6 @@ def source_type(path: Path) -> str:
         ".html": "html",
         ".htm": "html",
     }.get(ext, "other")
+
+
+__all__ = ["ExtractedSource", "extract", "extract_text", "source_type"]

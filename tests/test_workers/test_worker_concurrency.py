@@ -39,7 +39,7 @@ def _fake_runner_factory(page_path: str, *, delay: float = 0.0):
     worker and the CLI writer overlap on the same DB.
     """
 
-    def runner(cfg, backend: ChangeRequestBackend, *, source_path, source_text):
+    def runner(cfg, backend: ChangeRequestBackend, *, source_path, source_text, source_meta=None):
         if delay:
             time.sleep(delay)
         backend.write(
