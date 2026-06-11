@@ -67,6 +67,31 @@ def test_text_match_acronym(brain: BrainPaths) -> None:
     assert any(p == "wiki/concepts/rag.md" for p, _, _ in hits)
 
 
+def test_word_order_and_plural_match(brain: BrainPaths) -> None:
+    # "Embedding Vectors" must be flagged as a dup of "Vector Embeddings"
+    # (same tokens, different order + plural) — the baseline's case 04.
+    _add_page(brain, "concepts/vector-embeddings.md", "Vector Embeddings", "dense vectors")
+    _reindex(brain)
+    conn = get_connection(brain.db_path)
+    try:
+        hits = find_similar_pages("Embedding Vectors", conn)
+    finally:
+        conn.close()
+    assert any(p == "wiki/concepts/vector-embeddings.md" for p, _, _ in hits)
+
+
+def test_shared_word_is_not_a_false_positive(brain: BrainPaths) -> None:
+    # "Vector Database" shares only one token with "Vector Embeddings" → not a dup.
+    _add_page(brain, "concepts/vector-embeddings.md", "Vector Embeddings", "dense vectors")
+    _reindex(brain)
+    conn = get_connection(brain.db_path)
+    try:
+        hits = find_similar_pages("Vector Database", conn)
+    finally:
+        conn.close()
+    assert all(p != "wiki/concepts/vector-embeddings.md" for p, _, _ in hits)
+
+
 def test_no_match(brain: BrainPaths) -> None:
     _add_page(brain, "concepts/rag.md", "RAG", "retrieval augmented generation")
     _reindex(brain)
