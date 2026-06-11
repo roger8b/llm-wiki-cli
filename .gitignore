@@ -17,3 +17,6 @@ graphify-out/.ast_log.txt
 graphify-out/.ast_pid
 graphify-out/.graphify_python
 graphify-out/.graphify_root
+
+# Local eval run artifacts (curated snapshot lives in evals/BASELINE.md)
+evals/results/
