@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from ..core.config import WorkspaceConfig
 from .models import IngestionResult, LintReport, MaintenanceResult, QueryResult
 from .telemetry import ExecutionMeta, extract_meta
-from .tools import domain_tools
+from .tools import domain_tools, wiki_stats
 
 if TYPE_CHECKING:
     from .backend import ChangeRequestBackend
@@ -295,6 +295,31 @@ def _metadata_line(source_meta: dict[str, str | None] | None) -> str:
     return f"METADADOS: {', '.join(parts)}\n" if parts else ""
 
 
+def _ingestion_message(
+    cfg: WorkspaceConfig,
+    *,
+    source_path: str,
+    source_text: str,
+    source_meta: dict[str, str | None] | None = None,
+) -> str:
+    """Assemble the user message: today's date, wiki state, source + metadata.
+
+    Dynamic context goes in the MESSAGE (not the static, cacheable system
+    prompt) so the agent always sees the correct ``updated_at`` date, knows how
+    big the wiki already is (#164), and gets the source's provenance (#163).
+    """
+    from ..core.misc import today
+
+    return (
+        f"DATA DE HOJE: {today()}\n"
+        f"ESTADO DA WIKI: {wiki_stats(cfg.paths)}\n\n"
+        f"FONTE: {source_path}\n"
+        f"{_metadata_line(source_meta)}\n"
+        f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
+        "Integre esta fonte na wiki seguindo o protocolo."
+    )
+
+
 def run_ingestion(
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend,
@@ -313,11 +338,8 @@ def run_ingestion(
         middleware=_agent_middleware(backend),
         response_format=_response_format(IngestionResult),
     )
-    message = (
-        f"FONTE: {source_path}\n"
-        f"{_metadata_line(source_meta)}\n"
-        f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
-        "Integre esta fonte na wiki seguindo o protocolo."
+    message = _ingestion_message(
+        cfg, source_path=source_path, source_text=source_text, source_meta=source_meta
     )
     return _invoke(agent, message, IngestionResult, cfg, backend)
 
@@ -374,5 +396,10 @@ def run_maintenance(
         middleware=_agent_middleware(backend),
         response_format=_response_format(MaintenanceResult),
     )
-    message = f"Problemas detectados:\n{findings_text}\n\nProponha correções."
+    from ..core.misc import today
+
+    message = (
+        f"DATA DE HOJE: {today()}\n\n"
+        f"Problemas detectados:\n{findings_text}\n\nProponha correções."
+    )
     return _invoke(agent, message, MaintenanceResult, cfg, backend)

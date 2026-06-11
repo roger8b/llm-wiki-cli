@@ -47,3 +47,13 @@ def test_read_only_prompts_forbid_writing(prompts: dict[str, str]) -> None:
 
 def test_ingestion_requires_frontmatter(prompts: dict[str, str]) -> None:
     assert "frontmatter" in prompts["ingestion.md"]
+
+
+def test_ingestion_has_no_hardcoded_date(prompts: dict[str, str]) -> None:
+    # The dynamic date is injected via the message (DATA DE HOJE), so the prompt
+    # must not carry a literal YYYY-MM-DD that models would copy into updated_at.
+    import re
+
+    assert not re.search(r"\d{4}-\d{2}-\d{2}", prompts["ingestion.md"]), (
+        "ingestion.md must not hardcode a date; use the DATA DE HOJE placeholder"
+    )
