@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from . import html as _html
 from . import markdown as _markdown
 from . import pdf as _pdf
 
@@ -15,6 +16,8 @@ _REGISTRY: dict[str, Extractor] = {
     ".markdown": _markdown.extract,
     ".txt": _markdown.extract,
     ".pdf": _pdf.extract,
+    ".html": _html.extract,
+    ".htm": _html.extract,
 }
 
 
@@ -36,4 +39,5 @@ def source_type(path: Path) -> str:
         ".txt": "text",
         ".pdf": "pdf",
         ".html": "html",
+        ".htm": "html",
     }.get(ext, "other")
