@@ -75,6 +75,10 @@ class FileChange(BaseModel):
     # Review aids, derived at capture time (optional / backward-compatible):
     category: str | None = None  # new|edited|removed (review grouping)
     confidence: str | None = None  # low|medium|high, from the page frontmatter
+    # Heuristic quality (issue #168): 0–100 score + descriptive flags. None on
+    # delete and on change requests created before this field existed.
+    quality_score: int | None = None
+    quality_flags: list[str] = Field(default_factory=list)
 
 
 class ChangeRequest(BaseModel):

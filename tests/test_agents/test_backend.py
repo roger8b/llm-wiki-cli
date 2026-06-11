@@ -101,3 +101,26 @@ class TestCollectChanges:
         same = (brain_root / "wiki/concepts/rag.md").read_text(encoding="utf-8")
         be.write("wiki/concepts/rag.md", same)
         assert be.collect_changes() == []
+
+    def test_quality_score_attached(self, brain_root: Path) -> None:
+        be = ChangeRequestBackend(brain_root)
+        body = " ".join(["word"] * 200)
+        be.write(
+            "wiki/concepts/vector-database.md",
+            "---\ntitle: Vector Database\ntype: concept\ntags: [db]\n"
+            "sources: [raw/articles/x.md]\nupdated_at: 2026-06-10\nconfidence: high\n---\n"
+            f"# Vector Database\n\n## Definition\n{body}\n\nRelated: [[RAG]].\n",
+        )
+        change = be.collect_changes()[0]
+        # Links to the existing rag.md page on disk → resolves.
+        assert change.quality_score is not None
+        assert change.quality_score >= 90
+        assert change.quality_flags == []
+
+    def test_weak_page_gets_flags(self, brain_root: Path) -> None:
+        be = ChangeRequestBackend(brain_root)
+        be.write("wiki/concepts/stub.md", "# Stub\nshort.\n")
+        change = be.collect_changes()[0]
+        assert change.quality_score is not None and change.quality_score < 40
+        assert "short_body" in change.quality_flags
+        assert "no_links" in change.quality_flags

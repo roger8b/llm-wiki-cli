@@ -309,8 +309,40 @@ class ChangeRequestBackend(FilesystemBackend):
         value = meta.get("confidence") if meta else None
         return str(value) if value is not None else None
 
+    def _known_titles(self) -> set[str]:
+        """Slugified titles/stems of every wiki page on disk + in staging.
+
+        Used to resolve wikilinks when scoring page quality, so a link to a
+        sibling page created in the same change request still counts.
+        """
+        from ..core import markdown  # noqa: PLC0415
+
+        slugs: set[str] = set()
+
+        def _add(rel: str, content: str | None) -> None:
+            stem = PurePosixPath(rel).stem
+            slugs.add(markdown.slugify(stem))
+            if content is not None:
+                title = markdown.extract_title(content)
+                if title:
+                    slugs.add(markdown.slugify(title))
+
+        wiki_dir = self.brain_root / "wiki"
+        if wiki_dir.is_dir():
+            for file in wiki_dir.rglob("*.md"):
+                if file.name in {"index.md", "log.md"}:
+                    continue
+                rel = file.relative_to(self.brain_root).as_posix()
+                _add(rel, file.read_text(encoding="utf-8"))
+        for norm, content in self.staging.items():
+            _add(norm, content)
+        return slugs
+
     def collect_changes(self) -> list[FileChange]:
         """Compares staging with the disk and returns a list of FileChange (with diffs)."""
+        from ..core.quality import assess_page  # noqa: PLC0415
+
+        known_titles = self._known_titles()
         changes: list[FileChange] = []
         for norm in sorted(self.staging):
             new_content = self.staging[norm]
@@ -318,6 +350,7 @@ class ChangeRequestBackend(FilesystemBackend):
             if old is not None and old == new_content:
                 continue  # no real change
             operation = "update" if old is not None else "create"
+            report = assess_page(new_content, known_titles=known_titles)
             changes.append(
                 FileChange(
                     path=norm,
@@ -326,6 +359,8 @@ class ChangeRequestBackend(FilesystemBackend):
                     diff=make_diff(old or "", new_content, norm),
                     category=self._CATEGORY.get(operation),
                     confidence=self._confidence_of(new_content),
+                    quality_score=report.score,
+                    quality_flags=report.flags,
                 )
             )
         return changes

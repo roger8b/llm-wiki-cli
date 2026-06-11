@@ -56,6 +56,12 @@ def review(cr_id: str = typer.Argument(None, help="CR ID. Empty = list pending."
         typer.echo(f"[bold]{cr.id}[/bold] — {cr.status} — {esc(cr.summary or '')}")
         for c in cr.changes:
             typer.echo(f"\n[cyan]{esc(c.operation)}: {esc(c.path)}[/cyan]")
+            if c.quality_score is not None:
+                color = "green" if c.quality_score >= 80 else (
+                    "yellow" if c.quality_score >= 60 else "red"
+                )
+                flags = f" — {esc(', '.join(c.quality_flags))}" if c.quality_flags else ""
+                typer.echo(f"[{color}]quality: {c.quality_score}/100[/{color}]{flags}")
             _print_diff(c.diff)
     finally:
         conn.close()
