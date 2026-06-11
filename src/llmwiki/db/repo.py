@@ -148,6 +148,14 @@ class LinkRepo:
         ).fetchall()
         return [r["from_page"] for r in rows]
 
+    def outgoing(self, from_page: str) -> list[str]:
+        """Pages that ``from_page`` links TO (outgoing links)."""
+        rows = self.conn.execute(
+            "SELECT to_page FROM links WHERE from_page = ? ORDER BY to_page",
+            (from_page,),
+        ).fetchall()
+        return [r["to_page"] for r in rows]
+
     def clear(self) -> None:
         self.conn.execute("DELETE FROM links")
         self.conn.commit()
