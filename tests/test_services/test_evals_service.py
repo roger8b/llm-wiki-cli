@@ -38,7 +38,12 @@ def _fake_runner(
     new_pages: list[str] = []
 
     def w(path: str, title: str, ptype: str, body: str) -> None:
-        backend.write(path, _page(title, ptype, body))
+        content = _page(title, ptype, body)
+        res = backend.write(path, content)
+        # A competent agent confirms past the duplicate guardrail (#167) by
+        # writing the same path again; case 04 deliberately confirms a dup.
+        if res.error is not None:
+            backend.write(path, content)
         new_pages.append(path)
 
     if name.startswith("01"):

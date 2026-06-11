@@ -8,6 +8,10 @@ following the protocol below.
 - Use the `search_pages` tool and read (`read_file`) existing pages BEFORE creating
   new ones. PREFER editing an existing page over creating a duplicate.
 - Create/edit pages only inside `wiki/` using `write_file` / `edit_file`.
+- **Duplicate guardrail:** if `write_file` returns a "may duplicate an existing
+  page" error, do NOT force it. Open the listed page with `read_file` and EDIT
+  it instead. Only if it is genuinely a different concept, write to the SAME
+  path a second time to confirm the new page.
 - Every page MUST have YAML frontmatter: `title`, `type`, `tags`, `sources`,
   `updated_at`, `confidence`.
 - For `updated_at`, use EXACTLY the date given as `DATA DE HOJE` in the message.

@@ -124,3 +124,46 @@ class TestCollectChanges:
         assert change.quality_score is not None and change.quality_score < 40
         assert "short_body" in change.quality_flags
         assert "no_links" in change.quality_flags
+
+
+class TestDedupGuardrail:
+    def _backend_with_dup(self, brain_root: Path) -> ChangeRequestBackend:
+        be = ChangeRequestBackend(brain_root)
+        # Pretend "rag.md" already exists for any proposed title.
+        be.dedup_check = lambda title: [("wiki/concepts/rag.md", "RAG", "text match")]
+        return be
+
+    def test_create_is_blocked_first_time(self, brain_root: Path) -> None:
+        be = self._backend_with_dup(brain_root)
+        res = be.write("wiki/concepts/retrieval-augmented-generation.md", "# RAG dup\n")
+        assert res.error is not None
+        assert "rag.md" in res.error
+        assert "wiki/concepts/retrieval-augmented-generation.md" not in be.staging
+
+    def test_second_write_same_path_passes(self, brain_root: Path) -> None:
+        be = self._backend_with_dup(brain_root)
+        path = "wiki/concepts/retrieval-augmented-generation.md"
+        assert be.write(path, "# RAG dup\n").error is not None
+        res = be.write(path, "# RAG dup\n")  # confirm
+        assert res.error is None
+        assert path in be.staging
+
+    def test_edit_existing_never_triggers(self, brain_root: Path) -> None:
+        be = self._backend_with_dup(brain_root)
+        # rag.md exists on disk (brain_root fixture) → it's an update, not create.
+        res = be.write("wiki/concepts/rag.md", "---\ntitle: RAG\n---\n# RAG\nnovo\n")
+        assert res.error is None
+        assert "wiki/concepts/rag.md" in be.staging
+
+    def test_no_dedup_check_is_unchanged(self, brain_root: Path) -> None:
+        be = ChangeRequestBackend(brain_root)  # no dedup_check
+        res = be.write("wiki/concepts/anything.md", "# X\n")
+        assert res.error is None
+        assert "wiki/concepts/anything.md" in be.staging
+
+    def test_no_candidates_passes(self, brain_root: Path) -> None:
+        be = ChangeRequestBackend(brain_root)
+        be.dedup_check = lambda title: []
+        res = be.write("wiki/concepts/fresh.md", "# Fresh\n")
+        assert res.error is None
+        assert "wiki/concepts/fresh.md" in be.staging

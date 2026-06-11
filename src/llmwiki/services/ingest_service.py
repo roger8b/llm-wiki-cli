@@ -81,6 +81,27 @@ def _audit_result(
         )
 
 
+def _make_dedup_check(
+    paths: BrainPaths,
+) -> Callable[[str], list[tuple[str, str, str]]]:
+    """Build the duplicate guardrail for the backend (#167).
+
+    Uses its own short-lived connection (the agent runs off-thread, where the
+    service's connection is not safe to share).
+    """
+    from ..core.dedup import find_similar_pages
+    from ..db.connection import get_connection
+
+    def check(title: str) -> list[tuple[str, str, str]]:
+        conn = get_connection(paths.db_path)
+        try:
+            return find_similar_pages(title, conn)
+        finally:
+            conn.close()
+
+    return check
+
+
 def _default_runner(
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend,
@@ -167,6 +188,7 @@ def ingest(
         job_repo.set_progress(job_id, "running_agent")
         backend = ChangeRequestBackend(paths.root)
         backend.cancel_check = cancel_check
+        backend.dedup_check = _make_dedup_check(paths)
         result = runner(
             cfg, backend, source_path=rel, source_text=text, source_meta=source_meta
         )

@@ -95,6 +95,13 @@ class ChangeRequestBackend(FilesystemBackend):
         # Optional cooperative-cancellation probe; when it returns True the agent
         # aborts at the next model-call boundary. Set by services.
         self.cancel_check: Callable[[], bool] | None = None
+        # Optional duplicate guardrail (#167): given a proposed page title,
+        # returns existing similar pages as (path, title, reason). Services
+        # inject it; None keeps the original behaviour.
+        self.dedup_check: Callable[[str], list[tuple[str, str, str]]] | None = None
+        # Paths already warned about as possible duplicates — a second write to
+        # the same path is the agent's deliberate confirmation and goes through.
+        self._dedup_warned: set[str] = set()
 
     # --- normalization --------------------------------------------------
     @staticmethod
@@ -132,6 +139,44 @@ class ChangeRequestBackend(FilesystemBackend):
         self.write_attempts.append(norm)
         logger.warning("read-only backend: blocked write attempt to '%s'.", norm)
 
+    def _dedup_title(self, norm: str, content: str) -> str:
+        """The title to check for duplicates: frontmatter ``title`` or the stem."""
+        from ..core import frontmatter  # noqa: PLC0415
+
+        try:
+            meta, _ = frontmatter.parse(content)
+        except Exception:  # noqa: BLE001
+            meta = {}
+        title = meta.get("title") if meta else None
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+        return PurePosixPath(norm).stem
+
+    def _dedup_block(self, norm: str, content: str) -> WriteResult | None:
+        """Return a duplicate-warning WriteResult on the first create, else None.
+
+        Only fires for a brand-new page (not on disk, not staged) when a dedup
+        check is configured and the path hasn't been warned about yet. The
+        second write to the same path is the agent's confirmation and passes.
+        """
+        if self.dedup_check is None or norm in self._dedup_warned:
+            return None
+        if norm in self.staging or self._disk_content(norm) is not None:
+            return None  # an edit/overwrite, not a new page
+        candidates = self.dedup_check(self._dedup_title(norm, content))
+        if not candidates:
+            return None
+        self._dedup_warned.add(norm)
+        listed = ", ".join(f"{p} ({t})" for p, t, _ in candidates)
+        logger.info("dedup warning: %s ~ %s", norm, [p for p, _, _ in candidates])
+        return WriteResult(
+            error=(
+                f"'{norm}' may duplicate an existing page: {listed}. "
+                "Read it (read_file) and EDIT the existing page instead, or "
+                "write to this same path again to confirm creating a new one."
+            )
+        )
+
     # --- write: capture in staging --------------------------------------
     def write(self, file_path: str, content: str) -> WriteResult:
         norm = self._norm(file_path)
@@ -143,6 +188,9 @@ class ChangeRequestBackend(FilesystemBackend):
             return WriteResult(
                 error=f"'{file_path}': read-only operation — writes are not permitted."
             )
+        dup = self._dedup_block(norm, content)
+        if dup is not None:
+            return dup
         self.staging[norm] = content
         return WriteResult(path=file_path)
 
