@@ -84,6 +84,7 @@ Available extras:
 | `mcp` | MCP server for agent integrations |
 | `pdf` | PDF source ingestion |
 | `html` | HTML source ingestion (boilerplate removal) |
+| `audio` | Audio ingestion — offline transcription (faster-whisper) |
 
 ### Desktop app (macOS)
 

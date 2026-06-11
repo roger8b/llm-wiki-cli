@@ -20,6 +20,7 @@ from ..core.paths import BrainPaths
 from ..db.repo import JobRepo, SourceRepo
 from ..llm_agents.backend import ChangeRequestBackend
 from ..llm_agents.models import IngestionResult
+from ..sources.extractors import ExtractedSource
 from . import change_request_service
 from .change_request_service import create_from_changes
 
@@ -99,6 +100,29 @@ def _default_runner(
     )
 
 
+def _extract_for_job(
+    source_file: Path, cfg: WorkspaceConfig, job_repo: JobRepo, job_id: int
+) -> ExtractedSource:
+    """Extract a source's text + metadata, reporting progress on the job.
+
+    Audio is transcribed with faster-whisper (#76) using the configured model;
+    everything else uses the synchronous extractor registry.
+    """
+    from ..sources.extractors import extract, source_type
+
+    if source_type(source_file) == "audio":
+        from ..sources.extractors import audio
+
+        return audio.transcribe(
+            source_file,
+            model=cfg.whisper_model,
+            language=cfg.whisper_language,
+            progress=lambda step: job_repo.set_progress(job_id, step),
+        )
+    job_repo.set_progress(job_id, "extracting")
+    return extract(source_file)
+
+
 def ingest(
     source_file: Path,
     paths: BrainPaths,
@@ -117,7 +141,6 @@ def ingest(
     ``cancel_check`` is polled by the agent to abort cooperatively.
     """
     from ..core.errors import JobCancelledError
-    from ..sources.extractors import extract
 
     runner = runner or _default_runner
     inside_brain = paths.root in source_file.resolve().parents
@@ -127,19 +150,20 @@ def ingest(
     if not force:
         _check_already_processed(source_file, conn)
 
-    extracted = extract(source_file)
-    text = extracted.text
-    source_meta: dict[str, str | None] = {
-        "title": extracted.title,
-        "author": extracted.author,
-        "date": extracted.date,
-        "url": extracted.url,
-    }
-
     job_repo = JobRepo(conn)
     if job_id is None:
         job_id = job_repo.create("ingest", json.dumps({"source": rel}), status="running")
     try:
+        # Extraction runs INSIDE the job: audio transcription (#76) is slow, so
+        # progress is reported and a failure is recorded on the job.
+        extracted = _extract_for_job(source_file, cfg, job_repo, job_id)
+        text = extracted.text
+        source_meta: dict[str, str | None] = {
+            "title": extracted.title,
+            "author": extracted.author,
+            "date": extracted.date,
+            "url": extracted.url,
+        }
         job_repo.set_progress(job_id, "running_agent")
         backend = ChangeRequestBackend(paths.root)
         backend.cancel_check = cancel_check
