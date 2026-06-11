@@ -29,6 +29,8 @@ _CONFIG_KEYS = (
     "agent_max_retries",
     "onboarded",
     "providers",
+    "whisper_model",
+    "whisper_language",
 )
 
 # Default config written on first init.
@@ -41,6 +43,8 @@ _DEFAULTS: dict[str, object] = {
     "agent_max_retries": 2,
     "onboarded": False,
     "providers": {},
+    "whisper_model": "small",
+    "whisper_language": None,
 }
 
 
@@ -65,6 +69,9 @@ class WorkspaceConfig(BaseModel):
     onboarded: bool = False
     # Per-provider settings keyed by provider name (openai|anthropic|google).
     providers: dict[str, ProviderConfig] = {}
+    # Offline audio transcription (faster-whisper, optional [audio] extra).
+    whisper_model: str = "small"  # tiny|base|small|medium|large-v3
+    whisper_language: str | None = None  # None = autodetect
 
     @property
     def paths(self) -> BrainPaths:
