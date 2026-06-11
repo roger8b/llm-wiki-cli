@@ -19,6 +19,9 @@ class Citation(BaseModel):
     page: str | None = None
     source: str | None = None
     quote: str | None = None
+    # Set by query_service after resolving page/source against the index/raw.
+    # Default keeps old history payloads (without the field) loading. (#172)
+    invalid: bool = False
 
 
 class SuggestedPage(BaseModel):

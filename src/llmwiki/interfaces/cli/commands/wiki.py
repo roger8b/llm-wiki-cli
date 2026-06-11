@@ -120,7 +120,10 @@ def ask(
         typer.echo("\n[dim]Sources:[/dim]")
         for i, c in enumerate(result.citations, 1):
             ref = c.page or c.source or "?"
-            typer.echo(f"  [{i}] {esc(ref)}")
+            if c.invalid:
+                typer.echo(f"  [{i}] [yellow](!) {esc(ref)} — não resolve[/yellow]")
+            else:
+                typer.echo(f"  [{i}] {esc(ref)}")
     if cr is not None:
         typer.echo(
             f"\n[green]Answer saved as change request {cr.id}[/green] "
