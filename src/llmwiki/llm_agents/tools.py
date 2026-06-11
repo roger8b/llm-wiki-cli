@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import PurePosixPath
 
-from ..core import frontmatter
+from ..core import frontmatter, markdown
 from ..core.models import PageType
 from ..core.paths import BrainPaths
 from ..db.connection import get_connection
@@ -100,6 +101,59 @@ def make_read_metadata(paths: BrainPaths) -> Callable[[str], str]:
     return read_metadata
 
 
+def make_related_pages(paths: BrainPaths) -> Callable[[str], str]:
+    def related_pages(title: str) -> str:
+        """Para um TÍTULO proposto, lista páginas existentes relacionadas (por
+        busca textual e por tokens do slug em comum), com tipo e um link em
+        comum quando houver. Chame ANTES de criar uma página para decidir entre
+        editar uma existente ou linkar a vizinhança."""
+        # TODO(#170): usar search.service.hybrid_search quando a camada
+        # semântica existir — hoje é FTS + sobreposição de tokens de slug.
+        title = title.strip()
+        if not title:
+            return "Informe um título."
+        title_tokens = {t for t in markdown.slugify(title).split("-") if len(t) >= 4}
+
+        conn = get_connection(paths.db_path)
+        try:
+            pages = {p.path: p for p in PageRepo(conn).list()}
+            candidates: set[str] = set()
+            # (a) full-text search by the proposed title.
+            for path, _t, _r in PageFtsRepo(conn).search(title, limit=8):
+                if path in pages:
+                    candidates.add(path)
+            # (b) pages whose slug (title or filename) shares a token with the title.
+            for p in pages.values():
+                page_tokens = set(markdown.slugify(p.title).split("-")) | set(
+                    markdown.slugify(PurePosixPath(p.path).stem).split("-")
+                )
+                if title_tokens & page_tokens:
+                    candidates.add(p.path)
+            if not candidates:
+                return "Nenhuma página relacionada encontrada — provavelmente é um conceito novo."
+            link_repo = LinkRepo(conn)
+            ordered = sorted(candidates)[:8]
+            lines: list[str] = []
+            for path in ordered:
+                p = pages[path]
+                # (c) a link this candidate shares with another candidate.
+                common = next(
+                    (
+                        pages[t].title
+                        for t in link_repo.outgoing(path)
+                        if t in candidates and t != path
+                    ),
+                    None,
+                )
+                extra = f" [link em comum: {common}]" if common else ""
+                lines.append(f"{path} — {p.title} ({p.type.value}){extra}")
+        finally:
+            conn.close()
+        return "\n".join(lines)
+
+    return related_pages
+
+
 def domain_tools(paths: BrainPaths) -> list[Callable[[str], str]]:
     """All read-only domain tools exposed to the agents."""
     return [
@@ -107,4 +161,5 @@ def domain_tools(paths: BrainPaths) -> list[Callable[[str], str]]:
         make_search_by_type(paths),
         make_get_backlinks(paths),
         make_read_metadata(paths),
+        make_related_pages(paths),
     ]

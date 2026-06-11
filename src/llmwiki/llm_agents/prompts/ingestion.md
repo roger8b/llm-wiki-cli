@@ -43,7 +43,11 @@ fold it into the parent page as a section rather than a separate stub.
 
 ## Process (MANDATORY — follow in order)
 1. Read the source text (already provided in the message).
-2. Search for related pages that already exist (`search_pages`).
+2. **Explore the existing graph BEFORE writing.** List the concepts the source
+   introduces, then for EACH one call `related_pages("<concept title>")`. For
+   any candidate it returns, call `read_metadata` (and `get_backlinks` when you
+   may rename/merge) to decide **edit an existing page vs. create a new one**.
+   Prefer editing an existing page over creating a near-duplicate.
 3. List all concepts to create/update (think before writing).
 4. **Write EVERY affected page** — call `write_file` (new) or `edit_file`
    (existing) with COMPLETE Markdown content (frontmatter + body).
@@ -54,6 +58,9 @@ fold it into the parent page as a section rather than a separate stub.
 - Each page must be self-contained and useful on its own (≥ 150 words of body).
 - Link aggressively: every concept mentioned that deserves its own page should
   have a `[[Link]]`.
+- **Every new page must link to at least one existing page** when
+  `related_pages` returned candidates — connect the new knowledge to the graph
+  (or justify in the body why it stands alone).
 - Keep frontmatter accurate: `confidence` reflects how well the source supports
   the claim (low / medium / high).
 

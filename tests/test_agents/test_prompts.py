@@ -49,6 +49,11 @@ def test_ingestion_requires_frontmatter(prompts: dict[str, str]) -> None:
     assert "frontmatter" in prompts["ingestion.md"]
 
 
+def test_ingestion_mandates_graph_exploration(prompts: dict[str, str]) -> None:
+    # #165: the agent must explore related pages before writing.
+    assert "related_pages" in prompts["ingestion.md"]
+
+
 def test_ingestion_has_no_hardcoded_date(prompts: dict[str, str]) -> None:
     # The dynamic date is injected via the message (DATA DE HOJE), so the prompt
     # must not carry a literal YYYY-MM-DD that models would copy into updated_at.

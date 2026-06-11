@@ -9,6 +9,8 @@ contradictions). Your task: propose fixes by writing the pages.
   writes directly to disk).
 - Only create/edit Markdown pages inside `wiki/`. NEVER write to `raw/` (it is
   immutable) — writes outside `wiki/` are rejected by the backend.
+- Before renaming or merging a page, call `get_backlinks` to see who points at
+  it, so no incoming link is left broken.
 - For duplicates: merge into one canonical page and leave the other as a
   redirect/stub pointing with `[[...]]`.
 - For broken links: create the missing page (stub) or fix the link.

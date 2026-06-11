@@ -6,8 +6,10 @@ from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection
 from llmwiki.db.repo import LinkRepo
 from llmwiki.llm_agents.tools import (
+    domain_tools,
     make_get_backlinks,
     make_read_metadata,
+    make_related_pages,
     make_search_by_type,
     make_search_pages,
     wiki_stats,
@@ -79,6 +81,47 @@ class TestWikiStats:
         assert "3 páginas" in out
         assert "concept: 2" in out
         assert "entity: 1" in out
+
+
+class TestRelatedPages:
+    def _seed(self, brain: BrainPaths) -> None:
+        _add_page(brain, "concepts/rag.md", "RAG", "links to [[Vector Database]]")
+        _add_page(brain, "concepts/vector-database.md", "Vector Database", "stores vectors")
+        _add_page(brain, "concepts/rag-eval.md", "RAG Evaluation", "how to test rag")
+        _add_page(brain, "entities/acme.md", "Acme Corp", "a company", ptype="entity")
+        conn = get_connection(brain.db_path)
+        try:
+            index_service.reindex(brain, conn)
+        finally:
+            conn.close()
+
+    def test_finds_by_title_and_slug_token(self, brain: BrainPaths) -> None:
+        self._seed(brain)
+        out = make_related_pages(brain)("RAG")
+        assert "wiki/concepts/rag.md" in out
+        assert "RAG Evaluation" in out  # shares the 'rag' slug token
+        assert "(concept)" in out
+        assert "Acme Corp" not in out  # unrelated
+
+    def test_reports_common_link(self, brain: BrainPaths) -> None:
+        self._seed(brain)
+        # "Vector Database" relates to rag (rag links to it) — rag is a candidate
+        # via the 'database'/'vector' search; the common-link annotation appears
+        # when a candidate links to another candidate.
+        out = make_related_pages(brain)("Vector Database")
+        assert "wiki/concepts/vector-database.md" in out
+
+    def test_no_match_returns_hint(self, brain: BrainPaths) -> None:
+        self._seed(brain)
+        out = make_related_pages(brain)("Quantum Chromodynamics")
+        assert "Nenhuma página relacionada" in out
+
+
+class TestDomainToolsRegistry:
+    def test_related_pages_registered(self, brain: BrainPaths) -> None:
+        names = {t.__name__ for t in domain_tools(brain)}
+        assert "related_pages" in names
+        assert "search_pages" in names
 
 
 class TestGetBacklinks:
