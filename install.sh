@@ -12,7 +12,7 @@ set -euo pipefail
 
 HOME_DIR="${LLMWIKI_HOME:-$HOME/.wiki}"
 BIN_DIR="${LLMWIKI_BIN:-$HOME/.local/bin}"
-EXTRAS="${LLMWIKI_EXTRAS:-api,mcp,agent,ollama}"
+EXTRAS="${LLMWIKI_EXTRAS:-api,mcp,agent,ollama,pdf}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- pré-requisito: Python 3.12+ ---------------------------------------

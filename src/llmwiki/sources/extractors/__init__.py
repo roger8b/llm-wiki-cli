@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import markdown as _markdown
+from . import pdf as _pdf
 
 Extractor = Callable[[Path], str]
 
@@ -13,6 +14,7 @@ _REGISTRY: dict[str, Extractor] = {
     ".md": _markdown.extract,
     ".markdown": _markdown.extract,
     ".txt": _markdown.extract,
+    ".pdf": _pdf.extract,
 }
 
 
