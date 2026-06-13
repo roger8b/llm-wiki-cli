@@ -15,6 +15,7 @@ import { DiffPanel } from "@/components/shared/DiffPanel"
 import { diffValues } from "@/lib/diff"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 
 function opIcon(op: FileChange["operation"]) {
   if (op === "delete") return <Trash2 className="size-3.5 text-rejected" />
@@ -129,6 +130,28 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
   const [draft, setDraft] = useState("")
   const [saving, setSaving] = useState(false)
 
+  // Per-file selection for partial apply (#184): all files checked by default,
+  // reset whenever the selected CR changes.
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(cr.changes.map((c) => c.path)),
+  )
+  useEffect(() => {
+    setSelected(new Set(cr.changes.map((c) => c.path)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cr.id])
+  function toggleFile(path: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+  const total = cr.changes.length
+  const selectedCount = selected.size
+  const partial = selectedCount > 0 && selectedCount < total
+  const nothingSelected = isPending && selectedCount === 0
+
   // Seed the editor whenever edit mode is (re)entered — works for both the
   // Edit button and the ⌘E shortcut handled in the parent view.
   useEffect(() => {
@@ -158,9 +181,13 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
   }
 
   async function handleApply() {
+    // Full apply → omit paths; partial → send the checked subset (#184).
+    const paths = partial ? [...selected] : undefined
     try {
-      await apply(cr.id)
-      toast.success(`${cr.id} applied`)
+      await apply(cr.id, paths)
+      toast.success(
+        paths ? `${cr.id}: ${paths.length} applied, rest rejected` : `${cr.id} applied`,
+      )
     } catch (e) {
       toast.error(`Apply failed: ${(e as Error).message}`)
     }
@@ -217,21 +244,48 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
             Files ({cr.changes.length})
           </div>
           <div className="flex-1 overflow-y-auto">
-            {cr.changes.map((c, i) => (
-              <button
-                key={c.path}
-                onClick={() => selectFile(i)}
-                className={cn(
-                  "flex w-full items-center gap-1.5 border-b px-3 py-[7px] text-left transition-colors hover:bg-accent",
-                  i === fileIdx && "bg-secondary",
-                )}
-              >
-                {opIcon(c.operation)}
-                <span className="flex-1 truncate font-mono text-[11px]">
-                  {c.path}
-                </span>
-              </button>
-            ))}
+            {cr.changes.map((c, i) => {
+              const settledMark = !isPending
+                ? cr.rejected_paths?.includes(c.path)
+                  ? "rejected"
+                  : cr.applied_paths?.includes(c.path)
+                    ? "applied"
+                    : null
+                : null
+              return (
+                <div
+                  key={c.path}
+                  className={cn(
+                    "flex w-full items-center gap-1.5 border-b px-3 py-[7px] transition-colors hover:bg-accent",
+                    i === fileIdx && "bg-secondary",
+                  )}
+                >
+                  {isPending && (
+                    <Checkbox
+                      checked={selected.has(c.path)}
+                      onCheckedChange={() => toggleFile(c.path)}
+                      aria-label={`Include ${c.path}`}
+                      className="size-3.5 shrink-0"
+                    />
+                  )}
+                  <button
+                    onClick={() => selectFile(i)}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                  >
+                    {opIcon(c.operation)}
+                    <span className="flex-1 truncate font-mono text-[11px]">
+                      {c.path}
+                    </span>
+                  </button>
+                  {settledMark === "applied" && (
+                    <Check className="size-3.5 shrink-0 text-apply" />
+                  )}
+                  {settledMark === "rejected" && (
+                    <X className="size-3.5 shrink-0 text-rejected" />
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
 
@@ -295,7 +349,7 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
       <div className="flex shrink-0 items-center gap-2 border-t-[1.5px] bg-card px-5 py-3">
         <Button
           onClick={handleApply}
-          disabled={disabled}
+          disabled={disabled || nothingSelected}
           className="gap-1.5 bg-apply text-apply-foreground hover:bg-apply/90"
         >
           {busy ? (
@@ -303,9 +357,20 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
           ) : (
             <Check className="size-4" />
           )}
-          {busy ? "Applying…" : "Apply"}
-          {!busy && <kbd className="ml-0.5 font-mono text-[10px] opacity-65">⌘↵</kbd>}
+          {busy
+            ? "Applying…"
+            : partial
+              ? `Apply selected (${selectedCount})`
+              : "Apply"}
+          {!busy && !partial && (
+            <kbd className="ml-0.5 font-mono text-[10px] opacity-65">⌘↵</kbd>
+          )}
         </Button>
+        {isPending && partial && (
+          <span className="text-[11px] text-pending">
+            the other {total - selectedCount} will be rejected
+          </span>
+        )}
         <Button
           onClick={handleReject}
           disabled={disabled}

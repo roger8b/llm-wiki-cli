@@ -95,6 +95,10 @@ class ChangeRequest(BaseModel):
     # Structural lint findings the agent could not auto-fix before the CR (#166).
     # Surfaced to the reviewer (front in #185); empty on clean / legacy CRs.
     warnings: list[str] = Field(default_factory=list)
+    # Per-file settlement once applied (#184): which paths were written vs
+    # rejected in a partial apply. Empty on pending / fully-applied / legacy CRs.
+    applied_paths: list[str] = Field(default_factory=list)
+    rejected_paths: list[str] = Field(default_factory=list)
 
 
 class LintFinding(BaseModel):

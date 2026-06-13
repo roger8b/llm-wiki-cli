@@ -124,11 +124,29 @@ def _warnings(diff_dir: str) -> list[str]:
     return [str(w) for w in value] if isinstance(value, list) else []
 
 
+def _settled_paths(diff_dir: str) -> tuple[list[str], list[str]]:
+    """Read ``applied_paths`` / ``rejected_paths`` from the CR meta (#184)."""
+    meta_file = Path(diff_dir) / "meta.json"
+    if not meta_file.is_file():
+        return [], []
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], []
+    applied = meta.get("applied_paths")
+    rejected = meta.get("rejected_paths")
+    return (
+        [str(p) for p in applied] if isinstance(applied, list) else [],
+        [str(p) for p in rejected] if isinstance(rejected, list) else [],
+    )
+
+
 def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
     row = ChangeRequestRepo(conn).get(cr_id)
     if row is None:
         return None
     changes, _ = _load_changes(row["diff_dir"])
+    applied_paths, rejected_paths = _settled_paths(row["diff_dir"])
     return ChangeRequest(
         id=row["id"],
         status=row["status"],
@@ -140,6 +158,8 @@ def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
         changes=changes,
         edited_by_reviewer=_edited_by_reviewer(row["diff_dir"]),
         warnings=_warnings(row["diff_dir"]),
+        applied_paths=applied_paths,
+        rejected_paths=rejected_paths,
     )
 
 
@@ -168,29 +188,52 @@ def apply(
     conn: sqlite3.Connection,
     *,
     git_commit: bool = False,
+    paths_filter: list[str] | None = None,
 ) -> ChangeRequest:
-    """Writes changes to disk, reindexes, records to log, and marks the CR as applied."""
+    """Writes changes to disk, reindexes, records to log, and marks the CR applied.
+
+    Partial-apply semantics (#184): ``paths_filter`` selects which file paths to
+    apply. The CR settles in a SINGLE decision — the selected paths are written
+    and the remaining paths are recorded as rejected (``applied_paths`` /
+    ``rejected_paths`` in ``meta.json``); the CR ends ``applied`` either way. Pass
+    ``None`` (or the full set) for the original "apply everything" behaviour. An
+    empty list is refused (reject the CR instead). A path not in the CR raises.
+    """
     repo = ChangeRequestRepo(conn)
     row = repo.get(cr_id)
     if row is None:
-        raise ValueError(f"Change request not found: {cr_id}")
+        raise CRNotFoundError(f"Change request not found: {cr_id}")
     if row["status"] != "pending_review":
-        raise ValueError(f"CR {cr_id} is already '{row['status']}'.")
+        raise CRStatusError(f"CR {cr_id} is already '{row['status']}'.")
 
     changes, source_path = _load_changes(row["diff_dir"])
+    all_paths = [c.path for c in changes]
 
-    # Defence in depth: re-validate every path against the write allow-list
-    # before touching the disk, so a malformed/malicious CR cannot escape the
-    # wiki/ sandbox even if it slipped past the backend. Atomic: validate all
-    # before writing any.
+    if paths_filter is None:
+        selected = list(all_paths)
+    else:
+        norm = [p.lstrip("/") for p in paths_filter]
+        if not norm:
+            raise CREmptyError(f"no paths selected for {cr_id}; reject it instead.")
+        unknown = [p for p in norm if p not in all_paths]
+        if unknown:
+            raise CRPathNotFoundError(f"paths not in {cr_id}: {', '.join(unknown)}")
+        selected = norm
+
+    applied = [c for c in changes if c.path in set(selected)]
+    rejected_paths = [p for p in all_paths if p not in set(selected)]
+
+    # Defence in depth: re-validate every APPLIED path against the write
+    # allow-list before touching the disk, so a malformed/malicious CR cannot
+    # escape the wiki/ sandbox. Atomic: validate all before writing any.
     from ..llm_agents.backend import validate_change_path
 
-    for change in changes:
+    for change in applied:
         err = validate_change_path(change.path)
         if err is not None:
-            raise ValueError(f"CR {cr_id}: refusing to apply '{change.path}': {err}")
+            raise CRInvalidPathError(f"CR {cr_id}: refusing to apply '{change.path}': {err}")
 
-    for change in changes:
+    for change in applied:
         target = paths.root / change.path
         if change.operation == "delete":
             target.unlink(missing_ok=True)
@@ -200,11 +243,12 @@ def apply(
 
     index_service.reindex(paths, conn)
     index_service.rebuild_index_md(paths, conn)
-    _append_log(paths, cr_id, changes)
+    _append_log(paths, cr_id, applied)
 
     if source_path:
         SourceRepo(conn).mark_processed(source_path)
 
+    _record_settlement(row["diff_dir"], [c.path for c in applied], rejected_paths)
     repo.set_status(cr_id, "applied", applied=True)
 
     if git_commit:
@@ -213,6 +257,20 @@ def apply(
     cr = get(cr_id, conn)
     assert cr is not None
     return cr
+
+
+def _record_settlement(
+    diff_dir: str, applied_paths: list[str], rejected_paths: list[str]
+) -> None:
+    """Persist the per-file apply/reject decision into the CR meta (#184)."""
+    meta_file = Path(diff_dir) / "meta.json"
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    meta["applied_paths"] = applied_paths
+    meta["rejected_paths"] = rejected_paths
+    meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _confidence_of(content: str) -> str | None:

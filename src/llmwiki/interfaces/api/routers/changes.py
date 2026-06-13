@@ -72,19 +72,36 @@ def update_cr_file(
 
 
 @router.post("/{cr_id}/apply")
-def apply_cr(cr_id: str, commit: bool = Body(False, embed=True)) -> dict[str, Any]:
-    """Apply a change request to the wiki."""
-    from ....services import change_request_service
+def apply_cr(
+    cr_id: str,
+    commit: bool = Body(False, embed=True),
+    selected: list[str] | None = Body(None, embed=True, alias="paths"),  # noqa: B008
+) -> dict[str, Any]:
+    """Apply a change request to the wiki, optionally only ``paths`` (#184).
+
+    With a ``paths`` subset, those files are applied and the rest rejected (the
+    CR settles in one decision). Omitting ``paths`` applies everything.
+    """
+    from ....services import change_request_service as crs
 
     paths = _ctx()
     conn = open_conn(paths)
     try:
-        cr = change_request_service.apply(cr_id, paths, conn, git_commit=commit)
-    except ValueError as exc:
+        cr = crs.apply(cr_id, paths, conn, git_commit=commit, paths_filter=selected)
+    except crs.CRNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except crs.CRStatusError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:  # path-not-in-CR, empty selection, invalid path
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         conn.close()
-    return {"id": cr.id, "status": cr.status}
+    return {
+        "id": cr.id,
+        "status": cr.status,
+        "applied_paths": cr.applied_paths,
+        "rejected_paths": cr.rejected_paths,
+    }
 
 
 @router.post("/{cr_id}/reject")

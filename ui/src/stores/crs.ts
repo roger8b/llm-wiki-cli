@@ -22,7 +22,8 @@ interface CrState {
   selectFile: (idx: number) => void
   setTab: (tab: DiffTab) => void
   setEditing: (editing: boolean) => void
-  apply: (id: string) => Promise<void>
+  /** Apply a CR. With `paths`, only those files apply and the rest are rejected (#184). */
+  apply: (id: string, paths?: string[]) => Promise<void>
   reject: (id: string) => Promise<void>
   /** Edit one file's proposed content before apply (#183). */
   updateFile: (id: string, path: string, newContent: string) => Promise<void>
@@ -85,11 +86,11 @@ export const useCrStore = create<CrState>((set, get) => ({
     }
   },
 
-  apply: async (id) => {
+  apply: async (id, paths) => {
     if (get().busyId) return // already applying/rejecting something
     set({ busyId: id })
     try {
-      await api.applyChangeRequest(id)
+      await api.applyChangeRequest(id, false, paths)
       settleCr(set, get, id, "applied")
     } finally {
       set({ busyId: null })
