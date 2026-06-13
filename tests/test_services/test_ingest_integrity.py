@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -154,6 +155,66 @@ class TestCrossCheck:
         finally:
             conn.close()
         assert "did not declare" in caplog.text
+
+
+class TestEmptyCrNote:
+    """The empty-CR outcome explains itself in the job result (not silent)."""
+
+    def _job_result(self, brain: BrainPaths, jid: int) -> dict:
+        from llmwiki.db.repo import JobRepo
+
+        conn = get_connection(brain.db_path)
+        try:
+            return json.loads(JobRepo(conn).get(jid)["result"])
+        finally:
+            conn.close()
+
+    def test_phantom_note(self, brain: BrainPaths) -> None:
+        from llmwiki.db.repo import JobRepo
+
+        def liar(cfg, backend, *, source_path, source_text, source_meta=None):
+            return IngestionResult(summary="x", new_pages=["wiki/concepts/ghost.md"])
+
+        src = _make_source(brain)
+        conn = get_connection(brain.db_path)
+        try:
+            jid = JobRepo(conn).create("ingest", status="running")
+            ingest_service.ingest(src, brain, conn, _cfg(brain), runner=liar, job_id=jid)
+        finally:
+            conn.close()
+        note = self._job_result(brain, jid)["note"]
+        assert "ghost.md" in note and "wrote none" in note
+
+    def test_fallback_note(self, brain: BrainPaths) -> None:
+        from llmwiki.db.repo import JobRepo
+        from llmwiki.llm_agents.telemetry import ExecutionMeta
+
+        def mute(cfg, backend, *, source_path, source_text, source_meta=None):
+            backend.execution_meta = ExecutionMeta(model="m", used_fallback=True)
+            return IngestionResult(summary="")
+
+        src = _make_source(brain)
+        conn = get_connection(brain.db_path)
+        try:
+            jid = JobRepo(conn).create("ingest", status="running")
+            ingest_service.ingest(src, brain, conn, _cfg(brain), runner=mute, job_id=jid)
+        finally:
+            conn.close()
+        assert "tool-calling" in self._job_result(brain, jid)["note"]
+
+    def test_no_note_when_changes(self, brain: BrainPaths) -> None:
+        from llmwiki.db.repo import JobRepo
+
+        src = _make_source(brain)
+        conn = get_connection(brain.db_path)
+        try:
+            jid = JobRepo(conn).create("ingest", status="running")
+            ingest_service.ingest(
+                src, brain, conn, _cfg(brain), runner=_runner_writes_rag, job_id=jid
+            )
+        finally:
+            conn.close()
+        assert "note" not in self._job_result(brain, jid)
 
 
 class TestCancellation:

@@ -88,10 +88,15 @@ function resultSummary(job: Job) {
   if (r.cancelled) return <span className="text-muted-foreground">Cancelled</span>
   if (job.type === "ingest") {
     const cr = r.cr as string | null
-    return cr ? (
+    return cr && Number(r.files ?? 0) > 0 ? (
       <span>CR <strong className="font-mono">{cr}</strong> · {String(r.files ?? 0)} files</span>
     ) : (
-      <span className="text-muted-foreground">No changes proposed</span>
+      <span
+        className="text-muted-foreground"
+        title={typeof r.note === "string" ? r.note : undefined}
+      >
+        {typeof r.note === "string" ? r.note : "No changes proposed"}
+      </span>
     )
   }
   if (job.type === "ask")
@@ -118,7 +123,8 @@ function outcomeText(job: Job): string {
   if (job.status === "cancelled" || r?.cancelled) return "Cancelled"
   if (job.type === "ingest") {
     const cr = r?.cr as string | null
-    return cr ? `CR ${cr} · ${String(r?.files ?? 0)} files` : "No changes proposed"
+    if (cr && Number(r?.files ?? 0) > 0) return `CR ${cr} · ${String(r?.files ?? 0)} files`
+    return typeof r?.note === "string" ? r.note : "No changes proposed"
   }
   if (job.type === "ask") return `Answered${r?.change_request_id ? ` · CR ${r.change_request_id}` : ""}`
   if (job.type === "maintain")

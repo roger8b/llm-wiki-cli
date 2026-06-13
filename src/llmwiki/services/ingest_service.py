@@ -86,6 +86,29 @@ def _audit_result(
         )
 
 
+def _empty_cr_note(result: IngestionResult, meta: ExecutionMeta | None) -> str:
+    """Human-readable reason an ingestion produced no change request (#237 follow-up).
+
+    The agent ran without error but staged nothing. Surface WHY in the job result
+    so the UI stops showing a bare, silent "no changes proposed".
+    """
+    declared = {p.lstrip("/") for p in (*result.new_pages, *result.affected_pages)}
+    if declared:
+        return (
+            f"The agent listed pages ({', '.join(sorted(declared))}) but wrote none — "
+            "the model likely did not call the write tools (write_file/edit_file)."
+        )
+    if meta is not None and meta.used_fallback:
+        return (
+            "The model returned no structured output and called no write tools — its "
+            "tool-calling may be too weak for ingestion; try a stronger model."
+        )
+    return (
+        "The agent found nothing to record (source empty/too short, a duplicate, or "
+        "already covered by the wiki)."
+    )
+
+
 def _make_dedup_check(
     paths: BrainPaths,
 ) -> Callable[[str], list[tuple[str, str, str]]]:
@@ -418,12 +441,15 @@ def ingest(
             execution=execution,
             warnings=warnings,
         )
-        job_repo.complete(
-            job_id,
-            result=json.dumps(
-                {"cr": cr.id, "files": cr.files_changed, "execution": execution}
-            ),
-        )
+        result_payload: dict[str, object] = {
+            "cr": cr.id,
+            "files": cr.files_changed,
+            "execution": execution,
+        }
+        if not changes:
+            # Explain the empty CR so the "no changes" outcome isn't silent.
+            result_payload["note"] = _empty_cr_note(result, meta)
+        job_repo.complete(job_id, result=json.dumps(result_payload))
         return cr
     except JobCancelledError as exc:
         job_repo.cancel(job_id, result=json.dumps({"cancelled": True, "reason": str(exc)}))
