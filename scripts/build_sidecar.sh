@@ -37,14 +37,22 @@ if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
 fi
 
 # --- ensure runtime extras --------------------------------------------
-# PyInstaller only bundles what it can import. The source-format extractors
-# import their backends lazily inside functions, so the deps must be installed
-# in this build env or the frozen sidecar ships without them and fails at
-# runtime with "install the [pdf] extra" — useless advice for a frozen binary.
-# Audio (faster-whisper) is intentionally excluded: it drags in ctranslate2 /
-# onnxruntime and bloats the bundle; add `audio` here if the app needs it.
-echo "==> Installing project + source extras (pdf/html)"
-"$PY" -m pip install --quiet -e "$ROOT[pdf,html]"
+# PyInstaller only bundles what it can import, and the extractors/providers
+# import their backends lazily inside functions — so EVERY optional dep must be
+# installed in this build env or the frozen sidecar ships without it and fails
+# at runtime with "install the [x] extra" (useless advice for a frozen binary).
+# This installs the full feature set so the sidecar contemplates all of the app:
+#   agent/ollama/anthropic/openai/google → all LLM + embedding providers
+#   api/mcp                              → server + MCP interfaces
+#   pdf/html                             → document extractors
+#   semantic                             → sqlite-vec vector search (#169)
+#   audio                                → faster-whisper transcription (#76)
+# NOTE: `audio` drags in ctranslate2/onnxruntime/av and adds ~hundreds of MB to
+# the bundle. Drop it from the list (and the audio --collect-all flags below) if
+# transcription isn't needed and bundle size matters.
+EXTRAS="agent,ollama,anthropic,openai,google,api,mcp,pdf,html,semantic,audio"
+echo "==> Installing project + all feature extras ($EXTRAS)"
+"$PY" -m pip install --quiet -e "$ROOT[$EXTRAS]"
 
 # --- build --------------------------------------------------------------
 WORK="$ROOT/.build-sidecar"
@@ -66,12 +74,22 @@ echo "==> Running PyInstaller (this can take a few minutes)"
   --collect-all langchain \
   --collect-all langchain_core \
   --collect-all langchain_ollama \
+  --collect-all langchain_anthropic \
+  --collect-all langchain_openai \
+  --collect-all langchain_google_genai \
   --collect-all langgraph \
   --collect-all deepagents \
   --collect-submodules llmwiki \
   --collect-data llmwiki \
   --collect-all pypdf \
   --collect-all trafilatura \
+  --collect-all sqlite_vec \
+  --collect-all faster_whisper \
+  --collect-all ctranslate2 \
+  --collect-all onnxruntime \
+  --collect-all av \
+  --collect-all tokenizers \
+  --collect-all huggingface_hub \
   --hidden-import uvicorn.logging \
   --hidden-import uvicorn.loops.auto \
   --hidden-import uvicorn.protocols.http.auto \
