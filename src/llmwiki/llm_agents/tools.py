@@ -7,10 +7,12 @@ from collections.abc import Callable
 from pathlib import PurePosixPath
 
 from ..core import frontmatter, markdown
+from ..core.config import WorkspaceConfig
 from ..core.models import PageType
 from ..core.paths import BrainPaths
 from ..db.connection import get_connection
-from ..db.repo import LinkRepo, PageFtsRepo, PageRepo
+from ..db.repo import LinkRepo, PageRepo
+from ..search.service import SearchHit, hybrid_search
 
 
 def wiki_stats(paths: BrainPaths) -> str:
@@ -40,23 +42,42 @@ def wiki_stats(paths: BrainPaths) -> str:
 _SEARCH_LIMIT = 10
 
 
-def make_search_pages(paths: BrainPaths) -> Callable[[str], str]:
+def _hybrid_hits(
+    conn: object, cfg: WorkspaceConfig, query: str, limit: int
+) -> list[SearchHit]:
+    """Run hybrid (keyword + semantic) search, or pure keyword when semantic off.
+
+    The semantic backend is built lazily from ``cfg``; when no embedding model is
+    configured (or sqlite-vec is unavailable) ``build_semantic_backend`` returns
+    ``(None, None)`` and the result is identical to the old FTS-only search (#170).
+    """
+    import sqlite3
+
+    from ..search.factory import build_semantic_backend
+
+    assert isinstance(conn, sqlite3.Connection)
+    embedder, store = build_semantic_backend(cfg, conn)
+    return hybrid_search(conn, query, limit=limit, embedder=embedder, store=store)
+
+
+def make_search_pages(paths: BrainPaths, cfg: WorkspaceConfig) -> Callable[[str], str]:
     def search_pages(query: str) -> str:
-        """Busca páginas da wiki por palavra-chave. Retorna, por resultado,
-        'path — título' e, na linha seguinte, um trecho com o termo destacado
-        entre « », para escolher a página sem abri-la."""
+        """Busca páginas da wiki por SIGNIFICADO e por palavra-chave (busca
+        híbrida): encontra a página certa mesmo sem o termo exato — busque pelo
+        CONCEITO. Cada resultado traz 'path — título [origem:score]' e, na linha
+        seguinte, um trecho « » para escolher a página sem abri-la."""
         conn = get_connection(paths.db_path)
         try:
-            results = PageFtsRepo(conn).search_snippets(query, limit=_SEARCH_LIMIT)
+            hits = _hybrid_hits(conn, cfg, query, _SEARCH_LIMIT)
         finally:
             conn.close()
-        if not results:
+        if not hits:
             return "Nenhuma página encontrada."
         lines: list[str] = []
-        for path, title, _rank, snippet in results:
-            lines.append(f"{path} — {title}")
-            if snippet:
-                lines.append(f"    «{snippet}»")
+        for hit in hits:
+            lines.append(f"{hit.path} — {hit.title} [{hit.source}:{hit.score:.3f}]")
+            if hit.snippet:
+                lines.append(f"    «{hit.snippet}»")
         return "\n".join(lines)
 
     return search_pages
@@ -112,14 +133,12 @@ def make_read_metadata(paths: BrainPaths) -> Callable[[str], str]:
     return read_metadata
 
 
-def make_related_pages(paths: BrainPaths) -> Callable[[str], str]:
+def make_related_pages(paths: BrainPaths, cfg: WorkspaceConfig) -> Callable[[str], str]:
     def related_pages(title: str) -> str:
         """Para um TÍTULO proposto, lista páginas existentes relacionadas (por
-        busca textual e por tokens do slug em comum), com tipo e um link em
-        comum quando houver. Chame ANTES de criar uma página para decidir entre
-        editar uma existente ou linkar a vizinhança."""
-        # TODO(#170): usar search.service.hybrid_search quando a camada
-        # semântica existir — hoje é FTS + sobreposição de tokens de slug.
+        busca híbrida — significado + texto — e por tokens do slug em comum), com
+        tipo e um link em comum quando houver. Chame ANTES de criar uma página
+        para decidir entre editar uma existente ou linkar a vizinhança."""
         title = title.strip()
         if not title:
             return "Informe um título."
@@ -129,10 +148,10 @@ def make_related_pages(paths: BrainPaths) -> Callable[[str], str]:
         try:
             pages = {p.path: p for p in PageRepo(conn).list()}
             candidates: set[str] = set()
-            # (a) full-text search by the proposed title.
-            for path, _t, _r in PageFtsRepo(conn).search(title, limit=8):
-                if path in pages:
-                    candidates.add(path)
+            # (a) hybrid (semantic + keyword) search by the proposed title.
+            for hit in _hybrid_hits(conn, cfg, title, 8):
+                if hit.path in pages:
+                    candidates.add(hit.path)
             # (b) pages whose slug (title or filename) shares a token with the title.
             for p in pages.values():
                 page_tokens = set(markdown.slugify(p.title).split("-")) | set(
@@ -165,12 +184,16 @@ def make_related_pages(paths: BrainPaths) -> Callable[[str], str]:
     return related_pages
 
 
-def domain_tools(paths: BrainPaths) -> list[Callable[[str], str]]:
-    """All read-only domain tools exposed to the agents."""
+def domain_tools(paths: BrainPaths, cfg: WorkspaceConfig) -> list[Callable[[str], str]]:
+    """All read-only domain tools exposed to the agents.
+
+    ``cfg`` lets search-backed tools enable the semantic layer when an embedding
+    model is configured (#170); otherwise they behave as pure FTS.
+    """
     return [
-        make_search_pages(paths),
+        make_search_pages(paths, cfg),
         make_search_by_type(paths),
         make_get_backlinks(paths),
         make_read_metadata(paths),
-        make_related_pages(paths),
+        make_related_pages(paths, cfg),
     ]

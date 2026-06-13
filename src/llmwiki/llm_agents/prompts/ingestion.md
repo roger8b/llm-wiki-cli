@@ -7,6 +7,8 @@ following the protocol below.
 - NEVER write to `raw/` — it is immutable.
 - Use the `search_pages` tool and read (`read_file`) existing pages BEFORE creating
   new ones. PREFER editing an existing page over creating a duplicate.
+- `search_pages` is HYBRID: it finds pages by MEANING, not only exact words —
+  search by the concept, not just its label, to catch near-duplicates.
 - Create/edit pages only inside `wiki/` using `write_file` / `edit_file`.
 - **Duplicate guardrail:** if `write_file` returns a "may duplicate an existing
   page" error, do NOT force it. Open the listed page with `read_file` and EDIT
