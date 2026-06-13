@@ -34,23 +34,41 @@ def _resolve_wikilink(target: str, known_titles: dict[str, str]) -> str | None:
     return known_titles.get(markdown.slugify(target))
 
 
-def lint_structural(
-    paths: BrainPaths, conn: sqlite3.Connection | None = None
-) -> list[LintFinding]:
-    files = _iter_wiki_files(paths.wiki)
-    findings: list[LintFinding] = []
+def titles_from_contents(files: dict[str, str]) -> dict[str, str]:
+    """Build slug(title)->path and slug(stem)->path from in-memory contents.
 
-    # Maps slug(title)->path and slug(filename)->path to resolve links.
+    Used to resolve wikilinks both on disk and against a change-request staging
+    area, so a link to a sibling page created in the same run still resolves.
+    """
     title_to_path: dict[str, str] = {}
-    bodies: dict[str, str] = {}
-    incoming: dict[str, int] = {}
-
-    for file in files:
-        rel = paths.relative(file)
-        incoming.setdefault(rel, 0)
-        text = file.read_text(encoding="utf-8")
+    for rel, text in files.items():
         try:
             meta, body = frontmatter.parse(text)
+        except InvalidFrontmatterError:
+            meta, body = {}, text
+        stem = Path(rel).stem
+        title = (meta.get("title") if meta else None) or markdown.extract_title(body) or stem
+        title_to_path[markdown.slugify(str(title))] = rel
+        title_to_path[markdown.slugify(stem)] = rel
+    return title_to_path
+
+
+def lint_contents(
+    files: dict[str, str], *, known_titles: dict[str, str]
+) -> list[LintFinding]:
+    """Validate page contents in memory (frontmatter, type, wikilinks).
+
+    Shared by ``lint_structural`` (disk) and the ingestion self-correction loop
+    (#166), which lints the backend's staging before creating a change request.
+    Orphan detection is intentionally NOT here: a brand-new staged page may be
+    linked only after the run, so it is not an orphan yet. ``known_titles`` maps
+    ``slug -> path`` for link resolution (disk + staging for the staging case).
+    """
+    findings: list[LintFinding] = []
+    for rel in sorted(files):
+        text = files[rel]
+        try:
+            meta, _ = frontmatter.parse(text)
         except InvalidFrontmatterError as exc:
             findings.append(
                 LintFinding(
@@ -83,16 +101,8 @@ def lint_structural(
                 )
             )
 
-        title = meta.get("title") or markdown.extract_title(body) or file.stem
-        title_to_path[markdown.slugify(str(title))] = rel
-        title_to_path[markdown.slugify(file.stem)] = rel
-        bodies[rel] = text
-
-    # Links: broken links + incoming count.
-    for rel, text in bodies.items():
         for target in markdown.extract_wikilinks(text):
-            dest = _resolve_wikilink(target, title_to_path)
-            if dest is None:
+            if _resolve_wikilink(target, known_titles) is None:
                 findings.append(
                     LintFinding(
                         kind="broken_link",
@@ -101,10 +111,29 @@ def lint_structural(
                         pages=[rel],
                     )
                 )
-            elif dest != rel:
-                incoming[dest] = incoming.get(dest, 0) + 1
+    return findings
 
-    # Orphans: no incoming links.
+
+def lint_structural(
+    paths: BrainPaths, conn: sqlite3.Connection | None = None
+) -> list[LintFinding]:
+    files = {paths.relative(f): f.read_text(encoding="utf-8") for f in _iter_wiki_files(paths.wiki)}
+    known_titles = titles_from_contents(files)
+
+    findings = lint_contents(files, known_titles=known_titles)
+
+    # Orphans (disk-only): a page with no incoming resolved links. Only pages
+    # with parseable frontmatter act as link sources (mirrors the legacy pass).
+    incoming: dict[str, int] = {rel: 0 for rel in files}
+    for rel, text in files.items():
+        try:
+            frontmatter.parse(text)
+        except InvalidFrontmatterError:
+            continue
+        for target in markdown.extract_wikilinks(text):
+            dest = _resolve_wikilink(target, known_titles)
+            if dest is not None and dest != rel:
+                incoming[dest] = incoming.get(dest, 0) + 1
     for rel, count in sorted(incoming.items()):
         if count == 0:
             findings.append(

@@ -351,6 +351,18 @@ def _ingestion_message(
     )
 
 
+def _fix_message(findings: list[str]) -> str:
+    """Correction prompt for the self-correction loop (#166)."""
+    listed = "\n".join(f"- {f}" for f in findings)
+    return (
+        "As páginas que você escreveu têm problemas estruturais:\n"
+        f"{listed}\n\n"
+        "Corrija-as usando edit_file/write_file no MESMO path. "
+        "NÃO crie páginas novas e não mude nenhuma página correta. "
+        "Retorne o resultado estruturado ao terminar."
+    )
+
+
 def run_ingestion(
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend,
@@ -360,6 +372,7 @@ def run_ingestion(
     source_meta: dict[str, str | None] | None = None,
     outline: OutlinePlan | None = None,
     part: tuple[int, int] | None = None,
+    fix_findings: list[str] | None = None,
 ) -> IngestionResult:
     from deepagents import create_deep_agent
 
@@ -371,14 +384,17 @@ def run_ingestion(
         middleware=_agent_middleware(backend),
         response_format=_response_format(IngestionResult),
     )
-    message = _ingestion_message(
-        cfg,
-        source_path=source_path,
-        source_text=source_text,
-        source_meta=source_meta,
-        outline=outline,
-        part=part,
-    )
+    if fix_findings:
+        message = _fix_message(fix_findings)
+    else:
+        message = _ingestion_message(
+            cfg,
+            source_path=source_path,
+            source_text=source_text,
+            source_meta=source_meta,
+            outline=outline,
+            part=part,
+        )
     return _invoke(agent, message, IngestionResult, cfg, backend)
 
 

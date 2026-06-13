@@ -51,11 +51,14 @@ def create_from_changes(
     job_id: int | None = None,
     source_path: str | None = None,
     execution: dict[str, object] | None = None,
+    warnings: list[str] | None = None,
 ) -> ChangeRequest:
     """Creates a CR from captured changes. Initial status: pending_review.
 
     ``execution`` carries optional agent telemetry (model, tokens, latency,
     tool calls, fallback) persisted into ``meta.json`` for later auditing.
+    ``warnings`` carries structural lint findings the agent could not auto-fix
+    before the CR (#166), shown to the reviewer.
     """
     repo = ChangeRequestRepo(conn)
     cr_id = repo.next_id()
@@ -73,6 +76,7 @@ def create_from_changes(
         "source_path": source_path,
         "created_at": created,
         "execution": execution,
+        "warnings": warnings or [],
         "changes": [c.model_dump() for c in changes],
     }
     (diff_dir / "meta.json").write_text(
@@ -87,6 +91,7 @@ def create_from_changes(
         diff_dir=str(diff_dir),
         created_at=datetime.fromisoformat(created),
         changes=changes,
+        warnings=warnings or [],
     )
 
 
@@ -107,6 +112,18 @@ def _edited_by_reviewer(diff_dir: str) -> bool:
     return bool(meta.get("edited_by_reviewer", False))
 
 
+def _warnings(diff_dir: str) -> list[str]:
+    meta_file = Path(diff_dir) / "meta.json"
+    if not meta_file.is_file():
+        return []
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    value = meta.get("warnings")
+    return [str(w) for w in value] if isinstance(value, list) else []
+
+
 def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
     row = ChangeRequestRepo(conn).get(cr_id)
     if row is None:
@@ -122,6 +139,7 @@ def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
         applied_at=datetime.fromisoformat(row["applied_at"]) if row["applied_at"] else None,
         changes=changes,
         edited_by_reviewer=_edited_by_reviewer(row["diff_dir"]),
+        warnings=_warnings(row["diff_dir"]),
     )
 
 
