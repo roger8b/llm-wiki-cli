@@ -58,6 +58,15 @@ export function CommandPalette() {
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
 
+        <CommandGroup heading="Actions">
+          <CommandItem
+            value="New wiki page create"
+            onSelect={() => go("/wiki?new=1")}
+          >
+            New wiki page
+          </CommandItem>
+        </CommandGroup>
+
         {pages.length > 0 && (
           <CommandGroup heading="Pages">
             {pages.map((p) => (

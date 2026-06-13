@@ -176,11 +176,17 @@ export const api = {
     path: string,
     frontmatter: Record<string, unknown>,
     body: string,
+    expectNew = false,
   ) =>
     request<{ change_request_id: string; files_changed: number }>(
       `/wiki/pages/${path}/propose-edit`,
-      { method: "POST", body: JSON.stringify({ frontmatter, body }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ frontmatter, body, expect_new: expectNew }),
+      },
     ),
+  listTemplates: () =>
+    request<{ type: string; body: string }[]>("/wiki/templates"),
 
   // ── query ──
   ask: (question: string, saveAsPage = false) =>

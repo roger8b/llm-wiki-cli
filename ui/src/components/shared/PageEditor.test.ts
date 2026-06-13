@@ -38,6 +38,7 @@ describe("api.proposeEdit (#186)", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       frontmatter: { title: "RAG", type: "concept" },
       body: "# RAG\nbody\n",
+      expect_new: false,
     })
   })
 })
