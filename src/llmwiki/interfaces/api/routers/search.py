@@ -19,20 +19,33 @@ def _ctx() -> Any:
 
 
 @router.get("")
-def search(q: str = Query(...)) -> list[dict[str, Any]]:
-    """Full-text search across wiki pages."""
-    from ....db.repo import PageFtsRepo
+def search(q: str = Query(...), limit: int = Query(20)) -> list[dict[str, Any]]:
+    """Hybrid (keyword + semantic) content search across wiki pages (#188).
+
+    Uses ``hybrid_search``: keyword snippets (#171) plus semantic results when an
+    embedding model is configured (#169) — transparent to the caller. Each hit:
+    ``{path, title, score, source, snippet}``.
+    """
+    from ....core.config import load_config
+    from ....search.factory import build_semantic_backend
+    from ....search.service import hybrid_search
 
     paths = _ctx()
     conn = open_conn(paths)
     try:
-        results = PageFtsRepo(conn).search_snippets(q)
+        embedder, store = build_semantic_backend(load_config(paths), conn)
+        hits = hybrid_search(conn, q, limit=limit, embedder=embedder, store=store)
     finally:
         conn.close()
-    # ``snippet`` is additive — existing clients that read path/title/rank are
-    # unaffected (#171).
     return [
-        {"path": p, "title": t, "rank": r, "snippet": s} for p, t, r, s in results
+        {
+            "path": h.path,
+            "title": h.title,
+            "score": h.score,
+            "source": h.source,
+            "snippet": h.snippet,
+        }
+        for h in hits
     ]
 
 

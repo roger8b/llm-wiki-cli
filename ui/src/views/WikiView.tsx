@@ -137,11 +137,17 @@ export function WikiView() {
       .listPages()
       .then((p) => {
         setPages(p)
-        // honor ?q=Title from Ask wikilinks, else open first page
+        // ?path= (exact, from global search #188) wins over ?q=Title (wikilinks).
+        const exact = params.get("path")
         const q = params.get("q")?.toLowerCase()
-        const match = q ? p.find((x) => x.title.toLowerCase() === q) : undefined
-        const target = match ?? p[0]
-        if (target) openPath(target.path)
+        const match = exact
+          ? p.find((x) => x.path === exact)
+          : q
+            ? p.find((x) => x.title.toLowerCase() === q)
+            : undefined
+        const target = match ?? (exact ? undefined : p[0])
+        if (exact && match) openPath(exact)
+        else if (target) openPath(target.path)
       })
       .catch((e) => toast.error((e as Error).message))
     // ⌘K "New wiki page" routes here with ?new=1 (#187).

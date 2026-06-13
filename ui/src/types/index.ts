@@ -178,7 +178,9 @@ export interface Graph {
 export interface SearchResult {
   path: string
   title: string
-  rank: number
+  score: number
+  source: "keyword" | "semantic"
+  snippet?: string | null
 }
 
 export interface OllamaStatus {

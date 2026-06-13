@@ -56,9 +56,8 @@ class TestReadEndpoints:
         assert r.status_code == 200
         first = r.json()[0]
         assert first["path"].endswith("rag.md")
-        # snippet is an additive field (#171); the legacy keys still present.
-        assert {"path", "title", "rank"} <= first.keys()
-        assert "snippet" in first
+        # hybrid payload (#188): path/title/score/source/snippet.
+        assert {"path", "title", "score", "source", "snippet"} <= first.keys()
 
     def test_lint_structural(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)
