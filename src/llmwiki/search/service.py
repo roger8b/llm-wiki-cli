@@ -20,6 +20,7 @@ class SearchHit:
     title: str
     score: float
     source: str  # "keyword" | "semantic"
+    snippet: str | None = None  # FTS5 highlight excerpt (#171); None if unavailable
 
 
 @runtime_checkable
@@ -34,8 +35,8 @@ class VectorStore(Protocol):
 
 def keyword_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[SearchHit]:
     return [
-        SearchHit(path=p, title=t, score=-rank, source="keyword")
-        for p, t, rank in PageFtsRepo(conn).search(query, limit)
+        SearchHit(path=p, title=t, score=-rank, source="keyword", snippet=snippet)
+        for p, t, rank, snippet in PageFtsRepo(conn).search_snippets(query, limit)
     ]
 
 

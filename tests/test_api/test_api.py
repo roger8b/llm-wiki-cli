@@ -54,7 +54,11 @@ class TestReadEndpoints:
         client.get("/api/graph")  # reindexa (popula FTS)
         r = client.get("/api/search", params={"q": "retrieval"})
         assert r.status_code == 200
-        assert r.json()[0]["path"].endswith("rag.md")
+        first = r.json()[0]
+        assert first["path"].endswith("rag.md")
+        # snippet is an additive field (#171); the legacy keys still present.
+        assert {"path", "title", "rank"} <= first.keys()
+        assert "snippet" in first
 
     def test_lint_structural(self, client, brain: BrainPaths) -> None:
         _seed_page(brain)

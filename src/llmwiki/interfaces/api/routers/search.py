@@ -26,10 +26,14 @@ def search(q: str = Query(...)) -> list[dict[str, Any]]:
     paths = _ctx()
     conn = open_conn(paths)
     try:
-        results = PageFtsRepo(conn).search(q)
+        results = PageFtsRepo(conn).search_snippets(q)
     finally:
         conn.close()
-    return [{"path": p, "title": t, "rank": r} for p, t, r in results]
+    # ``snippet`` is additive — existing clients that read path/title/rank are
+    # unaffected (#171).
+    return [
+        {"path": p, "title": t, "rank": r, "snippet": s} for p, t, r, s in results
+    ]
 
 
 @router.get("/graph")

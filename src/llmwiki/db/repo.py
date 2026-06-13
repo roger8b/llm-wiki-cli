@@ -195,33 +195,52 @@ class PageFtsRepo:
         # so we use explicit OR for broader recall.
         return " OR ".join(tokens)
 
-    def search(self, query: str, limit: int = 20) -> list[tuple[str, str, float]]:
-        """Return (path, title, rank) sorted by relevance (bm25, lower = better)."""
+    # FTS5 snippet over the body column (index 2): 12-token window, «» highlight.
+    _SNIPPET_EXPR = "snippet(pages_fts, 2, '«', '»', '…', 12)"
+
+    @staticmethod
+    def _one_line(text: str | None) -> str | None:
+        """Collapse a raw-markdown snippet to a single whitespace-normalised line."""
+        if not text:
+            return None
+        collapsed = " ".join(text.split())
+        return collapsed or None
+
+    def _run_search(
+        self, query: str, limit: int, *, with_snippet: bool
+    ) -> list[sqlite3.Row]:
+        cols = "path, title, bm25(pages_fts) AS rank"
+        if with_snippet:
+            cols += f", {self._SNIPPET_EXPR} AS snippet"
+        sql = (
+            f"SELECT {cols} FROM pages_fts "
+            "WHERE pages_fts MATCH ? ORDER BY rank LIMIT ?"
+        )
         safe_query = self._sanitize_fts_query(query)
         try:
-            rows = self.conn.execute(
-                """
-                SELECT path, title, bm25(pages_fts) AS rank
-                FROM pages_fts
-                WHERE pages_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (safe_query, limit),
-            ).fetchall()
+            return self.conn.execute(sql, (safe_query, limit)).fetchall()
         except sqlite3.OperationalError:
-            # Last-resort fallback: phrase search on original query
-            rows = self.conn.execute(
-                """
-                SELECT path, title, bm25(pages_fts) AS rank
-                FROM pages_fts
-                WHERE pages_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (f'"{query}"', limit),
-            ).fetchall()
+            # Last-resort fallback: phrase search on the original query.
+            return self.conn.execute(sql, (f'"{query}"', limit)).fetchall()
+
+    def search(self, query: str, limit: int = 20) -> list[tuple[str, str, float]]:
+        """Return (path, title, rank) sorted by relevance (bm25, lower = better)."""
+        rows = self._run_search(query, limit, with_snippet=False)
         return [(r["path"], r["title"], float(r["rank"])) for r in rows]
+
+    def search_snippets(
+        self, query: str, limit: int = 20
+    ) -> list[tuple[str, str, float, str | None]]:
+        """Like :meth:`search` but also returns an FTS5 highlight snippet (#171).
+
+        The snippet is a single line drawn from the page body with the matched
+        terms wrapped in « »; ``None`` when the match is title/tags-only.
+        """
+        rows = self._run_search(query, limit, with_snippet=True)
+        return [
+            (r["path"], r["title"], float(r["rank"]), self._one_line(r["snippet"]))
+            for r in rows
+        ]
 
 
 class JobRepo:
