@@ -378,7 +378,7 @@ def run_ingestion(
 
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=domain_tools(cfg.paths),
+        tools=domain_tools(cfg.paths, cfg),
         system_prompt=_prompt("ingestion.md"),
         backend=backend,
         middleware=_agent_middleware(backend),
@@ -433,7 +433,7 @@ def run_outline(
     backend = ChangeRequestBackend(cfg.brain_root, read_only=True)
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=domain_tools(cfg.paths),
+        tools=domain_tools(cfg.paths, cfg),
         system_prompt=_prompt("outline.md"),
         backend=backend,
         middleware=_agent_middleware(backend),
@@ -456,7 +456,7 @@ def run_query(
 
     kwargs: dict[str, Any] = {
         "model": _build_model(cfg),
-        "tools": domain_tools(cfg.paths),
+        "tools": domain_tools(cfg.paths, cfg),
         "system_prompt": _prompt("query.md"),
         "middleware": _agent_middleware(backend),
         "response_format": _response_format(QueryResult),
@@ -473,7 +473,7 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
 
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=domain_tools(cfg.paths),
+        tools=domain_tools(cfg.paths, cfg),
         system_prompt=_prompt("lint.md"),
         middleware=_agent_middleware(None),
         response_format=_response_format(LintReport),
@@ -491,7 +491,7 @@ def run_maintenance(
 
     agent = create_deep_agent(
         model=_build_model(cfg),
-        tools=domain_tools(cfg.paths),
+        tools=domain_tools(cfg.paths, cfg),
         system_prompt=_prompt("maintenance.md"),
         backend=backend,
         middleware=_agent_middleware(backend),

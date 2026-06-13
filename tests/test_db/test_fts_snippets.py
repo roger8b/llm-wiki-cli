@@ -59,6 +59,7 @@ class TestSearchSnippets:
 
 class TestSearchToolFormat:
     def test_tool_includes_snippet_lines(self, brain) -> None:
+        from llmwiki.core.config import WorkspaceConfig
         from llmwiki.db.repo import PageFtsRepo as Repo
         from llmwiki.llm_agents.tools import make_search_pages
 
@@ -72,12 +73,15 @@ class TestSearchToolFormat:
             )
         finally:
             conn.close()
-        out = make_search_pages(brain)("vector")
+        out = make_search_pages(brain, WorkspaceConfig(brain_root=brain.root))("vector")
         lines = out.splitlines()
-        assert lines[0] == "wiki/concepts/rag.md — RAG"
+        # "path — title [source:score]" then an indented «snippet» (#170/#171).
+        assert lines[0].startswith("wiki/concepts/rag.md — RAG [keyword:")
         assert lines[1].strip().startswith("«") and "«vector»" in lines[1]
 
     def test_tool_no_results(self, brain) -> None:
+        from llmwiki.core.config import WorkspaceConfig
         from llmwiki.llm_agents.tools import make_search_pages
 
-        assert make_search_pages(brain)("nonexistentterm") == "Nenhuma página encontrada."
+        search = make_search_pages(brain, WorkspaceConfig(brain_root=brain.root))
+        assert search("nonexistentterm") == "Nenhuma página encontrada."

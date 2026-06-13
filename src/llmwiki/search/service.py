@@ -65,6 +65,7 @@ def hybrid_search(
     the semantic layer. Without a configured layer, returns keyword results.
     """
     keyword = keyword_search(conn, query, limit)
+    snippets = {hit.path: hit.snippet for hit in keyword if hit.snippet}
 
     semantic: list[tuple[str, str]] = []  # (path, title), already ranked
     if embedder is not None and store is not None:
@@ -91,7 +92,13 @@ def hybrid_search(
         fuse(path, title, rank, "semantic")
 
     hits = [
-        SearchHit(path=path, title=meta[path][0], score=score, source=meta[path][1])
+        SearchHit(
+            path=path,
+            title=meta[path][0],
+            score=score,
+            source=meta[path][1],
+            snippet=snippets.get(path),
+        )
         for path, score in scores.items()
     ]
     return sorted(hits, key=lambda h: h.score, reverse=True)[:limit]

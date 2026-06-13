@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from llmwiki.core.config import WorkspaceConfig
 from llmwiki.core.paths import BrainPaths
 from llmwiki.db.connection import get_connection
 from llmwiki.db.repo import LinkRepo
@@ -15,6 +16,10 @@ from llmwiki.llm_agents.tools import (
     wiki_stats,
 )
 from llmwiki.services import index_service
+
+
+def _cfg(brain: BrainPaths) -> WorkspaceConfig:
+    return WorkspaceConfig(brain_root=brain.root)
 
 
 def _add_page(
@@ -35,13 +40,13 @@ class TestSearchPages:
             index_service.reindex(brain, conn)
         finally:
             conn.close()
-        search = make_search_pages(brain)
+        search = make_search_pages(brain, _cfg(brain))
         out = search("retrieval")
         assert "wiki/concepts/rag.md" in out
         assert "RAG" in out
 
     def test_returns_message_when_empty(self, brain: BrainPaths) -> None:
-        search = make_search_pages(brain)
+        search = make_search_pages(brain, _cfg(brain))
         out = search("nonexistent-term-xyz")
         assert "Nenhuma página encontrada" in out
 
@@ -97,7 +102,7 @@ class TestRelatedPages:
 
     def test_finds_by_title_and_slug_token(self, brain: BrainPaths) -> None:
         self._seed(brain)
-        out = make_related_pages(brain)("RAG")
+        out = make_related_pages(brain, _cfg(brain))("RAG")
         assert "wiki/concepts/rag.md" in out
         assert "RAG Evaluation" in out  # shares the 'rag' slug token
         assert "(concept)" in out
@@ -108,18 +113,18 @@ class TestRelatedPages:
         # "Vector Database" relates to rag (rag links to it) — rag is a candidate
         # via the 'database'/'vector' search; the common-link annotation appears
         # when a candidate links to another candidate.
-        out = make_related_pages(brain)("Vector Database")
+        out = make_related_pages(brain, _cfg(brain))("Vector Database")
         assert "wiki/concepts/vector-database.md" in out
 
     def test_no_match_returns_hint(self, brain: BrainPaths) -> None:
         self._seed(brain)
-        out = make_related_pages(brain)("Quantum Chromodynamics")
+        out = make_related_pages(brain, _cfg(brain))("Quantum Chromodynamics")
         assert "Nenhuma página relacionada" in out
 
 
 class TestDomainToolsRegistry:
     def test_related_pages_registered(self, brain: BrainPaths) -> None:
-        names = {t.__name__ for t in domain_tools(brain)}
+        names = {t.__name__ for t in domain_tools(brain, _cfg(brain))}
         assert "related_pages" in names
         assert "search_pages" in names
 

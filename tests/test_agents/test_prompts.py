@@ -54,6 +54,12 @@ def test_ingestion_mandates_graph_exploration(prompts: dict[str, str]) -> None:
     assert "related_pages" in prompts["ingestion.md"]
 
 
+def test_search_prompts_mention_semantic(prompts: dict[str, str]) -> None:
+    # #170: ingestion and query must tell the agent search matches by meaning.
+    for name in ("ingestion.md", "query.md"):
+        assert "meaning" in prompts[name], f"{name} must mention semantic/meaning search"
+
+
 def test_ingestion_mentions_duplicate_guardrail(prompts: dict[str, str]) -> None:
     # #167: the prompt must teach the read-or-confirm protocol for the dup warning.
     assert "duplicate" in prompts["ingestion.md"]
