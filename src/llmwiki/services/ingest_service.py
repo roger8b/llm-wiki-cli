@@ -116,6 +116,7 @@ def _default_runner(
     source_meta: dict[str, str | None] | None = None,
     outline: OutlinePlan | None = None,
     part: tuple[int, int] | None = None,
+    fix_findings: list[str] | None = None,
 ) -> IngestionResult:
     from ..llm_agents.factory import run_ingestion
 
@@ -127,6 +128,7 @@ def _default_runner(
         source_meta=source_meta,
         outline=outline,
         part=part,
+        fix_findings=fix_findings,
     )
 
 
@@ -162,6 +164,84 @@ def _merge_results(results: list[IngestionResult]) -> IngestionResult:
         new_pages=sorted(dict.fromkeys(new_pages)),
         affected_pages=sorted(dict.fromkeys(affected)),
     )
+
+
+def _lint_staging(paths: BrainPaths, staging: dict[str, str]) -> list[str]:
+    """Structural lint of the backend staging, as ``"kind: message"`` strings (#166).
+
+    ``known_titles`` = titles on disk + titles in staging, so a wikilink to a
+    sibling page created in the same run resolves and is not a broken link.
+    Orphan detection does not apply to staging (a new page may be linked later).
+    """
+    from . import lint_service
+
+    disk_files = {
+        paths.relative(f): f.read_text(encoding="utf-8")
+        for f in lint_service._iter_wiki_files(paths.wiki)
+    }
+    known_titles = {
+        **lint_service.titles_from_contents(disk_files),
+        **lint_service.titles_from_contents(staging),
+    }
+    findings = lint_service.lint_contents(staging, known_titles=known_titles)
+    return [f"{f.kind}: {f.message}" for f in findings]
+
+
+def _self_correct(
+    cfg: WorkspaceConfig,
+    backend: ChangeRequestBackend,
+    *,
+    runner: Runner,
+    source_path: str,
+    source_text: str,
+    source_meta: dict[str, str | None],
+    paths: BrainPaths,
+    job_repo: JobRepo,
+    job_id: int,
+) -> list[str]:
+    """Lint the staging and let the agent fix structural issues before the CR (#166).
+
+    Returns the findings that remain after up to ``cfg.agent_fix_retries`` fix
+    passes (empty when clean). A clean first pass costs zero extra invocations.
+    """
+    findings = _lint_staging(paths, backend.staging)
+    if not findings or cfg.agent_fix_retries <= 0:
+        return findings
+    # Keep the pre-fix telemetry (e.g. the multi-pass aggregate) and fold each
+    # fix pass into it, so the CR's execution totals stay complete.
+    metas: list[ExecutionMeta] = [backend.execution_meta] if backend.execution_meta else []
+    attempt = 0
+    while findings and attempt < cfg.agent_fix_retries:
+        attempt += 1
+        logger.info(
+            "ingest(%s): structural lint found %d issue(s); fix pass %d/%d",
+            source_path,
+            len(findings),
+            attempt,
+            cfg.agent_fix_retries,
+        )
+        job_repo.set_progress(job_id, "fixing_structural_issues")
+        runner(
+            cfg,
+            backend,
+            source_path=source_path,
+            source_text=source_text,
+            source_meta=source_meta,
+            fix_findings=findings,
+        )
+        if backend.execution_meta is not None:
+            metas.append(backend.execution_meta)
+        findings = _lint_staging(paths, backend.staging)
+    backend.execution_meta = ExecutionMeta.merge(metas)
+    if findings:
+        logger.warning(
+            "ingest(%s): %d structural issue(s) unresolved after %d fix pass(es): %s",
+            source_path,
+            len(findings),
+            attempt,
+            findings,
+        )
+    return findings
 
 
 def _run_passes(
@@ -310,6 +390,19 @@ def ingest(
             result = runner(
                 cfg, backend, source_path=rel, source_text=text, source_meta=source_meta
             )
+        # Self-correction: lint the staging and let the agent fix structural
+        # issues before the CR; leftover findings become CR warnings (#166).
+        warnings = _self_correct(
+            cfg,
+            backend,
+            runner=runner,
+            source_path=rel,
+            source_text=text,
+            source_meta=source_meta,
+            paths=paths,
+            job_repo=job_repo,
+            job_id=job_id,
+        )
         job_repo.set_progress(job_id, "creating_change_request")
         changes = backend.collect_changes()
         _audit_result(result, changes, rel)
@@ -323,6 +416,7 @@ def ingest(
             job_id=job_id,
             source_path=rel if rel.startswith("raw/") else None,
             execution=execution,
+            warnings=warnings,
         )
         job_repo.complete(
             job_id,

@@ -92,6 +92,9 @@ class ChangeRequest(BaseModel):
     changes: list[FileChange] = Field(default_factory=list)
     # True once a reviewer manually edited a file's content before apply (#183).
     edited_by_reviewer: bool = False
+    # Structural lint findings the agent could not auto-fix before the CR (#166).
+    # Surfaced to the reviewer (front in #185); empty on clean / legacy CRs.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class LintFinding(BaseModel):

@@ -27,6 +27,7 @@ _CONFIG_KEYS = (
     "temperature",
     "request_timeout",
     "agent_max_retries",
+    "agent_fix_retries",
     "onboarded",
     "providers",
     "whisper_model",
@@ -44,6 +45,8 @@ _DEFAULTS: dict[str, object] = {
     "temperature": None,
     "request_timeout": 300,
     "agent_max_retries": 2,
+    # Self-correction passes for structural lint findings before the CR (#166).
+    "agent_fix_retries": 1,
     "onboarded": False,
     "providers": {},
     "whisper_model": "small",
@@ -73,6 +76,9 @@ class WorkspaceConfig(BaseModel):
     request_timeout: int = 300  # seconds
     # Total agent.invoke attempts on transient errors (1 = no retry).
     agent_max_retries: int = 2
+    # Max self-correction passes when staging has structural lint findings
+    # before the change request is created (#166); 0 disables the loop.
+    agent_fix_retries: int = 1
     # True once the user has completed the first-run onboarding flow.
     onboarded: bool = False
     # Per-provider settings keyed by provider name (openai|anthropic|google).
