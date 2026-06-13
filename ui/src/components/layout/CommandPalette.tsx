@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { FileText, FolderOpen, GitPullRequest, Sparkles } from "lucide-react"
+import { FileText, FolderOpen, GitPullRequest, Sparkles, Search } from "lucide-react"
 import { api } from "@/lib/api"
-import type { PageMeta, Source } from "@/types"
+import type { PageMeta, SearchResult, Source } from "@/types"
 import { useAppStore } from "@/stores/app"
 import { useCrStore } from "@/stores/crs"
 import {
@@ -14,6 +14,19 @@ import {
   CommandList,
 } from "@/components/ui/command"
 
+/** Render an FTS snippet, turning the «…» highlight markers into <mark>. */
+export function renderSnippet(snippet: string): React.ReactNode[] {
+  return snippet.split(/[«»]/).map((part, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="rounded bg-primary/20 px-0.5 text-foreground">
+        {part}
+      </mark>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  )
+}
+
 export function CommandPalette() {
   const navigate = useNavigate()
   const open = useAppStore((s) => s.cmdkOpen)
@@ -22,6 +35,15 @@ export function CommandPalette() {
   const [query, setQuery] = useState("")
   const [pages, setPages] = useState<PageMeta[]>([])
   const [sources, setSources] = useState<Source[]>([])
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const typeByPath = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of pages) m.set(p.path, p.type)
+    return m
+  }, [pages])
 
   // global ⌘K / Ctrl+K
   useEffect(() => {
@@ -42,11 +64,51 @@ export function CommandPalette() {
     api.listSources().then(setSources).catch(() => {})
   }, [open, pages.length])
 
+  // Debounced content search (#188): ≥3 chars, 250ms, cancel the prior request.
+  useEffect(() => {
+    const q = query.trim()
+    if (q.length < 3) {
+      setResults([])
+      setSearching(false)
+      abortRef.current?.abort()
+      return
+    }
+    const timer = setTimeout(() => {
+      abortRef.current?.abort()
+      const ctrl = new AbortController()
+      abortRef.current = ctrl
+      setSearching(true)
+      api
+        .search(q, 8, ctrl.signal)
+        .then((r) => {
+          setResults(r)
+          setSearching(false)
+        })
+        .catch(() => {
+          // aborted or backend off — stay silent in the palette
+          if (!ctrl.signal.aborted) setSearching(false)
+        })
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [query])
+
   function go(to: string) {
+    abortRef.current?.abort()
     setOpen(false)
     setQuery("")
+    setResults([])
     navigate(to)
   }
+
+  // Group search results by page type, preserving server score order.
+  const resultGroups = useMemo(() => {
+    const groups = new Map<string, SearchResult[]>()
+    for (const r of results) {
+      const t = typeByPath.get(r.path) ?? "other"
+      ;(groups.get(t) ?? groups.set(t, []).get(t)!).push(r)
+    }
+    return [...groups.entries()]
+  }, [results, typeByPath])
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
@@ -116,6 +178,47 @@ export function CommandPalette() {
               </CommandItem>
             ))}
           </CommandGroup>
+        )}
+
+        {query.trim().length >= 3 && (searching || results.length > 0) && (
+          <>
+            {searching && results.length === 0 && (
+              <CommandGroup heading="Search wiki" forceMount>
+                <CommandItem value={`__searching ${query}`} forceMount disabled>
+                  <Search className="size-4 animate-pulse text-muted-foreground" />
+                  Searching…
+                </CommandItem>
+              </CommandGroup>
+            )}
+            {resultGroups.map(([type, items]) => (
+              <CommandGroup key={type} heading={`Search · ${type}`} forceMount>
+                {items.map((r) => (
+                  <CommandItem
+                    key={r.path}
+                    // include the query so cmdk's filter keeps the server hits
+                    value={`${query} ${r.title} ${r.path}`}
+                    forceMount
+                    onSelect={() => go(`/wiki?path=${encodeURIComponent(r.path)}`)}
+                  >
+                    <Search className="size-4 shrink-0 text-muted-foreground" />
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate">{r.title}</span>
+                      {r.snippet && (
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          {renderSnippet(r.snippet)}
+                        </span>
+                      )}
+                    </div>
+                    {r.source === "semantic" && (
+                      <span className="ml-auto shrink-0 text-[10px] text-primary">
+                        semantic
+                      </span>
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </>
         )}
 
         {query.trim() && (

@@ -301,8 +301,11 @@ export const api = {
   },
 
   // ── search / graph ──
-  search: (q: string) =>
-    request<SearchResult[]>(`/search?q=${encodeURIComponent(q)}`),
+  search: (q: string, limit = 20, signal?: AbortSignal) =>
+    request<SearchResult[]>(
+      `/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+      { signal },
+    ),
   graph: () => request<Graph>("/graph"),
 
   // ── brains ──
