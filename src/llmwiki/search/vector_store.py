@@ -118,15 +118,22 @@ class SqliteVecStore:
         """
         if not self.available or self._vec_table_dim() is None:
             return []
+        # sqlite-vec requires the KNN constraint (``k = ?``) to sit directly on
+        # the vec0 table scan — a ``LIMIT`` after a JOIN is not recognised. So the
+        # KNN runs in a CTE over the vec table alone, then we join for the path.
+        k = max(limit * 4, limit)
         try:
             rows = self.conn.execute(
                 f"""
-                SELECT pe.path AS path, v.distance AS distance
-                FROM {_VEC_TABLE} v
-                JOIN page_embeddings pe ON pe.rowid = v.rowid
-                WHERE v.embedding MATCH ? ORDER BY v.distance LIMIT ?
+                WITH knn AS (
+                    SELECT rowid, distance FROM {_VEC_TABLE}
+                    WHERE embedding MATCH ? AND k = ?
+                )
+                SELECT pe.path AS path, knn.distance AS distance
+                FROM knn JOIN page_embeddings pe ON pe.rowid = knn.rowid
+                ORDER BY knn.distance
                 """,
-                (self._serialize(vector), max(limit * 4, limit)),
+                (self._serialize(vector), k),
             ).fetchall()
         except sqlite3.OperationalError as exc:
             logger.warning("semantic query failed, falling back to FTS: %s", exc)
