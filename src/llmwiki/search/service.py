@@ -7,11 +7,14 @@ hybrid search (e.g. Qdrant). Without a provider, it falls back to pure FTS.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from ..db.repo import PageFtsRepo
+
+logger = logging.getLogger("llmwiki.search.service")
 
 
 @dataclass
@@ -40,6 +43,11 @@ def keyword_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> lis
     ]
 
 
+# Reciprocal Rank Fusion constant (#169). 60 is the value from the original RRF
+# paper; it damps the contribution of low-ranked items from either list.
+_RRF_K = 60
+
+
 def hybrid_search(
     conn: sqlite3.Connection,
     query: str,
@@ -48,20 +56,42 @@ def hybrid_search(
     embedder: EmbeddingProvider | None = None,
     store: VectorStore | None = None,
 ) -> list[SearchHit]:
-    """Combines keyword (FTS) and semantic (if embedder+store are provided).
+    """Fuse keyword (FTS) and semantic (when configured) results via RRF.
 
-    Merges by path, keeping the best score from each source. Without a configured
-    semantic layer, returns keyword results only.
+    Reciprocal Rank Fusion combines the two ranked lists by rank, not raw score,
+    so incomparable FTS bm25 and vector distances merge sanely. ``source`` marks
+    the list where the page ranked best. A runtime embedding failure (e.g. the
+    provider is offline) degrades to pure FTS — search never breaks because of
+    the semantic layer. Without a configured layer, returns keyword results.
     """
-    hits: dict[str, SearchHit] = {}
-    for hit in keyword_search(conn, query, limit):
-        hits[hit.path] = hit
+    keyword = keyword_search(conn, query, limit)
 
+    semantic: list[tuple[str, str]] = []  # (path, title), already ranked
     if embedder is not None and store is not None:
-        vector = embedder.embed(query)
-        for path, title, score in store.query(vector, limit):
-            existing = hits.get(path)
-            if existing is None or score > existing.score:
-                hits[path] = SearchHit(path=path, title=title, score=score, source="semantic")
+        try:
+            vector = embedder.embed(query)
+            semantic = [(p, t) for p, t, _ in store.query(vector, limit)]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("semantic search failed, using FTS only: %s", exc)
 
-    return sorted(hits.values(), key=lambda h: h.score, reverse=True)[:limit]
+    scores: dict[str, float] = {}
+    meta: dict[str, tuple[str, str, int]] = {}  # path -> (title, source, best_rank)
+
+    def fuse(path: str, title: str, rank: int, source: str) -> None:
+        scores[path] = scores.get(path, 0.0) + 1.0 / (_RRF_K + rank)
+        prev = meta.get(path)
+        if prev is None or rank < prev[2]:
+            meta[path] = (title or (prev[0] if prev else path), source, rank)
+        elif prev[0] == path and title:
+            meta[path] = (title, prev[1], prev[2])
+
+    for rank, hit in enumerate(keyword):
+        fuse(hit.path, hit.title, rank, "keyword")
+    for rank, (path, title) in enumerate(semantic):
+        fuse(path, title, rank, "semantic")
+
+    hits = [
+        SearchHit(path=path, title=meta[path][0], score=score, source=meta[path][1])
+        for path, score in scores.items()
+    ]
+    return sorted(hits, key=lambda h: h.score, reverse=True)[:limit]

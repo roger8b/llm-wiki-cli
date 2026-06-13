@@ -24,6 +24,30 @@ def _load_schema() -> str:
     return resources.files("llmwiki.db").joinpath("schema.sql").read_text(encoding="utf-8")
 
 
+def load_vec_extension(conn: sqlite3.Connection) -> bool:
+    """Load the sqlite-vec extension on ``conn`` for semantic search (#169).
+
+    Returns True on success, False if the extension (optional ``[semantic]``
+    extra) or ``enable_load_extension`` is unavailable — callers then degrade to
+    pure FTS. Only invoked when an embedding model is configured.
+    """
+    try:
+        import sqlite_vec  # type: ignore[import-untyped] # noqa: PLC0415
+    except ImportError:
+        return False
+    try:
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        return True
+    except (AttributeError, sqlite3.OperationalError):
+        return False
+    finally:
+        try:
+            conn.enable_load_extension(False)
+        except (AttributeError, sqlite3.OperationalError):
+            pass
+
+
 def retry_on_locked[T](
     fn: Callable[[], T],
     *,

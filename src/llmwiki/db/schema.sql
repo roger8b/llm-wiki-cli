@@ -76,3 +76,14 @@ CREATE TABLE IF NOT EXISTS ask_history (
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
   path UNINDEXED, title, body, tags
 );
+
+-- Bookkeeping for local semantic search (#169). The vector data itself lives in
+-- a sqlite-vec vec0 virtual table created lazily (only when an embedding model
+-- is configured), so this schema stays loadable without the sqlite-vec
+-- extension. ``rowid`` here is the key shared with the vec0 table.
+CREATE TABLE IF NOT EXISTS page_embeddings (
+  path         TEXT NOT NULL,
+  chunk_idx    INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  PRIMARY KEY (path, chunk_idx)
+);

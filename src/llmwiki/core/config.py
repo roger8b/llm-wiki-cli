@@ -35,6 +35,7 @@ _CONFIG_KEYS = (
     "chunk_threshold_chars",
     "chunk_size_chars",
     "chunk_overlap_chars",
+    "embedding_model",
 )
 
 # Default config written on first init.
@@ -56,6 +57,9 @@ _DEFAULTS: dict[str, object] = {
     "chunk_threshold_chars": 24000,
     "chunk_size_chars": 16000,
     "chunk_overlap_chars": 1000,
+    # Local semantic search (#169). None = disabled (pure FTS). Format
+    # "<provider>:<model>", e.g. "ollama:nomic-embed-text".
+    "embedding_model": None,
 }
 
 
@@ -93,6 +97,9 @@ class WorkspaceConfig(BaseModel):
     chunk_threshold_chars: int = 24000
     chunk_size_chars: int = 16000
     chunk_overlap_chars: int = 1000
+    # Local semantic search (#169, optional [semantic] extra). None disables it
+    # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
+    embedding_model: str | None = None
 
     @property
     def paths(self) -> BrainPaths:

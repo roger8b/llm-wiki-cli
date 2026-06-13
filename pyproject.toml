@@ -27,6 +27,7 @@ mcp = ["mcp>=1.2"]
 pdf = ["pypdf>=4.2"]
 html = ["trafilatura>=1.8"]
 audio = ["faster-whisper>=1.0"]
+semantic = ["sqlite-vec>=0.1"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-cov>=5", "mypy>=1.10", "ruff>=0.4", "types-PyYAML", "pre-commit>=3.7"]
 
 [project.scripts]
