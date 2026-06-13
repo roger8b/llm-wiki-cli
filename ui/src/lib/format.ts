@@ -1,4 +1,17 @@
-import type { ChangeRequest, FileChange } from "@/types"
+import type { ChangeRequest, ExecutionMeta, FileChange } from "@/types"
+
+/** Compact token count, e.g. 12300 → "12.3k" (#185). */
+export function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
+/** Discreet CR telemetry line: "model · 12.3k in / 2.1k out · 4.5s · 7 tools". */
+export function execLine(e: ExecutionMeta): string {
+  const parts = [e.model, `${fmtTokens(e.tokens_in)} in / ${fmtTokens(e.tokens_out)} out`]
+  if (e.latency_ms) parts.push(`${(e.latency_ms / 1000).toFixed(1)}s`)
+  if (e.tool_calls) parts.push(`${e.tool_calls} tools`)
+  return parts.join(" · ")
+}
 
 /** Compact relative time, e.g. "2 min ago", "3h ago", "yesterday". */
 export function timeAgo(iso?: string | null): string {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { timeAgo, pageTags, crKind } from "./format"
-import type { ChangeRequest, FileChange } from "@/types"
+import { timeAgo, pageTags, crKind, execLine, fmtTokens } from "./format"
+import type { ChangeRequest, ExecutionMeta, FileChange } from "@/types"
 
 describe("timeAgo", () => {
   it("returns empty for missing/invalid input", () => {
@@ -33,5 +33,26 @@ describe("crKind", () => {
     expect(crKind({ summary: "Saved answer: x" } as ChangeRequest)).toBe("ask --save")
     expect(crKind({ summary: "Delete page: x" } as ChangeRequest)).toBe("ingest")
     expect(crKind({ summary: "lint fixes" } as ChangeRequest)).toBe("maintain")
+  })
+})
+
+describe("fmtTokens / execLine (#185)", () => {
+  it("compacts thousands", () => {
+    expect(fmtTokens(950)).toBe("950")
+    expect(fmtTokens(12300)).toBe("12.3k")
+  })
+  it("renders the telemetry line, omitting zero latency/tools", () => {
+    const e: ExecutionMeta = {
+      model: "anthropic:claude",
+      tokens_in: 12300,
+      tokens_out: 2100,
+      tool_calls: 7,
+      latency_ms: 4500,
+      used_fallback: false,
+    }
+    expect(execLine(e)).toBe("anthropic:claude · 12.3k in / 2.1k out · 4.5s · 7 tools")
+    expect(execLine({ ...e, latency_ms: 0, tool_calls: 0 })).toBe(
+      "anthropic:claude · 12.3k in / 2.1k out",
+    )
   })
 })

@@ -99,6 +99,9 @@ class ChangeRequest(BaseModel):
     # rejected in a partial apply. Empty on pending / fully-applied / legacy CRs.
     applied_paths: list[str] = Field(default_factory=list)
     rejected_paths: list[str] = Field(default_factory=list)
+    # Agent run telemetry (model, tokens, latency, tool_calls, used_fallback)
+    # surfaced to the reviewer (#185). None on legacy CRs / non-agent CRs.
+    execution: dict[str, object] | None = None
 
 
 class LintFinding(BaseModel):

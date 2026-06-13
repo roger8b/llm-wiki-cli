@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow"
 import { Check, X, Pencil, Plus, FilePen, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import { timeAgo, pageTags, crKind } from "@/lib/format"
+import { timeAgo, pageTags, crKind, execLine } from "@/lib/format"
 import {
   useCrStore,
   selectedCr,
@@ -21,6 +21,13 @@ function opIcon(op: FileChange["operation"]) {
   if (op === "delete") return <Trash2 className="size-3.5 text-rejected" />
   if (op === "update") return <FilePen className="size-3.5 text-pending" />
   return <Plus className="size-3.5 text-apply" />
+}
+
+// ── review quality helper (#185) ──
+const CONF_DOT: Record<string, string> = {
+  high: "bg-apply",
+  medium: "bg-pending",
+  low: "bg-rejected",
 }
 
 // ─────────────────────────────────────────────── CR list (left pane)
@@ -218,10 +225,37 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
           {timeAgo(cr.created_at)}
         </span>
       </div>
+      {/* telemetry (#185): model · tokens · latency · tools, + fallback badge */}
+      {cr.execution && (
+        <div className="flex shrink-0 items-center gap-2 border-b bg-card px-5 py-1 text-[11px] text-muted-foreground">
+          <span className="truncate font-mono">{execLine(cr.execution)}</span>
+          {cr.execution.used_fallback && (
+            <span
+              title="agent did not return structured output; result assembled via fallback"
+              className="shrink-0 rounded border border-pending/40 bg-pending/10 px-1.5 py-0.5 text-[10px] text-pending"
+            >
+              fallback
+            </span>
+          )}
+        </div>
+      )}
       {/* summary */}
       <div className="shrink-0 border-b-[1.5px] bg-accent px-5 py-3 text-[13px] leading-relaxed">
         {cr.summary}
       </div>
+      {/* warnings (#166/#185): structural issues the agent could not auto-fix */}
+      {cr.warnings && cr.warnings.length > 0 && (
+        <div className="shrink-0 border-b-[1.5px] bg-pending/10 px-5 py-2 text-[11.5px] text-pending">
+          <span className="font-semibold">
+            {cr.warnings.length} warning{cr.warnings.length > 1 ? "s" : ""}:
+          </span>
+          <ul className="ml-4 mt-0.5 list-disc">
+            {cr.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* tabs */}
       <div className="flex shrink-0 gap-0 border-b-[1.5px] bg-card px-5">
         {(["diff", "after", "before"] as const).map((t) => (
@@ -276,6 +310,23 @@ function CrDetail({ cr }: { cr: ChangeRequest }) {
                     <span className="flex-1 truncate font-mono text-[11px]">
                       {c.path}
                     </span>
+                    {c.confidence && (
+                      <span
+                        title={`confidence: ${c.confidence}`}
+                        className={cn(
+                          "size-2 shrink-0 rounded-full",
+                          CONF_DOT[c.confidence] ?? "bg-muted-foreground/40",
+                        )}
+                      />
+                    )}
+                    {typeof c.quality_score === "number" && (
+                      <span
+                        title={(c.quality_flags ?? []).join(", ")}
+                        className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                      >
+                        {c.quality_score}
+                      </span>
+                    )}
                   </button>
                   {settledMark === "applied" && (
                     <Check className="size-3.5 shrink-0 text-apply" />

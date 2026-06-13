@@ -18,6 +18,11 @@ export interface FileChange {
   operation: FileOperation
   diff: string
   new_content?: string | null
+  /** Review aids (#136/#168): page confidence + heuristic quality. */
+  category?: string | null
+  confidence?: string | null
+  quality_score?: number | null
+  quality_flags?: string[]
 }
 
 export interface ChangeRequest {
@@ -34,6 +39,19 @@ export interface ChangeRequest {
   /** Per-file settlement after a partial apply (#184). */
   applied_paths?: string[]
   rejected_paths?: string[]
+  /** Structural lint warnings the agent could not auto-fix (#166). */
+  warnings?: string[]
+  /** Agent run telemetry surfaced in review (#185). */
+  execution?: ExecutionMeta | null
+}
+
+export interface ExecutionMeta {
+  model: string
+  tokens_in: number
+  tokens_out: number
+  tool_calls: number
+  latency_ms: number
+  used_fallback: boolean
 }
 
 export type SourceStatus = "pending" | "processing" | "processed" | "error"
