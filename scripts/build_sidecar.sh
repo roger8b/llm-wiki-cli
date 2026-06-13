@@ -36,6 +36,16 @@ if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
   "$PY" -m pip install --quiet pyinstaller
 fi
 
+# --- ensure runtime extras --------------------------------------------
+# PyInstaller only bundles what it can import. The source-format extractors
+# import their backends lazily inside functions, so the deps must be installed
+# in this build env or the frozen sidecar ships without them and fails at
+# runtime with "install the [pdf] extra" — useless advice for a frozen binary.
+# Audio (faster-whisper) is intentionally excluded: it drags in ctranslate2 /
+# onnxruntime and bloats the bundle; add `audio` here if the app needs it.
+echo "==> Installing project + source extras (pdf/html)"
+"$PY" -m pip install --quiet -e "$ROOT[pdf,html]"
+
 # --- build --------------------------------------------------------------
 WORK="$ROOT/.build-sidecar"
 rm -rf "$WORK"
@@ -60,6 +70,8 @@ echo "==> Running PyInstaller (this can take a few minutes)"
   --collect-all deepagents \
   --collect-submodules llmwiki \
   --collect-data llmwiki \
+  --collect-all pypdf \
+  --collect-all trafilatura \
   --hidden-import uvicorn.logging \
   --hidden-import uvicorn.loops.auto \
   --hidden-import uvicorn.protocols.http.auto \

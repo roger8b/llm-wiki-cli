@@ -124,8 +124,10 @@ jobs:
 
       # Step 2: compile Python sidecar binary (PyInstaller)
       - name: Install Python dependencies
+        # pdf,html: source-format extractors bundled into the frozen sidecar
+        # (see scripts/build_sidecar.sh) so the desktop app can ingest them.
         run: |
-          pip install -e ".[agent,ollama,api,mcp]"
+          pip install -e ".[agent,ollama,api,mcp,pdf,html]"
           pip install pyinstaller
 
       - name: Build PyInstaller sidecar
