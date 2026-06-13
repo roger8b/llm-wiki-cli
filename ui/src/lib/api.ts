@@ -172,6 +172,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path, unlink_backlinks: unlinkBacklinks }),
     }),
+  proposeEdit: (
+    path: string,
+    frontmatter: Record<string, unknown>,
+    body: string,
+  ) =>
+    request<{ change_request_id: string; files_changed: number }>(
+      `/wiki/pages/${path}/propose-edit`,
+      { method: "POST", body: JSON.stringify({ frontmatter, body }) },
+    ),
 
   // ── query ──
   ask: (question: string, saveAsPage = false) =>
