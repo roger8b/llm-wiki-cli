@@ -25,6 +25,25 @@ class ExecutionMeta:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @staticmethod
+    def merge(metas: list[ExecutionMeta]) -> ExecutionMeta | None:
+        """Aggregate per-pass telemetry into one record (multi-pass ingest, #162).
+
+        Sums tokens/latency/tool_calls, keeps the first model seen, and ORs the
+        fallback flag (any pass falling back marks the whole run). Returns
+        ``None`` for an empty list so callers can persist ``None`` unchanged.
+        """
+        if not metas:
+            return None
+        return ExecutionMeta(
+            model=metas[0].model,
+            tokens_in=sum(m.tokens_in for m in metas),
+            tokens_out=sum(m.tokens_out for m in metas),
+            tool_calls=sum(m.tool_calls for m in metas),
+            latency_ms=sum(m.latency_ms for m in metas),
+            used_fallback=any(m.used_fallback for m in metas),
+        )
+
 
 def extract_meta(
     state: dict[str, Any],

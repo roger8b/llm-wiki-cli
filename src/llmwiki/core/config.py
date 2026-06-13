@@ -31,6 +31,9 @@ _CONFIG_KEYS = (
     "providers",
     "whisper_model",
     "whisper_language",
+    "chunk_threshold_chars",
+    "chunk_size_chars",
+    "chunk_overlap_chars",
 )
 
 # Default config written on first init.
@@ -45,6 +48,11 @@ _DEFAULTS: dict[str, object] = {
     "providers": {},
     "whisper_model": "small",
     "whisper_language": None,
+    # Long-source multi-pass ingestion (#162). Sources longer than the
+    # threshold are split into chunks and ingested pass-by-pass.
+    "chunk_threshold_chars": 24000,
+    "chunk_size_chars": 16000,
+    "chunk_overlap_chars": 1000,
 }
 
 
@@ -72,6 +80,13 @@ class WorkspaceConfig(BaseModel):
     # Offline audio transcription (faster-whisper, optional [audio] extra).
     whisper_model: str = "small"  # tiny|base|small|medium|large-v3
     whisper_language: str | None = None  # None = autodetect
+    # Multi-pass ingestion for long sources (#162). A source longer than
+    # ``chunk_threshold_chars`` is split into ``chunk_size_chars`` windows with
+    # ``chunk_overlap_chars`` of overlap and ingested one chunk at a time,
+    # reusing the same change-request backend so later chunks see earlier pages.
+    chunk_threshold_chars: int = 24000
+    chunk_size_chars: int = 16000
+    chunk_overlap_chars: int = 1000
 
     @property
     def paths(self) -> BrainPaths:

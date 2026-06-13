@@ -11,7 +11,7 @@ import pytest
 
 from llmwiki.llm_agents import factory
 
-_PROMPTS = ["ingestion.md", "query.md", "lint.md", "maintenance.md"]
+_PROMPTS = ["ingestion.md", "query.md", "lint.md", "maintenance.md", "outline.md"]
 
 
 @pytest.fixture(scope="module")
@@ -38,8 +38,8 @@ def test_write_prompts_scope_to_wiki(prompts: dict[str, str]) -> None:
 
 
 def test_read_only_prompts_forbid_writing(prompts: dict[str, str]) -> None:
-    # query and lint are read-only operations.
-    for name in ("query.md", "lint.md"):
+    # query, lint and outline are read-only operations.
+    for name in ("query.md", "lint.md", "outline.md"):
         assert "do not write" in prompts[name] or "read-only" in prompts[name], (
             f"{name} must declare it is read-only"
         )
