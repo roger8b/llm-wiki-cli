@@ -31,6 +31,9 @@ export interface ChangeRequest {
   changes: FileChange[]
   /** True once a reviewer manually edited a file before apply (#183). */
   edited_by_reviewer?: boolean
+  /** Per-file settlement after a partial apply (#184). */
+  applied_paths?: string[]
+  rejected_paths?: string[]
 }
 
 export type SourceStatus = "pending" | "processing" | "processed" | "error"

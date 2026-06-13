@@ -95,11 +95,17 @@ export const api = {
     ),
   getChangeRequest: (id: string) =>
     request<ChangeRequest>(`/change-requests/${id}`),
-  applyChangeRequest: (id: string, commit = false) =>
-    request<{ id: string; status: string }>(
-      `/change-requests/${id}/apply`,
-      { method: "POST", body: JSON.stringify({ commit }) },
-    ),
+  applyChangeRequest: (id: string, commit = false, paths?: string[]) =>
+    request<{
+      id: string
+      status: string
+      applied_paths?: string[]
+      rejected_paths?: string[]
+    }>(`/change-requests/${id}/apply`, {
+      method: "POST",
+      // Omit `paths` entirely for a full apply (backend treats it as "all").
+      body: JSON.stringify(paths ? { commit, paths } : { commit }),
+    }),
   rejectChangeRequest: (id: string) =>
     request<{ id: string; status: string }>(
       `/change-requests/${id}/reject`,

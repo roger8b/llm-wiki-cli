@@ -45,6 +45,33 @@ describe("useCrStore.updateFile", () => {
   })
 })
 
+describe("useCrStore.apply partial (#184)", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("passes the selected paths subset to the API", async () => {
+    useCrStore.setState({ crs: [cr()], selectedId: "CR-2026-0001", busyId: null })
+    const spy = vi
+      .spyOn(api, "applyChangeRequest")
+      .mockResolvedValue({ id: "CR-2026-0001", status: "applied" })
+
+    await useCrStore.getState().apply("CR-2026-0001", ["wiki/a.md", "wiki/b.md"])
+
+    expect(spy).toHaveBeenCalledWith("CR-2026-0001", false, ["wiki/a.md", "wiki/b.md"])
+    expect(useCrStore.getState().crs[0].status).toBe("applied")
+  })
+
+  it("omits paths on a full apply", async () => {
+    useCrStore.setState({ crs: [cr()], selectedId: "CR-2026-0001", busyId: null })
+    const spy = vi
+      .spyOn(api, "applyChangeRequest")
+      .mockResolvedValue({ id: "CR-2026-0001", status: "applied" })
+
+    await useCrStore.getState().apply("CR-2026-0001")
+
+    expect(spy).toHaveBeenCalledWith("CR-2026-0001", false, undefined)
+  })
+})
+
 describe("useCrStore edit-mode flags", () => {
   it("setEditing toggles and select resets it", () => {
     useCrStore.setState({ crs: [cr()], editing: true })

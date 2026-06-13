@@ -70,18 +70,39 @@ def review(cr_id: str = typer.Argument(None, help="CR ID. Empty = list pending."
 def apply(
     cr_id: str = typer.Argument(..., help="Change request ID."),
     commit: bool = typer.Option(False, "--commit", help="Create a git commit when applying."),
+    only: list[str] | None = typer.Option(  # noqa: B008
+        None,
+        "--only",
+        help="Apply only this path (repeatable); the rest are rejected (#184).",
+    ),
 ) -> None:
-    """Apply a change request: writes to the wiki, reindexes, and records to the log."""
+    """Apply a change request: writes to the wiki, reindexes, and records to the log.
+
+    With ``--only`` the named paths are applied and the remaining files are
+    rejected — the CR settles in a single decision.
+    """
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
-        cr = change_request_service.apply(cr_id, paths, conn, git_commit=commit)
+        cr = change_request_service.apply(
+            cr_id, paths, conn, git_commit=commit, paths_filter=only or None
+        )
     except ValueError as exc:
         typer.echo(f"[red]{exc}[/red]", err=True)
         raise typer.Exit(code=1) from None
     finally:
         conn.close()
-    typer.echo(f"[green]Applied {cr.id}[/green] ({cr.files_changed} files).")
+    if cr.rejected_paths:
+        typer.echo(
+            f"[green]Applied {cr.id}[/green] "
+            f"({len(cr.applied_paths)} applied, {len(cr.rejected_paths)} rejected)."
+        )
+        for p in cr.applied_paths:
+            typer.echo(f"  [green]applied[/green]: {p}")
+        for p in cr.rejected_paths:
+            typer.echo(f"  [yellow]rejected[/yellow]: {p}")
+    else:
+        typer.echo(f"[green]Applied {cr.id}[/green] ({cr.files_changed} files).")
 
 
 def reject(cr_id: str = typer.Argument(..., help="Change request ID.")) -> None:
