@@ -19,14 +19,29 @@ def _ctx() -> Any:
 
 
 @router.get("/pages")
-def list_pages() -> list[dict[str, Any]]:
-    """List all wiki pages."""
+def list_pages(tag: str | None = None) -> list[dict[str, Any]]:
+    """List wiki pages, optionally filtered by ``tag`` (normalised) — #189."""
     from ....db.repo import PageRepo
 
     paths = _ctx()
     conn = open_conn(paths)
     try:
-        return [p.model_dump(mode="json") for p in PageRepo(conn).list()]
+        repo = PageRepo(conn)
+        pages = repo.by_tag(tag) if tag else repo.list()
+        return [p.model_dump(mode="json") for p in pages]
+    finally:
+        conn.close()
+
+
+@router.get("/tags")
+def list_tags() -> list[dict[str, Any]]:
+    """Tag cloud: ``[{tag, count}]`` ordered by count desc (#189)."""
+    from ....db.repo import TagRepo
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        return [{"tag": t, "count": n} for t, n in TagRepo(conn).counts()]
     finally:
         conn.close()
 

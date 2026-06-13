@@ -87,3 +87,11 @@ CREATE TABLE IF NOT EXISTS page_embeddings (
   content_hash TEXT NOT NULL,
   PRIMARY KEY (path, chunk_idx)
 );
+
+-- Queryable tag index for tag navigation (#189). Tags are normalised
+-- (lowercase, trimmed) so different casings collapse to one. Rebuilt on reindex.
+CREATE TABLE IF NOT EXISTS page_tags (
+  path TEXT NOT NULL,
+  tag  TEXT NOT NULL,
+  PRIMARY KEY (path, tag)
+);
