@@ -41,6 +41,37 @@ class TestExecutionPersisted:
         assert meta["execution"]["tokens_in"] == 120
         assert meta["execution"]["tool_calls"] == 2
 
+    def test_get_exposes_execution_for_review(self, brain: BrainPaths) -> None:
+        # #185: the review UI reads cr.execution; get() must surface it.
+        src = brain.raw / "articles" / "b.md"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text("about rag", encoding="utf-8")
+        cfg = WorkspaceConfig(brain_root=brain.root)
+        conn = get_connection(brain.db_path)
+        try:
+            cr = ingest_service.ingest(src, brain, conn, cfg, runner=_runner_with_meta)
+            reloaded = change_request_service.get(cr.id, conn)
+        finally:
+            conn.close()
+        assert reloaded is not None
+        assert reloaded.execution is not None
+        assert reloaded.execution["model"] == "ollama:test"
+        assert reloaded.execution["used_fallback"] is False
+
+    def test_get_execution_none_for_legacy_cr(self, brain: BrainPaths) -> None:
+        # A manually-built CR (no agent run) has no execution block.
+        conn = get_connection(brain.db_path)
+        try:
+            change = FileChange(
+                path="wiki/concepts/x.md", operation="create", new_content="# X\n", diff=""
+            )
+            cr = change_request_service.create_from_changes([change], "manual", brain, conn)
+            reloaded = change_request_service.get(cr.id, conn)
+        finally:
+            conn.close()
+        assert reloaded is not None
+        assert reloaded.execution is None
+
 
 class TestLintCrossReference:
     def test_annotate_attaches_related_cr(self, brain: BrainPaths) -> None:

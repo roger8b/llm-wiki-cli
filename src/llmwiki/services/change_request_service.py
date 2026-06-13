@@ -124,6 +124,19 @@ def _warnings(diff_dir: str) -> list[str]:
     return [str(w) for w in value] if isinstance(value, list) else []
 
 
+def _execution(diff_dir: str) -> dict[str, object] | None:
+    """Read the agent ``execution`` telemetry from the CR meta (#185)."""
+    meta_file = Path(diff_dir) / "meta.json"
+    if not meta_file.is_file():
+        return None
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = meta.get("execution")
+    return value if isinstance(value, dict) else None
+
+
 def _settled_paths(diff_dir: str) -> tuple[list[str], list[str]]:
     """Read ``applied_paths`` / ``rejected_paths`` from the CR meta (#184)."""
     meta_file = Path(diff_dir) / "meta.json"
@@ -160,6 +173,7 @@ def get(cr_id: str, conn: sqlite3.Connection) -> ChangeRequest | None:
         warnings=_warnings(row["diff_dir"]),
         applied_paths=applied_paths,
         rejected_paths=rejected_paths,
+        execution=_execution(row["diff_dir"]),
     )
 
 
