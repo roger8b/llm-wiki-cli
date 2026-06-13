@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dev deps
-        run: pip install -e ".[agent,ollama,anthropic,openai,google,api,mcp,pdf,html,dev]"
+        run: pip install -e ".[agent,ollama,anthropic,openai,google,api,mcp,pdf,html,semantic,dev]"
       - name: Ruff
         run: ruff check src/ tests/
       - name: Mypy
@@ -41,7 +41,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install deps
-        run: pip install -e ".[agent,ollama,api,mcp,pdf,html,dev]"
+        run: pip install -e ".[agent,ollama,api,mcp,pdf,html,semantic,dev]"
       - name: Pytest (with coverage)
         run: pytest --cov=src/llmwiki --cov-report=term-missing
 
