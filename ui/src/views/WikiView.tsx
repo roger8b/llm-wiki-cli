@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { ChevronRight, FileText, Search, Trash2, Link2 } from "lucide-react"
+import { ChevronRight, FileText, Search, Trash2, Link2, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/format"
 import type { PageDetail, PageMeta } from "@/types"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
+import { PageEditor } from "@/components/shared/PageEditor"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
@@ -48,16 +49,40 @@ export function WikiView() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [deleting, setDeleting] = useState(false)
 
+  // edit-page state (#186)
+  const [editing, setEditing] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
+
   // title → path map for wikilink resolution
   const titleMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const p of pages) m.set(p.title.toLowerCase(), p.path)
     return m
   }, [pages])
+  const titles = useMemo(() => pages.map((p) => p.title), [pages])
+
+  async function handleProposeEdit(
+    frontmatter: Record<string, unknown>,
+    body: string,
+  ) {
+    if (!detail) return
+    setSavingEdit(true)
+    try {
+      const { change_request_id } = await api.proposeEdit(detail.path, frontmatter, body)
+      await refetchCrs()
+      toast.success(`Proposed as ${change_request_id} — review to apply`)
+      setEditing(false)
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
 
   const openPath = useCallback(async (path: string) => {
     setSelected(path)
     setBacklinks([])
+    setEditing(false)
     try {
       setDetail(await api.getPage(path))
     } catch (e) {
@@ -212,18 +237,42 @@ export function WikiView() {
                   ) : null}
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0 gap-1.5 text-muted-foreground hover:text-destructive"
-                onClick={openDeleteDialog}
-              >
-                <Trash2 className="size-4" /> Delete
-              </Button>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => setEditing(true)}
+                  disabled={editing}
+                >
+                  <Pencil className="size-4" /> Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-muted-foreground hover:text-destructive"
+                  onClick={openDeleteDialog}
+                  disabled={editing}
+                >
+                  <Trash2 className="size-4" /> Delete
+                </Button>
+              </div>
             </div>
-            <MarkdownReader content={detail.body} onWikiLink={onWikiLink} />
+            {editing ? (
+              <div className="flex h-[calc(100vh-220px)] min-h-[400px] flex-col">
+                <PageEditor
+                  detail={detail}
+                  titles={titles}
+                  saving={savingEdit}
+                  onSave={handleProposeEdit}
+                  onCancel={() => setEditing(false)}
+                />
+              </div>
+            ) : (
+              <MarkdownReader content={detail.body} onWikiLink={onWikiLink} />
+            )}
 
-            {backlinks.length > 0 && (
+            {!editing && backlinks.length > 0 && (
               <div className="mt-6 rounded-lg border bg-card p-3">
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   <Link2 className="size-3.5" /> Linked from

@@ -79,6 +79,28 @@ def delete_page(
     return {"change_request_id": cr.id, "files_changed": cr.files_changed}
 
 
+@router.post("/pages/{page_path:path}/propose-edit")
+def propose_edit(
+    page_path: str,
+    frontmatter: dict[str, Any] = Body(..., embed=True),  # noqa: B008
+    body: str = Body(..., embed=True),
+) -> dict[str, Any]:
+    """Propose a manual edit of a page as a change request (#186)."""
+    from ....services import page_service
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        cr = page_service.propose_edit(page_path, frontmatter, body, paths, conn)
+    except page_service.NoPageChangesError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except page_service.PageEditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        conn.close()
+    return {"change_request_id": cr.id, "files_changed": cr.files_changed}
+
+
 @router.post("/lint")
 def lint(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
     """Run lint checks on the wiki."""
