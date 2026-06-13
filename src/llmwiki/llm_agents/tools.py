@@ -36,17 +36,28 @@ def wiki_stats(paths: BrainPaths) -> str:
     return f"{len(pages)} páginas — " + ", ".join(ordered)
 
 
+# Max results and snippet shown by the search tool (#171).
+_SEARCH_LIMIT = 10
+
+
 def make_search_pages(paths: BrainPaths) -> Callable[[str], str]:
     def search_pages(query: str) -> str:
-        """Busca páginas da wiki por palavra-chave. Retorna 'path — título' por linha."""
+        """Busca páginas da wiki por palavra-chave. Retorna, por resultado,
+        'path — título' e, na linha seguinte, um trecho com o termo destacado
+        entre « », para escolher a página sem abri-la."""
         conn = get_connection(paths.db_path)
         try:
-            results = PageFtsRepo(conn).search(query, limit=10)
+            results = PageFtsRepo(conn).search_snippets(query, limit=_SEARCH_LIMIT)
         finally:
             conn.close()
         if not results:
             return "Nenhuma página encontrada."
-        return "\n".join(f"{path} — {title}" for path, title, _ in results)
+        lines: list[str] = []
+        for path, title, _rank, snippet in results:
+            lines.append(f"{path} — {title}")
+            if snippet:
+                lines.append(f"    «{snippet}»")
+        return "\n".join(lines)
 
     return search_pages
 
