@@ -109,6 +109,19 @@ class PageRepo:
         ).fetchall()
         return [_row_to_page(r) for r in rows]
 
+    def by_tag(self, tag: str) -> list[Page]:
+        """Pages carrying ``tag`` (normalised), ordered by type then path (#189)."""
+        rows = self.conn.execute(
+            """
+            SELECT p.* FROM wiki_pages p
+            JOIN page_tags t ON t.path = p.path
+            WHERE t.tag = ?
+            ORDER BY p.type, p.path
+            """,
+            (tag.strip().lower(),),
+        ).fetchall()
+        return [_row_to_page(r) for r in rows]
+
     def list(self) -> list[Page]:
         rows = self.conn.execute(
             "SELECT * FROM wiki_pages ORDER BY type, path"
@@ -118,6 +131,38 @@ class PageRepo:
     def clear(self) -> None:
         self.conn.execute("DELETE FROM wiki_pages")
         self.conn.commit()
+
+
+class TagRepo:
+    """Queryable per-page tag index (#189)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    @staticmethod
+    def normalize(tag: str) -> str:
+        return tag.strip().lower()
+
+    def clear(self) -> None:
+        self.conn.execute("DELETE FROM page_tags")
+        self.conn.commit()
+
+    def add(self, path: str, tags: list[str]) -> None:
+        for tag in tags:
+            norm = self.normalize(tag)
+            if norm:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO page_tags (path, tag) VALUES (?, ?)",
+                    (path, norm),
+                )
+        self.conn.commit()
+
+    def counts(self) -> list[tuple[str, int]]:
+        """``(tag, count)`` ordered by count desc, then tag."""
+        rows = self.conn.execute(
+            "SELECT tag, COUNT(*) AS n FROM page_tags GROUP BY tag ORDER BY n DESC, tag"
+        ).fetchall()
+        return [(r["tag"], int(r["n"])) for r in rows]
 
 
 class LinkRepo:

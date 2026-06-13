@@ -19,7 +19,7 @@ from ..core.errors import InvalidFrontmatterError
 from ..core.misc import sha256
 from ..core.models import Page, PageType
 from ..core.paths import BrainPaths
-from ..db.repo import LinkRepo, PageFtsRepo, PageRepo
+from ..db.repo import LinkRepo, PageFtsRepo, PageRepo, TagRepo
 
 logger = logging.getLogger("llmwiki.services.index")
 
@@ -57,10 +57,12 @@ def reindex(
     page_repo = PageRepo(conn)
     link_repo = LinkRepo(conn)
     fts_repo = PageFtsRepo(conn)
+    tag_repo = TagRepo(conn)
 
     page_repo.clear()
     link_repo.clear()
     fts_repo.clear()
+    tag_repo.clear()
 
     report = IndexReport()
     bodies: dict[str, str] = {}  # rel -> body, for the semantic pass
@@ -94,6 +96,7 @@ def reindex(
         )
         page_repo.upsert(page)
         fts_repo.add(rel, page.title, body, json.dumps(page.tags))
+        tag_repo.add(rel, page.tags)
         bodies[rel] = body
         report.pages_indexed += 1
 

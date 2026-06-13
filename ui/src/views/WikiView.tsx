@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { ChevronRight, FileText, Search, Trash2, Link2, Pencil, Plus } from "lucide-react"
+import {
+  ChevronRight,
+  FileText,
+  Search,
+  Trash2,
+  Link2,
+  Pencil,
+  Plus,
+  Tag,
+  X,
+} from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -48,8 +58,32 @@ export function WikiView() {
   const [detail, setDetail] = useState<PageDetail | null>(null)
   const [filter, setFilter] = useState("")
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const refetchCrs = useCrStore((s) => s.fetch)
+
+  // tag navigation (#189)
+  const [tags, setTags] = useState<{ tag: string; count: number }[]>([])
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [tagPages, setTagPages] = useState<PageMeta[] | null>(null)
+  const [tagsCollapsed, setTagsCollapsed] = useState(true)
+
+  const applyTag = useCallback(
+    async (tag: string) => {
+      setTagFilter(tag)
+      setParams({ tag }, { replace: false })
+      try {
+        setTagPages(await api.listPages(tag))
+      } catch {
+        setTagPages([])
+      }
+    },
+    [setParams],
+  )
+  function clearTag() {
+    setTagFilter(null)
+    setTagPages(null)
+    setParams({}, { replace: false })
+  }
 
   // delete-page dialog state
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -150,8 +184,12 @@ export function WikiView() {
         else if (target) openPath(target.path)
       })
       .catch((e) => toast.error((e as Error).message))
+    api.listTags().then(setTags).catch(() => {})
     // ⌘K "New wiki page" routes here with ?new=1 (#187).
     if (params.get("new")) setNewPageOpen(true)
+    // deep-link ?tag=foo (#189)
+    const t = params.get("tag")
+    if (t) void applyTag(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -185,15 +223,18 @@ export function WikiView() {
     }
   }
 
+  // Sidebar source: tag-filtered set (#189) or the full list, then text filter.
+  const sidebarPages = tagFilter ? (tagPages ?? []) : pages
   const filtered = filter
-    ? pages.filter(
+    ? sidebarPages.filter(
         (p) =>
           p.title.toLowerCase().includes(filter.toLowerCase()) ||
           p.path.toLowerCase().includes(filter.toLowerCase()),
       )
-    : pages
+    : sidebarPages
   const groups = groupByDir(filtered)
   const fm = detail?.frontmatter ?? {}
+  const pageTags = Array.isArray(fm.tags) ? (fm.tags as string[]) : []
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -216,6 +257,21 @@ export function WikiView() {
               className="h-8 pl-7 text-[13px]"
             />
           </div>
+          {tagFilter && (
+            <div className="flex items-center gap-1.5 rounded border border-primary/30 bg-primary/10 px-2 py-1 text-[11.5px]">
+              <Tag className="size-3.5 text-primary" />
+              <span className="truncate">
+                {tagFilter} ({filtered.length})
+              </span>
+              <button
+                onClick={clearTag}
+                className="ml-auto text-muted-foreground hover:text-foreground"
+                aria-label="Clear tag filter"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto py-1">
           {Object.entries(groups).map(([dir, items]) => {
@@ -259,9 +315,43 @@ export function WikiView() {
               </div>
             )
           })}
-          {pages.length === 0 && (
+          {filtered.length === 0 && (
             <div className="px-3 py-3 text-[12px] text-muted-foreground">
-              No pages yet.
+              {tagFilter ? "No pages with this tag." : "No pages yet."}
+            </div>
+          )}
+
+          {/* Tags section (#189) */}
+          {tags.length > 0 && (
+            <div className="mt-2 border-t pt-1">
+              <button
+                onClick={() => setTagsCollapsed((v) => !v)}
+                className="flex w-full items-center gap-1 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                <ChevronRight
+                  className={cn(
+                    "size-3 transition-transform",
+                    !tagsCollapsed && "rotate-90",
+                  )}
+                />
+                Tags ({tags.length})
+              </button>
+              {!tagsCollapsed && (
+                <div className="flex flex-wrap gap-1 px-2 py-1">
+                  {tags.slice(0, 20).map((t) => (
+                    <button
+                      key={t.tag}
+                      onClick={() => applyTag(t.tag)}
+                      className={cn(
+                        "rounded border px-1.5 py-0.5 text-[11px] transition-colors hover:bg-accent",
+                        tagFilter === t.tag && "border-primary/40 bg-primary/10 text-primary",
+                      )}
+                    >
+                      {t.tag} <span className="text-muted-foreground">{t.count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -289,7 +379,7 @@ export function WikiView() {
             <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 text-[12px] text-muted-foreground">
               <div className="min-w-0">
                 <span className="font-mono">{detail.path}</span>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                   {fm.type ? <span>type: {String(fm.type)}</span> : null}
                   {fm.confidence ? (
                     <span>confidence: {String(fm.confidence)}</span>
@@ -297,9 +387,20 @@ export function WikiView() {
                   {fm.updated_at ? (
                     <span>updated: {timeAgo(String(fm.updated_at))}</span>
                   ) : null}
-                  {Array.isArray(fm.tags) && fm.tags.length > 0 ? (
-                    <span>tags: {(fm.tags as string[]).join(", ")}</span>
-                  ) : null}
+                  {pageTags.length > 0 && (
+                    <span className="flex flex-wrap items-center gap-1">
+                      {pageTags.map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => applyTag(t)}
+                          className="rounded border bg-secondary px-1.5 py-0.5 text-[11px] text-foreground transition-colors hover:bg-accent"
+                          title={`Filter by tag: ${t}`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">

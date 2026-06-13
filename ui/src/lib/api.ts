@@ -161,7 +161,11 @@ export const api = {
     }),
 
   // ── wiki pages ──
-  listPages: () => request<PageMeta[]>("/wiki/pages"),
+  listPages: (tag?: string) =>
+    request<PageMeta[]>(
+      tag ? `/wiki/pages?tag=${encodeURIComponent(tag)}` : "/wiki/pages",
+    ),
+  listTags: () => request<{ tag: string; count: number }[]>("/wiki/tags"),
   getPage: (path: string) => request<PageDetail>(`/wiki/pages/${path}`),
   backlinks: (path: string) =>
     request<{ path: string; backlinks: { path: string; title: string }[] }>(
