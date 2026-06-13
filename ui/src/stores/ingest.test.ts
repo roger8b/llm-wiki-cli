@@ -31,6 +31,28 @@ describe("useIngestStore.cancel", () => {
   })
 })
 
+describe("useIngestStore.run note (#237 follow-up)", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("surfaces the empty-CR note from the job result", async () => {
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: 1,
+      type: "ingest",
+      status: "done",
+      progress: null,
+      result: JSON.stringify({ cr: "CR-1", files: 0, note: "The agent wrote none." }),
+      error: null,
+    } as never)
+
+    await useIngestStore.getState().run("Ingesting x", async () => ({ job_id: 1 }))
+
+    const s = useIngestStore.getState()
+    expect(s.status).toBe("done")
+    expect(s.crId).toBe("CR-1")
+    expect(s.note).toBe("The agent wrote none.")
+  })
+})
+
 describe("useIngestStore minimize/reopen", () => {
   it("close keeps the run state so it can be reopened", () => {
     useIngestStore.setState({ open: true, status: "running", title: "Ingesting x", crId: null })

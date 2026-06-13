@@ -16,6 +16,8 @@ interface IngestState {
   steps: string[]
   status: IngestStatus
   crId: string | null
+  /** Why the run produced no CR (empty-result explanation from the backend). */
+  note: string | null
   error: string | null
   /** Per-file progress for batch ingests (empty for single-file runs). */
   items: BatchItem[]
@@ -78,12 +80,23 @@ function parseCrId(result: string | null | undefined): string | null {
   }
 }
 
+/** Reason an ingest produced no CR, set by the backend (#237 follow-up). */
+function parseNote(result: string | null | undefined): string | null {
+  if (!result) return null
+  try {
+    return JSON.parse(result).note ?? null
+  } catch {
+    return null
+  }
+}
+
 export const useIngestStore = create<IngestState>((set, get) => ({
   open: false,
   title: "",
   steps: [],
   status: "idle",
   crId: null,
+  note: null,
   error: null,
   items: [],
   jobIds: [],
@@ -96,6 +109,7 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       steps: [],
       status: "running",
       crId: null,
+      note: null,
       error: null,
       items: [],
       jobIds: [],
@@ -133,7 +147,11 @@ export const useIngestStore = create<IngestState>((set, get) => ({
           }
           if (job.status === "done") {
             clearInterval(timer)
-            set({ status: "done", crId: parseCrId(job.result) })
+            set({
+              status: "done",
+              crId: parseCrId(job.result),
+              note: parseNote(job.result),
+            })
             break
           } else if (job.status === "cancelled") {
             clearInterval(timer)
@@ -164,6 +182,7 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       steps: [],
       status: "running",
       crId: null,
+      note: null,
       error: null,
       items: files.map((f) => ({ name: f.name, status: "queued" as FileStatus })),
       jobIds: [],
@@ -245,6 +264,7 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       status: "idle",
       steps: [],
       crId: null,
+      note: null,
       error: null,
       items: [],
       jobIds: [],

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 
 export function ProgressDrawer() {
   const navigate = useNavigate()
-  const { open, title, steps, status, crId, error, close, clear, items, jobIds, cancelling, cancel } =
+  const { open, title, steps, status, crId, note, error, close, clear, items, jobIds, cancelling, cancel } =
     useIngestStore()
 
   if (!open) return null
@@ -130,7 +130,7 @@ export function ProgressDrawer() {
             <>
               {status === "done" && (
                 <span className="text-[12px] text-muted-foreground">
-                  Done — no changes proposed.
+                  {note ?? "Done — no changes proposed."}
                 </span>
               )}
               {status === "cancelled" && (
