@@ -44,15 +44,26 @@ function meta(p: Provider) {
   return PROVIDERS.find((x) => x.id === p)!
 }
 
-type Section = "general" | "model" | "search" | "security" | "tools"
+type Section =
+  | "general"
+  | "model"
+  | "search"
+  | "ingestion"
+  | "transcription"
+  | "security"
+  | "tools"
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "general", label: "General" },
   { id: "model", label: "Model" },
   { id: "search", label: "Search" },
+  { id: "ingestion", label: "Ingestion" },
+  { id: "transcription", label: "Transcription" },
   { id: "security", label: "Security" },
   { id: "tools", label: "Tools" },
 ]
+
+const WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
 
 /** Card section matching the prototype: header (title + desc) over stacked rows. */
 function Section({
@@ -126,6 +137,16 @@ export function SettingsView() {
   const [test, setTest] = useState<ModelTestResult | null>(null)
   const [testing, setTesting] = useState(false)
 
+  // ── new config (#237) ──
+  const [embeddingModel, setEmbeddingModel] = useState("")
+  const [agentMaxRetries, setAgentMaxRetries] = useState(2)
+  const [agentFixRetries, setAgentFixRetries] = useState(1)
+  const [chunkThreshold, setChunkThreshold] = useState(24000)
+  const [chunkSize, setChunkSize] = useState(16000)
+  const [chunkOverlap, setChunkOverlap] = useState(1000)
+  const [whisperModel, setWhisperModel] = useState("small")
+  const [whisperLanguage, setWhisperLanguage] = useState("")
+
   // ── reference data ──
   const [providers, setProviders] = useState<ProvidersMap | null>(null)
   const [ollama, setOllama] = useState<OllamaStatus | null>(null)
@@ -151,11 +172,35 @@ export function SettingsView() {
     numCtx: number
     reqTimeout: number
     ftsLimit: number
+    embeddingModel: string
+    agentMaxRetries: number
+    agentFixRetries: number
+    chunkThreshold: number
+    chunkSize: number
+    chunkOverlap: number
+    whisperModel: string
+    whisperLanguage: string
   }) {
     return JSON.stringify(s)
   }
   function currentSnap() {
-    return snap({ provider, modelName, baseUrl, temperature, numCtx, reqTimeout, ftsLimit })
+    return snap({
+      provider,
+      modelName,
+      baseUrl,
+      temperature,
+      numCtx,
+      reqTimeout,
+      ftsLimit,
+      embeddingModel,
+      agentMaxRetries,
+      agentFixRetries,
+      chunkThreshold,
+      chunkSize,
+      chunkOverlap,
+      whisperModel,
+      whisperLanguage,
+    })
   }
 
   useEffect(() => {
@@ -181,6 +226,23 @@ export function SettingsView() {
         setNumCtx(cfg.num_ctx)
         setReqTimeout(cfg.request_timeout)
         setFtsLimit(cfg.fts_limit)
+        // new config (#237), tolerant to older backends that omit them
+        const em = cfg.embedding_model ?? ""
+        const amr = cfg.agent_max_retries ?? 2
+        const afr = cfg.agent_fix_retries ?? 1
+        const ct = cfg.chunk_threshold_chars ?? 24000
+        const cs = cfg.chunk_size_chars ?? 16000
+        const co = cfg.chunk_overlap_chars ?? 1000
+        const wm = cfg.whisper_model ?? "small"
+        const wl = cfg.whisper_language ?? ""
+        setEmbeddingModel(em)
+        setAgentMaxRetries(amr)
+        setAgentFixRetries(afr)
+        setChunkThreshold(ct)
+        setChunkSize(cs)
+        setChunkOverlap(co)
+        setWhisperModel(wm)
+        setWhisperLanguage(wl)
         setSnapshot(
           snap({
             provider: p,
@@ -190,6 +252,14 @@ export function SettingsView() {
             numCtx: cfg.num_ctx,
             reqTimeout: cfg.request_timeout,
             ftsLimit: cfg.fts_limit,
+            embeddingModel: em,
+            agentMaxRetries: amr,
+            agentFixRetries: afr,
+            chunkThreshold: ct,
+            chunkSize: cs,
+            chunkOverlap: co,
+            whisperModel: wm,
+            whisperLanguage: wl,
           }),
         )
       } finally {
@@ -242,6 +312,15 @@ export function SettingsView() {
         num_ctx: numCtx,
         request_timeout: reqTimeout,
         fts_limit: ftsLimit,
+        // #237 — empty strings map to null (disabled / autodetect)
+        embedding_model: embeddingModel.trim() || null,
+        agent_max_retries: agentMaxRetries,
+        agent_fix_retries: agentFixRetries,
+        chunk_threshold_chars: chunkThreshold,
+        chunk_size_chars: chunkSize,
+        chunk_overlap_chars: chunkOverlap,
+        whisper_model: whisperModel,
+        whisper_language: whisperLanguage.trim() || null,
       })
       // refresh providers (base_url/model may have changed)
       setProviders(await api.getProviders().catch(() => providers))
@@ -265,6 +344,14 @@ export function SettingsView() {
       setNumCtx(s.numCtx)
       setReqTimeout(s.reqTimeout)
       setFtsLimit(s.ftsLimit)
+      setEmbeddingModel(s.embeddingModel)
+      setAgentMaxRetries(s.agentMaxRetries)
+      setAgentFixRetries(s.agentFixRetries)
+      setChunkThreshold(s.chunkThreshold)
+      setChunkSize(s.chunkSize)
+      setChunkOverlap(s.chunkOverlap)
+      setWhisperModel(s.whisperModel)
+      setWhisperLanguage(s.whisperLanguage)
       setTest(null)
     } catch {
       /* snapshot malformed — nothing to restore */
@@ -556,6 +643,115 @@ export function SettingsView() {
                         value={ftsLimit}
                         onChange={(e) => setFtsLimit(Number(e.target.value))}
                         className="w-24"
+                      />
+                    </Row>
+                    <Row
+                      name="Embedding model"
+                      desc="provider:model for semantic search (e.g. ollama:nomic-embed-text). Empty = keyword-only. Requires the [semantic] extra in the backend."
+                    >
+                      <Input
+                        value={embeddingModel}
+                        onChange={(e) => setEmbeddingModel(e.target.value)}
+                        placeholder="ollama:nomic-embed-text"
+                        className="w-[240px] font-mono text-[12px]"
+                      />
+                    </Row>
+                  </Section>
+                </>
+              )}
+
+              {/* ── Ingestion ── */}
+              {section === "ingestion" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Ingestion</div>
+                  <Section
+                    title="Long-source chunking"
+                    desc="Sources longer than the threshold are ingested in multiple passes"
+                  >
+                    <Row name="Chunk threshold (chars)" desc="Above this length the multi-pass flow kicks in.">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={chunkThreshold}
+                        onChange={(e) => setChunkThreshold(Number(e.target.value))}
+                        className="w-28"
+                      />
+                    </Row>
+                    <Row name="Chunk size (chars)" desc="Target size of each pass window.">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={chunkSize}
+                        onChange={(e) => setChunkSize(Number(e.target.value))}
+                        className="w-28"
+                      />
+                    </Row>
+                    <Row name="Chunk overlap (chars)" desc="Context carried between consecutive chunks.">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="100"
+                        value={chunkOverlap}
+                        onChange={(e) => setChunkOverlap(Number(e.target.value))}
+                        className="w-28"
+                      />
+                    </Row>
+                  </Section>
+                  <Section
+                    title="Agent retries"
+                    desc="How hard the agent tries before giving up"
+                  >
+                    <Row name="Structural fix passes" desc="Self-correction attempts on lint findings before the CR.">
+                      <Input
+                        type="number"
+                        min="0"
+                        value={agentFixRetries}
+                        onChange={(e) => setAgentFixRetries(Number(e.target.value))}
+                        className="w-20"
+                      />
+                    </Row>
+                    <Row name="Max invoke retries" desc="Total agent.invoke attempts on transient errors (1 = no retry).">
+                      <Input
+                        type="number"
+                        min="1"
+                        value={agentMaxRetries}
+                        onChange={(e) => setAgentMaxRetries(Number(e.target.value))}
+                        className="w-20"
+                      />
+                    </Row>
+                  </Section>
+                </>
+              )}
+
+              {/* ── Transcription ── */}
+              {section === "transcription" && (
+                <>
+                  <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Transcription</div>
+                  <Section
+                    title="Audio (faster-whisper)"
+                    desc="Offline transcription of audio sources. Requires the [audio] extra in the backend."
+                  >
+                    <Row name="Whisper model" desc="Larger = more accurate, slower, more memory.">
+                      <select
+                        value={whisperModel}
+                        onChange={(e) => setWhisperModel(e.target.value)}
+                        className="w-[160px] rounded-md border bg-background px-3 py-2 font-mono text-[13px]"
+                      >
+                        {[...new Set([...WHISPER_MODELS, whisperModel])].map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </Row>
+                    <Row name="Language" desc="ISO code (e.g. en, pt). Empty = autodetect.">
+                      <Input
+                        value={whisperLanguage}
+                        onChange={(e) => setWhisperLanguage(e.target.value)}
+                        placeholder="autodetect"
+                        className="w-24 font-mono text-[12px]"
                       />
                     </Row>
                   </Section>

@@ -157,6 +157,15 @@ export interface WorkspaceConfig {
   temperature: number | null
   request_timeout: number
   onboarded: boolean
+  // Agent / ingestion / transcription config exposed in Settings (#237).
+  agent_max_retries?: number
+  agent_fix_retries?: number
+  embedding_model?: string | null
+  chunk_threshold_chars?: number
+  chunk_size_chars?: number
+  chunk_overlap_chars?: number
+  whisper_model?: string
+  whisper_language?: string | null
 }
 
 export interface GraphNode {

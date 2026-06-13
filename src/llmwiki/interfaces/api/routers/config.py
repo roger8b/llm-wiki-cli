@@ -20,6 +20,16 @@ def _config_payload() -> dict[str, Any]:
         "temperature": cfg.temperature,
         "request_timeout": cfg.request_timeout,
         "onboarded": cfg.onboarded,
+        # Exposed so the Settings UI can read/edit them (#237). All are already
+        # persisted via update_config (_CONFIG_KEYS); this only adds them to GET.
+        "agent_max_retries": cfg.agent_max_retries,
+        "agent_fix_retries": cfg.agent_fix_retries,
+        "embedding_model": cfg.embedding_model,
+        "chunk_threshold_chars": cfg.chunk_threshold_chars,
+        "chunk_size_chars": cfg.chunk_size_chars,
+        "chunk_overlap_chars": cfg.chunk_overlap_chars,
+        "whisper_model": cfg.whisper_model,
+        "whisper_language": cfg.whisper_language,
     }
 
 
