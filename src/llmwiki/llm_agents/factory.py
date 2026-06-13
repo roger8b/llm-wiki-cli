@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from ..core.config import WorkspaceConfig
-from .models import IngestionResult, LintReport, MaintenanceResult, QueryResult
+from .models import (
+    IngestionResult,
+    LintReport,
+    MaintenanceResult,
+    OutlinePlan,
+    QueryResult,
+)
 from .telemetry import ExecutionMeta, extract_meta
 from .tools import domain_tools, wiki_stats
 
@@ -295,24 +301,49 @@ def _metadata_line(source_meta: dict[str, str | None] | None) -> str:
     return f"METADADOS: {', '.join(parts)}\n" if parts else ""
 
 
+def _chunk_context(
+    outline: OutlinePlan | None, part: tuple[int, int] | None
+) -> str:
+    """Render the multi-pass preamble (outline + part-i-of-n note), or ''."""
+    if part is None:
+        return ""
+    i, n = part
+    lines = [
+        f"PARTE {i} DE {n} DA MESMA FONTE. Esta fonte longa foi dividida em "
+        f"{n} partes. Páginas das partes anteriores JÁ EXISTEM no staging — "
+        "ATUALIZE a página existente (edit_file) em vez de duplicar o conceito.",
+    ]
+    if outline is not None and (outline.concepts or outline.summary):
+        if outline.summary:
+            lines.append(f"RESUMO DA FONTE: {outline.summary}")
+        if outline.concepts:
+            lines.append("CONCEITOS ESPERADOS (plano global): " + "; ".join(outline.concepts))
+    return "\n".join(lines) + "\n\n"
+
+
 def _ingestion_message(
     cfg: WorkspaceConfig,
     *,
     source_path: str,
     source_text: str,
     source_meta: dict[str, str | None] | None = None,
+    outline: OutlinePlan | None = None,
+    part: tuple[int, int] | None = None,
 ) -> str:
     """Assemble the user message: today's date, wiki state, source + metadata.
 
     Dynamic context goes in the MESSAGE (not the static, cacheable system
     prompt) so the agent always sees the correct ``updated_at`` date, knows how
     big the wiki already is (#164), and gets the source's provenance (#163).
+    For long sources the message also carries the global outline and a
+    "part i of n" note so chunk passes stay consistent (#162).
     """
     from ..core.misc import today
 
     return (
         f"DATA DE HOJE: {today()}\n"
         f"ESTADO DA WIKI: {wiki_stats(cfg.paths)}\n\n"
+        f"{_chunk_context(outline, part)}"
         f"FONTE: {source_path}\n"
         f"{_metadata_line(source_meta)}\n"
         f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
@@ -327,6 +358,8 @@ def run_ingestion(
     source_path: str,
     source_text: str,
     source_meta: dict[str, str | None] | None = None,
+    outline: OutlinePlan | None = None,
+    part: tuple[int, int] | None = None,
 ) -> IngestionResult:
     from deepagents import create_deep_agent
 
@@ -339,9 +372,61 @@ def run_ingestion(
         response_format=_response_format(IngestionResult),
     )
     message = _ingestion_message(
-        cfg, source_path=source_path, source_text=source_text, source_meta=source_meta
+        cfg,
+        source_path=source_path,
+        source_text=source_text,
+        source_meta=source_meta,
+        outline=outline,
+        part=part,
     )
     return _invoke(agent, message, IngestionResult, cfg, backend)
+
+
+def _outline_message(
+    cfg: WorkspaceConfig,
+    *,
+    source_meta: dict[str, str | None] | None,
+    chunk_summaries: list[str],
+) -> str:
+    """User message for the outline pass: only the opening of each chunk."""
+    parts = [
+        f"FONTE longa dividida em {len(chunk_summaries)} partes.",
+        _metadata_line(source_meta).rstrip("\n"),
+    ]
+    for i, summary in enumerate(chunk_summaries, start=1):
+        parts.append(f"\n--- INÍCIO DA PARTE {i} ---\n{summary}")
+    parts.append("\nListe os conceitos esperados de toda a fonte e um resumo.")
+    return "\n".join(p for p in parts if p)
+
+
+def run_outline(
+    cfg: WorkspaceConfig,
+    *,
+    source_meta: dict[str, str | None] | None = None,
+    chunk_summaries: list[str],
+) -> OutlinePlan:
+    """Plan the concepts of a long source before chunk passes (#162).
+
+    Read-only: built with a ``read_only`` backend so no write tool can stage a
+    page during planning.
+    """
+    from deepagents import create_deep_agent
+
+    from .backend import ChangeRequestBackend
+
+    backend = ChangeRequestBackend(cfg.brain_root, read_only=True)
+    agent = create_deep_agent(
+        model=_build_model(cfg),
+        tools=domain_tools(cfg.paths),
+        system_prompt=_prompt("outline.md"),
+        backend=backend,
+        middleware=_agent_middleware(backend),
+        response_format=_response_format(OutlinePlan),
+    )
+    message = _outline_message(
+        cfg, source_meta=source_meta, chunk_summaries=chunk_summaries
+    )
+    return _invoke(agent, message, OutlinePlan, cfg, backend)
 
 
 def run_query(

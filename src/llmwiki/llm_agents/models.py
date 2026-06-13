@@ -15,6 +15,16 @@ class IngestionResult(BaseModel):
     new_pages: list[str] = Field(default_factory=list)
 
 
+class OutlinePlan(BaseModel):
+    """Read-only outline of a long source, produced before chunk passes (#162)."""
+
+    concepts: list[str] = Field(
+        default_factory=list,
+        description="Distinct concepts/entities/decisions the whole source covers.",
+    )
+    summary: str = Field(default="", description="One-paragraph summary of the source.")
+
+
 class Citation(BaseModel):
     page: str | None = None
     source: str | None = None

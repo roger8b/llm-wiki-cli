@@ -11,7 +11,7 @@ from llmwiki.core.config import WorkspaceConfig
 from llmwiki.llm_agents import factory
 from llmwiki.llm_agents.backend import ChangeRequestBackend
 from llmwiki.llm_agents.models import IngestionResult
-from llmwiki.llm_agents.telemetry import extract_meta
+from llmwiki.llm_agents.telemetry import ExecutionMeta, extract_meta
 
 
 def _ai(content="", usage=None, tool_calls=None):
@@ -36,6 +36,25 @@ class TestExtractMeta:
     def test_missing_usage_is_zero(self) -> None:
         meta = extract_meta({"messages": [_ai()]}, model="m", latency_ms=0, used_fallback=False)
         assert meta.tokens_in == 0 and meta.tokens_out == 0 and meta.tool_calls == 0
+
+
+class TestMerge:
+    def test_empty_is_none(self) -> None:
+        assert ExecutionMeta.merge([]) is None
+
+    def test_sums_and_ors_fallback(self) -> None:
+        a = ExecutionMeta("m", tokens_in=10, tokens_out=5, tool_calls=2, latency_ms=100)
+        b = ExecutionMeta(
+            "m", tokens_in=3, tokens_out=1, tool_calls=1, latency_ms=50, used_fallback=True
+        )
+        merged = ExecutionMeta.merge([a, b])
+        assert merged is not None
+        assert merged.model == "m"
+        assert merged.tokens_in == 13
+        assert merged.tokens_out == 6
+        assert merged.tool_calls == 3
+        assert merged.latency_ms == 150
+        assert merged.used_fallback is True
 
 
 class _FakeAgent:
