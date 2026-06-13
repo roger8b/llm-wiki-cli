@@ -39,12 +39,50 @@ _DIR = {
 }
 
 
+# Page type -> wiki subdirectory, mirrored in the front for slug/path preview.
+DIR = {
+    PageType.concept: "concepts",
+    PageType.entity: "entities",
+    PageType.source_summary: "research",
+    PageType.synthesis: "synthesis",
+    PageType.decision: "decisions",
+    PageType.project: "projects",
+    PageType.research: "research",
+}
+
+
 def _template(page_type: PageType) -> str:
     return (
         resources.files("llmwiki")
         .joinpath("templates", "page_templates", f"{page_type.value}.md")
         .read_text(encoding="utf-8")
     )
+
+
+def _strip_frontmatter(text: str) -> str:
+    """Return the body after a leading ``---``-fenced block (textual, no YAML parse).
+
+    The templates use ``{{title}}`` placeholders that are not valid YAML, so the
+    frontmatter is stripped by fence position rather than parsed.
+    """
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            after = text.find("\n", end + 1)
+            if after != -1:
+                return text[after + 1 :].lstrip("\n")
+    return text
+
+
+def list_templates() -> list[dict[str, str]]:
+    """Per-type page body templates for the "New page" editor (#187).
+
+    Returns the body (frontmatter stripped — the editor builds frontmatter from
+    its form) with the ``{{title}}`` placeholder intact for the front to fill.
+    """
+    return [
+        {"type": pt.value, "body": _strip_frontmatter(_template(pt))} for pt in PageType
+    ]
 
 
 def create_page(
@@ -68,19 +106,25 @@ def propose_edit(
     body: str,
     paths: BrainPaths,
     conn: sqlite3.Connection,
+    *,
+    expect_new: bool = False,
 ) -> ChangeRequest:
     """Propose a manual page edit as a change request (#186) — no LLM, no direct write.
 
     Validates the frontmatter (``type`` must be a PageType, ``title`` required),
     stamps ``updated_at`` (backend's responsibility), serialises the page, and
     routes it through ``ChangeRequestBackend`` so it lands as a reviewable CR.
-    Content identical to disk raises ``NoPageChangesError``.
+    Content identical to disk raises ``NoPageChangesError``. With ``expect_new``
+    (the "New page" flow, #187) a path that already exists raises
+    ``PageExistsError`` — the slug collision guard.
     """
     from ..core import frontmatter
     from ..llm_agents.backend import ChangeRequestBackend
     from . import change_request_service
 
     norm = path.lstrip("/")
+    if expect_new and (paths.root / norm).is_file():
+        raise PageExistsError(f"page already exists: {norm}")
     ptype = frontmatter_meta.get("type")
     if ptype not in _VALID_TYPES:
         raise InvalidPageTypeError(

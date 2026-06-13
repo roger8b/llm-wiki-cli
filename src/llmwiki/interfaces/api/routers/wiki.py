@@ -79,20 +79,33 @@ def delete_page(
     return {"change_request_id": cr.id, "files_changed": cr.files_changed}
 
 
+@router.get("/templates")
+def list_templates() -> list[dict[str, str]]:
+    """Per-type page body templates for the New-page editor (#187)."""
+    from ....services import page_service
+
+    _ctx()  # ensure a brain is active (404 otherwise)
+    return page_service.list_templates()
+
+
 @router.post("/pages/{page_path:path}/propose-edit")
 def propose_edit(
     page_path: str,
     frontmatter: dict[str, Any] = Body(..., embed=True),  # noqa: B008
     body: str = Body(..., embed=True),
+    expect_new: bool = Body(False, embed=True),
 ) -> dict[str, Any]:
-    """Propose a manual edit of a page as a change request (#186)."""
+    """Propose a manual edit/creation of a page as a change request (#186/#187)."""
+    from ....core.errors import PageExistsError
     from ....services import page_service
 
     paths = _ctx()
     conn = open_conn(paths)
     try:
-        cr = page_service.propose_edit(page_path, frontmatter, body, paths, conn)
-    except page_service.NoPageChangesError as exc:
+        cr = page_service.propose_edit(
+            page_path, frontmatter, body, paths, conn, expect_new=expect_new
+        )
+    except (page_service.NoPageChangesError, PageExistsError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except page_service.PageEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

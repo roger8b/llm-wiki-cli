@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { ChevronRight, FileText, Search, Trash2, Link2, Pencil } from "lucide-react"
+import { ChevronRight, FileText, Search, Trash2, Link2, Pencil, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/format"
-import type { PageDetail, PageMeta } from "@/types"
+import type { PageDetail, PageMeta, PageType } from "@/types"
+import { pagePath } from "@/lib/slug"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
 import { PageEditor } from "@/components/shared/PageEditor"
 import { Input } from "@/components/ui/input"
@@ -23,6 +24,12 @@ import { useCrStore } from "@/stores/crs"
 interface Backlink {
   path: string
   title: string
+}
+
+/** A page open in the editor: an existing edit (#186) or a new creation (#187). */
+interface EditorDraft {
+  detail: PageDetail
+  isNew: boolean
 }
 
 function groupByDir(pages: PageMeta[]): Record<string, PageMeta[]> {
@@ -49,9 +56,10 @@ export function WikiView() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [deleting, setDeleting] = useState(false)
 
-  // edit-page state (#186)
-  const [editing, setEditing] = useState(false)
+  // editor state (#186 edit / #187 new): a draft page + whether it's a creation.
+  const [editorDraft, setEditorDraft] = useState<EditorDraft | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [newPageOpen, setNewPageOpen] = useState(false)
 
   // title → path map for wikilink resolution
   const titleMap = useMemo(() => {
@@ -65,13 +73,18 @@ export function WikiView() {
     frontmatter: Record<string, unknown>,
     body: string,
   ) {
-    if (!detail) return
+    if (!editorDraft) return
     setSavingEdit(true)
     try {
-      const { change_request_id } = await api.proposeEdit(detail.path, frontmatter, body)
+      const { change_request_id } = await api.proposeEdit(
+        editorDraft.detail.path,
+        frontmatter,
+        body,
+        editorDraft.isNew,
+      )
       await refetchCrs()
       toast.success(`Proposed as ${change_request_id} — review to apply`)
-      setEditing(false)
+      setEditorDraft(null)
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -79,10 +92,32 @@ export function WikiView() {
     }
   }
 
+  // Build a draft from a type template and open the editor in "create" mode.
+  async function startNewPage(type: PageType, title: string, tags: string[]) {
+    const path = pagePath(type, title)
+    let body = `# ${title}\n`
+    try {
+      const templates = await api.listTemplates()
+      const tmpl = templates.find((t) => t.type === type)?.body
+      if (tmpl) body = tmpl.replaceAll("{{title}}", title)
+    } catch {
+      // fall back to a minimal body if templates can't be loaded
+    }
+    setEditorDraft({
+      detail: {
+        path,
+        frontmatter: { title, type, tags, confidence: "medium", sources: [] },
+        body,
+      },
+      isNew: true,
+    })
+    setNewPageOpen(false)
+  }
+
   const openPath = useCallback(async (path: string) => {
     setSelected(path)
     setBacklinks([])
-    setEditing(false)
+    setEditorDraft(null)
     try {
       setDetail(await api.getPage(path))
     } catch (e) {
@@ -109,6 +144,8 @@ export function WikiView() {
         if (target) openPath(target.path)
       })
       .catch((e) => toast.error((e as Error).message))
+    // ⌘K "New wiki page" routes here with ?new=1 (#187).
+    if (params.get("new")) setNewPageOpen(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -156,7 +193,14 @@ export function WikiView() {
     <div className="flex flex-1 overflow-hidden">
       {/* tree */}
       <aside className="flex w-[260px] shrink-0 flex-col overflow-hidden border-r-[1.5px]">
-        <div className="shrink-0 border-b-[1.5px] p-2">
+        <div className="shrink-0 space-y-2 border-b-[1.5px] p-2">
+          <Button
+            size="sm"
+            className="w-full gap-1.5"
+            onClick={() => setNewPageOpen(true)}
+          >
+            <Plus className="size-4" /> New page
+          </Button>
           <div className="relative">
             <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -217,9 +261,24 @@ export function WikiView() {
         </div>
       </aside>
 
-      {/* reader */}
+      {/* reader / editor */}
       <section className="flex-1 overflow-y-auto">
-        {detail ? (
+        {editorDraft ? (
+          <div className="mx-auto max-w-[900px] p-6">
+            <div className="mb-3 font-mono text-[12px] text-muted-foreground">
+              {editorDraft.isNew ? "New page" : "Editing"}: {editorDraft.detail.path}
+            </div>
+            <div className="flex h-[calc(100vh-160px)] min-h-[420px] flex-col">
+              <PageEditor
+                detail={editorDraft.detail}
+                titles={titles}
+                saving={savingEdit}
+                onSave={handleProposeEdit}
+                onCancel={() => setEditorDraft(null)}
+              />
+            </div>
+          </div>
+        ) : detail ? (
           <div className="mx-auto max-w-[760px] p-6">
             <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 text-[12px] text-muted-foreground">
               <div className="min-w-0">
@@ -242,8 +301,7 @@ export function WikiView() {
                   variant="ghost"
                   size="sm"
                   className="gap-1.5 text-muted-foreground hover:text-foreground"
-                  onClick={() => setEditing(true)}
-                  disabled={editing}
+                  onClick={() => setEditorDraft({ detail, isNew: false })}
                 >
                   <Pencil className="size-4" /> Edit
                 </Button>
@@ -252,27 +310,14 @@ export function WikiView() {
                   size="sm"
                   className="gap-1.5 text-muted-foreground hover:text-destructive"
                   onClick={openDeleteDialog}
-                  disabled={editing}
                 >
                   <Trash2 className="size-4" /> Delete
                 </Button>
               </div>
             </div>
-            {editing ? (
-              <div className="flex h-[calc(100vh-220px)] min-h-[400px] flex-col">
-                <PageEditor
-                  detail={detail}
-                  titles={titles}
-                  saving={savingEdit}
-                  onSave={handleProposeEdit}
-                  onCancel={() => setEditing(false)}
-                />
-              </div>
-            ) : (
-              <MarkdownReader content={detail.body} onWikiLink={onWikiLink} />
-            )}
+            <MarkdownReader content={detail.body} onWikiLink={onWikiLink} />
 
-            {!editing && backlinks.length > 0 && (
+            {backlinks.length > 0 && (
               <div className="mt-6 rounded-lg border bg-card p-3">
                 <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   <Link2 className="size-3.5" /> Linked from
@@ -361,6 +406,137 @@ export function WikiView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <NewPageDialog
+        open={newPageOpen}
+        onOpenChange={setNewPageOpen}
+        pages={pages}
+        onCreate={startNewPage}
+        onOpenExisting={openPath}
+      />
     </div>
+  )
+}
+
+const NEW_PAGE_TYPES: PageType[] = [
+  "concept",
+  "entity",
+  "source_summary",
+  "synthesis",
+  "decision",
+  "project",
+  "research",
+]
+
+function NewPageDialog({
+  open,
+  onOpenChange,
+  pages,
+  onCreate,
+  onOpenExisting,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  pages: PageMeta[]
+  onCreate: (type: PageType, title: string, tags: string[]) => void
+  onOpenExisting: (path: string) => void
+}) {
+  const [type, setType] = useState<PageType>("concept")
+  const [title, setTitle] = useState("")
+  const [tagsRaw, setTagsRaw] = useState("")
+
+  const path = title.trim() ? pagePath(type, title) : ""
+  const collision = path ? pages.find((p) => p.path === path) : undefined
+  const valid = title.trim().length > 0 && !collision
+
+  function reset() {
+    setType("concept")
+    setTitle("")
+    setTagsRaw("")
+  }
+  function confirm() {
+    if (!valid) return
+    const tags = tagsRaw.split(/[,\s]+/).filter(Boolean)
+    onCreate(type, title.trim(), tags)
+    reset()
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) reset()
+        onOpenChange(v)
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New wiki page</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <label className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
+            Type
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as PageType)}
+              className="h-9 rounded-md border bg-transparent px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              {NEW_PAGE_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
+            Title
+            <Input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && confirm()}
+              placeholder="Page title"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
+            Tags
+            <Input
+              value={tagsRaw}
+              onChange={(e) => setTagsRaw(e.target.value)}
+              placeholder="comma-separated"
+            />
+          </label>
+          {path && (
+            <div className="text-[11px] text-muted-foreground">
+              path: <span className="font-mono">{path}</span>
+            </div>
+          )}
+          {collision && (
+            <div className="rounded border border-pending/40 bg-pending/10 px-2 py-1.5 text-[11.5px] text-pending">
+              A page with this slug already exists.{" "}
+              <button
+                className="underline"
+                onClick={() => {
+                  onOpenExisting(collision.path)
+                  onOpenChange(false)
+                  reset()
+                }}
+              >
+                Open {collision.title}
+              </button>{" "}
+              instead, or pick a different title.
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={confirm} disabled={!valid}>
+            Create &amp; edit
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
