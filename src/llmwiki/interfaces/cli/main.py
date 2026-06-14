@@ -134,5 +134,34 @@ app.command()(mcp)
 app.command()(serve)
 
 
+def main() -> None:
+    """Console entry point with a central typed-exception → exit-code handler (#198).
+
+    Runs the Typer app in non-standalone mode so domain exceptions propagate to a
+    single place that maps them to stable exit codes and (under ``--json``) a JSON
+    error envelope on stderr. Typer/Click already exit 2 on usage errors.
+    """
+    import sys  # noqa: PLC0415
+
+    import click  # noqa: PLC0415
+
+    from ._errors import EXIT_CANCELLED, render_error  # noqa: PLC0415
+
+    as_json = "--json" in sys.argv
+    try:
+        app(standalone_mode=False)
+    except (click.exceptions.Exit, SystemExit) as exc:  # explicit typer.Exit / sys.exit
+        code = exc.exit_code if isinstance(exc, click.exceptions.Exit) else (exc.code or 0)
+        sys.exit(code if isinstance(code, int) else 1)
+    except click.exceptions.UsageError as exc:
+        exc.show()
+        sys.exit(exc.exit_code)
+    except (click.exceptions.Abort, KeyboardInterrupt):
+        print("Aborted.", file=sys.stderr)
+        sys.exit(EXIT_CANCELLED)
+    except Exception as exc:  # noqa: BLE001
+        sys.exit(render_error(exc, as_json=as_json))
+
+
 if __name__ == "__main__":
-    app()
+    main()

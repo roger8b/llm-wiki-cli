@@ -73,6 +73,10 @@ Exit code is non-zero when any finding has `severity: "error"`.
 
 ## Error envelope
 
+`wiki ingest` also accepts `--json` (a write command): its success output stays
+human, but a failure emits the same error envelope on stderr — e.g. an
+already-processed source exits 4, a missing file exits 3.
+
 When a command running with `--json` fails, the error is written to **stderr**
 as a JSON object and stdout stays empty:
 

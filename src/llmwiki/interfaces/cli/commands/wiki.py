@@ -22,19 +22,17 @@ from ....services import (
     lint_service,
     query_service,
 )
+from .._errors import handle_errors
 from .._output import emit
 
 console = Console()
 
 
 def _brain() -> BrainPaths:
-    try:
-        return load_active_brain()
-    except WikiError as exc:
-        typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1) from None
+    return load_active_brain()
 
 
+@handle_errors
 def index() -> None:
     """Rebuild metadata and regenerate wiki/index.md."""
     paths = _brain()
@@ -55,6 +53,7 @@ def index() -> None:
         )
 
 
+@handle_errors
 def search(
     query: str = typer.Argument(..., help="Search query (FTS5 + semantic when configured)."),
     type_: str | None = typer.Option(
@@ -136,6 +135,7 @@ def search(
     emit(payload, as_json=as_json, human=human)
 
 
+@handle_errors
 def lint(
     semantic: bool = typer.Option(
         False, "--all/--structural", help="--all includes semantic audit via LLM."
@@ -148,6 +148,8 @@ def lint(
         cfg = load_config(paths)
         try:
             findings = lint_service.lint_all(paths, cfg, semantic=True)
+        except WikiError:
+            raise
         except Exception as exc:  # noqa: BLE001
             typer.echo(f"[red]Semantic lint failed: {exc}[/red]", err=True)
             raise typer.Exit(code=1) from exc
@@ -172,6 +174,7 @@ def lint(
         raise typer.Exit(code=1)
 
 
+@handle_errors
 def ask(
     question: str = typer.Argument(..., help="Question for the wiki."),
     save: bool = typer.Option(False, "--save", help="Save the answer as a page (creates CR)."),
@@ -183,6 +186,8 @@ def ask(
     conn = get_connection(paths.db_path)
     try:
         result, cr = query_service.ask(question, paths, conn, cfg, save=save)
+    except WikiError:
+        raise
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"[red]Query failed: {exc}[/red]", err=True)
         raise typer.Exit(code=1) from exc
@@ -218,6 +223,7 @@ def ask(
     emit(payload, as_json=as_json, human=human)
 
 
+@handle_errors
 def maintain(
     apply_now: bool = typer.Option(False, "--apply", help="Apply the maintenance CR directly."),
 ) -> None:
@@ -240,6 +246,8 @@ def maintain(
         if apply_now:
             change_request_service.apply(cr.id, paths, conn)
             typer.echo(f"[green]Applied {cr.id}.[/green]")
+    except WikiError:
+        raise
     except Exception as exc:  # noqa: BLE001
         typer.echo(f"[red]Maintenance failed: {exc}[/red]", err=True)
         raise typer.Exit(code=1) from None
@@ -247,6 +255,7 @@ def maintain(
         conn.close()
 
 
+@handle_errors
 def log(
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:

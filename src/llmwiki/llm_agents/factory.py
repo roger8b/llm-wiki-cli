@@ -96,11 +96,22 @@ def _build_remote(provider: str, name: str, cfg: WorkspaceConfig) -> Any:
     Returns None to signal "let DeepAgents resolve the string" when the
     provider package isn't installed.
     """
+    from ..core.errors import ProviderError  # noqa: PLC0415
     from ..core.secrets import get_api_key  # noqa: PLC0415
 
     api_key = get_api_key(provider)
     pcfg = cfg.providers.get(provider)
     base_url = pcfg.base_url if pcfg else None
+    # A hosted provider with no key and no custom base_url cannot authenticate.
+    # Fail fast with a clear, typed error (CLI maps it to exit 5) instead of an
+    # opaque 401 deep inside the agent run. A base_url may point at a local proxy
+    # that needs no key, so only guard when neither is present.
+    if provider in {"anthropic", "openai", "google"} and not api_key and not base_url:
+        raise ProviderError(
+            f"No API key configured for provider '{provider}'. "
+            f"Set the {provider.upper()}_API_KEY environment variable "
+            "(or configure a base_url for a local endpoint)."
+        )
     common: dict[str, Any] = {"model": name}
     if cfg.temperature is not None:
         common["temperature"] = cfg.temperature

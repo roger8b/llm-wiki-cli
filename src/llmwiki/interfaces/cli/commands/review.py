@@ -10,22 +10,19 @@ from rich.markup import escape as esc
 from rich.syntax import Syntax
 from rich.table import Table
 
-from ....core.errors import WikiError
+from ....core.errors import NotFoundError
 from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import JobRepo
 from ....services import change_request_service
+from .._errors import handle_errors
 from .._output import emit
 
 console = Console()
 
 
 def _brain() -> BrainPaths:
-    try:
-        return load_active_brain()
-    except WikiError as exc:
-        typer.echo(f"[red]{exc}[/red]", err=True)
-        raise typer.Exit(code=1) from None
+    return load_active_brain()
 
 
 def _print_diff(diff: str) -> None:
@@ -35,6 +32,7 @@ def _print_diff(diff: str) -> None:
         console.print("[dim](no difference)[/dim]")
 
 
+@handle_errors
 def review(
     cr_id: str = typer.Argument(None, help="CR ID. Empty = list pending."),
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
@@ -69,12 +67,7 @@ def review(
             return
         cr = change_request_service.get(cr_id, conn)
         if cr is None:
-            if as_json:
-                print(f'{{"error": {{"code": "not_found", "message": '
-                      f'"Change request not found: {cr_id}"}}}}', file=sys.stderr)
-                raise typer.Exit(code=1)
-            typer.echo(f"[red]Change request not found: {cr_id}[/red]", err=True)
-            raise typer.Exit(code=1)
+            raise NotFoundError(f"Change request not found: {cr_id}")
 
         def human_detail() -> None:
             typer.echo(f"[bold]{cr.id}[/bold] — {cr.status} — {esc(cr.summary or '')}")
@@ -145,6 +138,7 @@ def reject(cr_id: str = typer.Argument(..., help="Change request ID.")) -> None:
     typer.echo(f"[yellow]Rejected {cr_id}.[/yellow]")
 
 
+@handle_errors
 def jobs(
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:
