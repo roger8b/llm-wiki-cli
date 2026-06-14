@@ -10,11 +10,12 @@ from rich.console import Console
 from rich.markup import escape as esc
 from rich.table import Table
 
+from ....core.config import load_config
 from ....core.errors import WikiError
 from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import SourceRepo
-from ....sources.manager import add_source
+from ....sources.manager import add_source, add_url
 
 source_app = typer.Typer(
     help="Manage raw sources in raw/.",
@@ -32,16 +33,30 @@ def _brain() -> BrainPaths:
 
 
 @source_app.command("add")
-def source_add(file: str = typer.Argument(..., help="Source file.")) -> None:
-    """Register a raw file in raw/."""
+def source_add(
+    file: str = typer.Argument(None, help="Source file."),
+    url: str = typer.Option(None, "--url", help="Capture a web article by URL."),
+) -> None:
+    """Register a raw file in raw/, or capture a web article with ``--url``."""
+    if bool(file) == bool(url):
+        typer.echo(
+            "[red]Provide exactly one of a file argument or --url.[/red]", err=True
+        )
+        raise typer.Exit(code=2)
     paths = _brain()
-    src = Path(file).resolve()
-    if not src.is_file():
-        typer.echo(f"[red]File not found: {file}[/red]", err=True)
-        raise typer.Exit(code=1)
     conn = get_connection(paths.db_path)
     try:
-        result = add_source(src, paths, SourceRepo(conn))
+        if url:
+            cfg = load_config(paths)
+            result = add_url(
+                url, paths, SourceRepo(conn), timeout=cfg.request_timeout
+            )
+        else:
+            src = Path(file).resolve()
+            if not src.is_file():
+                typer.echo(f"[red]File not found: {file}[/red]", err=True)
+                raise typer.Exit(code=3)
+            result = add_source(src, paths, SourceRepo(conn))
     finally:
         conn.close()
     if result.already_present:
@@ -49,8 +64,9 @@ def source_add(file: str = typer.Argument(..., help="Source file.")) -> None:
             f"[yellow]Source already registered[/yellow] (matching hash): {result.source.path}"
         )
     else:
+        title = f" — {result.source.title}" if result.source.title else ""
         typer.echo(
-            f"[green]Source registered:[/green] {result.source.path} "
+            f"[green]Source registered:[/green] {result.source.path}{title} "
             f"({result.source.status.value})"
         )
 

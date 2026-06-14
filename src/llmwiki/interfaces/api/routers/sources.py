@@ -156,3 +156,54 @@ def add_text_source(
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "note"
     body = content if content.startswith("#") else f"# {title}\n\n{content}"
     return _register_temp_source(f"{slug}.md", body.encode("utf-8"))
+
+
+def _url_timeout(paths: Any) -> int:
+    from ....core.config import load_config
+
+    return load_config(paths).request_timeout
+
+
+@router.post("/url/preview")
+def preview_url_source(url: str = Body(..., embed=True)) -> dict[str, Any]:
+    """Fetch + extract a URL without saving — title and a short preview (#195)."""
+    from ....core.errors import EmptyExtractionError, FetchError
+    from ....sources.manager import fetch_and_extract_url
+
+    paths = _ctx()
+    try:
+        extracted = fetch_and_extract_url(url, timeout=_url_timeout(paths))
+    except FetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except EmptyExtractionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "url": url,
+        "title": extracted.title,
+        "author": extracted.author,
+        "date": extracted.date,
+        "preview": extracted.text[:500],
+    }
+
+
+@router.post("/url")
+def add_url_source(url: str = Body(..., embed=True)) -> dict[str, Any]:
+    """Capture a web article by URL and register it as a source (#195)."""
+    from ....core.errors import EmptyExtractionError, FetchError
+    from ....db.repo import SourceRepo
+    from ....sources.manager import add_url
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        result = add_url(url, paths, SourceRepo(conn), timeout=_url_timeout(paths))
+    except FetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except EmptyExtractionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        conn.close()
+    return {
+        **result.source.model_dump(mode="json"),
+        "already_present": result.already_present,
+    }
