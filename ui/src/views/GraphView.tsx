@@ -578,15 +578,16 @@ export function GraphView() {
               const dy = e.clientY - panDragRef.current.y
               panDragRef.current = { x: e.clientX, y: e.clientY }
               // Convert CSS-pixel delta into world units (inverse of the
-              // current zoom + svg-to-screen scale).
+              // current zoom + svg-to-screen scale). Sign matches the
+              // canvas: drag-right → world moves right (Google Maps).
               const svg = svgRef.current!
               const r = svg.getBoundingClientRect()
               const sx = (W / r.width) / viewport.zoom
               const sy = (H / r.height) / viewport.zoom
               setViewport((v) => ({
                 ...v,
-                x: v.x - dx * sx,
-                y: v.y - dy * sy,
+                x: v.x + dx * sx,
+                y: v.y + dy * sy,
               }))
             }
           }}
@@ -613,79 +614,81 @@ export function GraphView() {
             if (focusId) setFocusId(null)
           }}
         >
-          <g transform={`translate(${viewport.x},${viewport.y})`}>
-            {/* edges */}
-            {resolvedEdges.map(([a, b], i) => {
-              if (!isVisible(a) || !isVisible(b)) return null
-              const inFocus =
-                !focusSet || (focusSet.has(a.id) && focusSet.has(b.id))
-              return (
-                <line
-                  key={i}
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke="currentColor"
-                  className="text-border"
-                  strokeWidth={1}
-                  opacity={inFocus ? 0.5 : 0.08}
-                />
-              )
-            })}
-            {/* nodes */}
-            {nodes.map((n) => {
-              if (!isVisible(n)) return null
-              const inFocus = !focusSet || focusSet.has(n.id)
-              const isMatch = matchIds.has(n.id)
-              const isCurrent = currentMatchId === n.id
-              const isSel = selected?.id === n.id
-              const highlight = isSel || isCurrent
-              return (
-                <g
-                  key={n.id}
-                  transform={`translate(${n.x},${n.y})`}
-                  opacity={inFocus ? (isMatch && !isCurrent ? 0.9 : 1) : 0.15}
-                  className="cursor-pointer"
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    dragRef.current = { id: n.id }
-                    setSelected(n)
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setFocusId(n.id)
-                  }}
-                  onDoubleClick={() =>
-                    navigate(`/wiki?path=${encodeURIComponent(n.id)}`)
+          {/* Edges + nodes rendered in world coordinates. The viewBox itself
+              carries the pan + zoom (set on the <svg> above). An extra
+              <g transform="translate(viewport)"> would double the pan —
+              we explicitly do NOT add one here. */}
+          {/* edges */}
+          {resolvedEdges.map(([a, b], i) => {
+            if (!isVisible(a) || !isVisible(b)) return null
+            const inFocus =
+              !focusSet || (focusSet.has(a.id) && focusSet.has(b.id))
+            return (
+              <line
+                key={i}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke="currentColor"
+                className="text-border"
+                strokeWidth={1}
+                opacity={inFocus ? 0.5 : 0.08}
+              />
+            )
+          })}
+          {/* nodes */}
+          {nodes.map((n) => {
+            if (!isVisible(n)) return null
+            const inFocus = !focusSet || focusSet.has(n.id)
+            const isMatch = matchIds.has(n.id)
+            const isCurrent = currentMatchId === n.id
+            const isSel = selected?.id === n.id
+            const highlight = isSel || isCurrent
+            return (
+              <g
+                key={n.id}
+                transform={`translate(${n.x},${n.y})`}
+                opacity={inFocus ? (isMatch && !isCurrent ? 0.9 : 1) : 0.15}
+                className="cursor-pointer"
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  dragRef.current = { id: n.id }
+                  setSelected(n)
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setFocusId(n.id)
+                }}
+                onDoubleClick={() =>
+                  navigate(`/wiki?path=${encodeURIComponent(n.id)}`)
+                }
+              >
+                <title>{`${n.title} • ${n.type} • ${degree(n.id)} connections`}</title>
+                <circle
+                  r={highlight ? 10 : isMatch ? 8 : 6}
+                  fill={colorFor(n.type)}
+                  stroke={
+                    isCurrent
+                      ? "var(--primary)"
+                      : highlight
+                        ? "var(--foreground)"
+                        : "white"
                   }
+                  strokeWidth={highlight ? 2.5 : isMatch ? 2 : 1.5}
+                />
+                <text
+                  x={12}
+                  y={4}
+                  className="fill-foreground"
+                  style={{ fontSize: 11, fontFamily: "var(--font-body)" }}
                 >
-                  <title>{`${n.title} • ${n.type} • ${degree(n.id)} connections`}</title>
-                  <circle
-                    r={highlight ? 10 : isMatch ? 8 : 6}
-                    fill={colorFor(n.type)}
-                    stroke={
-                      isCurrent
-                        ? "var(--primary)"
-                        : highlight
-                          ? "var(--foreground)"
-                          : "white"
-                    }
-                    strokeWidth={highlight ? 2.5 : isMatch ? 2 : 1.5}
-                  />
-                  <text
-                    x={12}
-                    y={4}
-                    className="fill-foreground"
-                    style={{ fontSize: 11, fontFamily: "var(--font-body)" }}
-                  >
-                    {n.title}
-                  </text>
-                </g>
-              )
-            })}
-          </g>
+                  {n.title}
+                </text>
+              </g>
+            )
+          })}
         </svg>
       )}
 
