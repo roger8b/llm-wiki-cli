@@ -7,14 +7,15 @@ import sys
 import typer
 from rich.console import Console
 from rich.markup import escape as esc
-from rich.table import Table
 
 from ....core.config import load_config
 from ....core.errors import WikiError
-from ....core.models import Severity
+from ....core.models import PageType, Severity
 from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
-from ....db.repo import PageFtsRepo
+from ....db.repo import PageRepo
+from ....search.factory import build_semantic_backend
+from ....search.service import hybrid_search, keyword_search
 from ....services import (
     change_request_service,
     index_service,
@@ -55,31 +56,82 @@ def index() -> None:
 
 
 def search(
-    query: str = typer.Argument(..., help="Search query (FTS5)."),
+    query: str = typer.Argument(..., help="Search query (FTS5 + semantic when configured)."),
+    type_: str | None = typer.Option(
+        None, "--type", "-t", help="Filter by page type (e.g. concept, decision)."
+    ),
+    tag: str | None = typer.Option(None, "--tag", help="Filter by tag."),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max results (default 10)."),
+    keyword_only: bool = typer.Option(
+        False, "--keyword-only", help="Force FTS even when semantic search is configured."
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:
-    """Search pages by keyword (FTS5 index)."""
+    """Search pages with snippets and optional type/tag filters."""
     paths = _brain()
+    # Validate --type early (exit 2: invalid usage), before touching the DB.
+    if type_ is not None:
+        try:
+            type_ = PageType(type_).value
+        except ValueError:
+            valid = ", ".join(t.value for t in PageType)
+            typer.echo(
+                f"[red]Invalid type '{type_}'. Use one of: {valid}[/red]", err=True
+            )
+            raise typer.Exit(code=2) from None
+
+    cfg = load_config(paths)
     conn = get_connection(paths.db_path)
     try:
-        results = PageFtsRepo(conn).search(query)
+        # Over-fetch so post-filtering by type/tag still returns up to `limit`.
+        fetch = limit if (type_ is None and tag is None) else max(limit * 5, 50)
+        embedder, store = (None, None) if keyword_only else build_semantic_backend(cfg, conn)
+        if embedder is not None:
+            hits = hybrid_search(conn, query, limit=fetch, embedder=embedder, store=store)
+        else:
+            hits = keyword_search(conn, query, limit=fetch)
+        # Enrich + filter with type/tags from the page index.
+        index = {p.path: p for p in PageRepo(conn).list()}
     finally:
         conn.close()
-    payload = {
-        "results": [
-            {"path": path, "title": title, "score": -rank, "source": "keyword"}
-            for path, title, rank in results
-        ]
-    }
+
+    results: list[dict[str, object]] = []
+    for hit in hits:
+        page = index.get(hit.path)
+        ptype = page.type.value if page else None
+        tags = list(page.tags) if page else []
+        if type_ is not None and ptype != type_:
+            continue
+        if tag is not None and tag.strip().lower() not in [t.lower() for t in tags]:
+            continue
+        results.append(
+            {
+                "path": hit.path,
+                "title": hit.title,
+                "score": round(hit.score, 4),
+                "source": hit.source,
+                "snippet": hit.snippet,
+                "type": ptype,
+                "tags": tags,
+            }
+        )
+        if len(results) >= limit:
+            break
+
+    payload = {"results": results}
 
     def human() -> None:
         if not results:
             typer.echo("[dim]No results found.[/dim]")
             return
-        table = Table("Page", "Title")
-        for path, title, _rank in results:
-            table.add_row(esc(path), esc(title))
-        Console(file=sys.stdout).print(table)
+        for r in results:
+            title = esc(str(r["title"] or r["path"]))
+            meta = f"[dim][{r['source']} {r['score']}][/dim]"
+            console.print(f"{esc(str(r['path']))} — {title}  {meta}")
+            snippet = r["snippet"]
+            if snippet:
+                snip = esc(str(snippet)).replace("«", "[yellow]").replace("»", "[/yellow]")
+                console.print(f"    {snip}")
 
     emit(payload, as_json=as_json, human=human)
 
