@@ -21,6 +21,7 @@ from ....services import (
     lint_service,
     query_service,
 )
+from .._output import emit
 
 console = Console()
 
@@ -53,7 +54,10 @@ def index() -> None:
         )
 
 
-def search(query: str = typer.Argument(..., help="Search query (FTS5).")) -> None:
+def search(
+    query: str = typer.Argument(..., help="Search query (FTS5)."),
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
     """Search pages by keyword (FTS5 index)."""
     paths = _brain()
     conn = get_connection(paths.db_path)
@@ -61,19 +65,30 @@ def search(query: str = typer.Argument(..., help="Search query (FTS5).")) -> Non
         results = PageFtsRepo(conn).search(query)
     finally:
         conn.close()
-    if not results:
-        typer.echo("[dim]No results found.[/dim]")
-        return
-    table = Table("Page", "Title")
-    for path, title, _rank in results:
-        table.add_row(esc(path), esc(title))
-    Console(file=sys.stdout).print(table)
+    payload = {
+        "results": [
+            {"path": path, "title": title, "score": -rank, "source": "keyword"}
+            for path, title, rank in results
+        ]
+    }
+
+    def human() -> None:
+        if not results:
+            typer.echo("[dim]No results found.[/dim]")
+            return
+        table = Table("Page", "Title")
+        for path, title, _rank in results:
+            table.add_row(esc(path), esc(title))
+        Console(file=sys.stdout).print(table)
+
+    emit(payload, as_json=as_json, human=human)
 
 
 def lint(
     semantic: bool = typer.Option(
         False, "--all/--structural", help="--all includes semantic audit via LLM."
     ),
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:
     """Audit the health of the wiki (structural; --all adds semantic via LLM)."""
     paths = _brain()
@@ -86,16 +101,21 @@ def lint(
             raise typer.Exit(code=1) from exc
     else:
         findings = lint_service.lint_structural(paths)
-    if not findings:
-        typer.echo("[green]Lint OK — no issues found.[/green]")
-        return
-    color = {Severity.info: "blue", Severity.warn: "yellow", Severity.error: "red"}
-    for f in findings:
-        typer.echo(
-            f"[{color[f.severity]}]{f.severity.value.upper()}[/] "
-            f"{esc(f.kind)}: {esc(f.message)}"
-        )
     errors = sum(1 for f in findings if f.severity == Severity.error)
+    payload = {"findings": findings}
+
+    def human() -> None:
+        if not findings:
+            typer.echo("[green]Lint OK — no issues found.[/green]")
+            return
+        color = {Severity.info: "blue", Severity.warn: "yellow", Severity.error: "red"}
+        for f in findings:
+            typer.echo(
+                f"[{color[f.severity]}]{f.severity.value.upper()}[/] "
+                f"{esc(f.kind)}: {esc(f.message)}"
+            )
+
+    emit(payload, as_json=as_json, human=human)
     if errors:
         raise typer.Exit(code=1)
 
@@ -103,6 +123,7 @@ def lint(
 def ask(
     question: str = typer.Argument(..., help="Question for the wiki."),
     save: bool = typer.Option(False, "--save", help="Save the answer as a page (creates CR)."),
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:
     """Answer a question using the wiki as the primary source."""
     paths = _brain()
@@ -115,20 +136,34 @@ def ask(
         raise typer.Exit(code=1) from exc
     finally:
         conn.close()
-    Console(file=sys.stdout).print(result.answer, markup=False)
-    if result.citations:
-        typer.echo("\n[dim]Sources:[/dim]")
-        for i, c in enumerate(result.citations, 1):
-            ref = c.page or c.source or "?"
-            if c.invalid:
-                typer.echo(f"  [{i}] [yellow](!) {esc(ref)} — não resolve[/yellow]")
-            else:
-                typer.echo(f"  [{i}] {esc(ref)}")
-    if cr is not None:
-        typer.echo(
-            f"\n[green]Answer saved as change request {cr.id}[/green] "
-            f"— review with wiki review {cr.id}"
-        )
+    payload = {
+        "answer": result.answer,
+        "citations": [c.model_dump(mode="json") for c in result.citations],
+        "suggested_page": (
+            result.suggested_page.model_dump(mode="json")
+            if result.suggested_page is not None
+            else None
+        ),
+        "change_request_id": cr.id if cr is not None else None,
+    }
+
+    def human() -> None:
+        Console(file=sys.stdout).print(result.answer, markup=False)
+        if result.citations:
+            typer.echo("\n[dim]Sources:[/dim]")
+            for i, c in enumerate(result.citations, 1):
+                ref = c.page or c.source or "?"
+                if c.invalid:
+                    typer.echo(f"  [{i}] [yellow](!) {esc(ref)} — não resolve[/yellow]")
+                else:
+                    typer.echo(f"  [{i}] {esc(ref)}")
+        if cr is not None:
+            typer.echo(
+                f"\n[green]Answer saved as change request {cr.id}[/green] "
+                f"— review with wiki review {cr.id}"
+            )
+
+    emit(payload, as_json=as_json, human=human)
 
 
 def maintain(
@@ -160,10 +195,23 @@ def maintain(
         conn.close()
 
 
-def log() -> None:
+def log(
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
     """Print wiki/log.md."""
     paths = _brain()
     if not paths.log_path.is_file():
+        if as_json:
+            print('{"entries": []}')
+            return
         typer.echo("[red]log.md not found.[/red]", err=True)
         raise typer.Exit(code=1)
-    Console(file=sys.stdout).print(paths.log_path.read_text(encoding="utf-8"), markup=False)
+    text = paths.log_path.read_text(encoding="utf-8")
+
+    def human() -> None:
+        Console(file=sys.stdout).print(text, markup=False)
+
+    # Entries are the markdown blocks separated by blank lines; expose them as a
+    # list while keeping the raw text for round-tripping.
+    entries = [block.strip() for block in text.split("\n\n") if block.strip()]
+    emit({"entries": entries, "raw": text}, as_json=as_json, human=human)

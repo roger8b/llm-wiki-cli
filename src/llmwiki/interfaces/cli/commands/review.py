@@ -15,6 +15,7 @@ from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import JobRepo
 from ....services import change_request_service
+from .._output import emit
 
 console = Console()
 
@@ -34,35 +35,60 @@ def _print_diff(diff: str) -> None:
         console.print("[dim](no difference)[/dim]")
 
 
-def review(cr_id: str = typer.Argument(None, help="CR ID. Empty = list pending.")) -> None:
+def review(
+    cr_id: str = typer.Argument(None, help="CR ID. Empty = list pending."),
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
     """Show the diffs of a change request, or list pending ones."""
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
         if cr_id is None:
-            crs = change_request_service.list_crs(conn, status="pending_review")
-            if not crs:
-                typer.echo("[dim]No pending change requests.[/dim]")
-                return
-            table = Table("CR", "Files", "Summary")
-            for cr in crs:
-                table.add_row(cr.id, str(cr.files_changed), esc((cr.summary or "")[:60]))
-            Console(file=sys.stdout).print(table)
+            pending = change_request_service.list_crs(conn, status="pending_review")
+
+            def _summary(cr: object) -> dict[str, object]:
+                return {
+                    "id": cr.id,
+                    "status": cr.status,
+                    "files_changed": cr.files_changed,
+                    "summary": cr.summary,
+                }
+
+            payload = {"pending": [_summary(c) for c in pending]}
+
+            def human_list() -> None:
+                if not pending:
+                    typer.echo("[dim]No pending change requests.[/dim]")
+                    return
+                table = Table("CR", "Files", "Summary")
+                for cr in pending:
+                    table.add_row(cr.id, str(cr.files_changed), esc((cr.summary or "")[:60]))
+                Console(file=sys.stdout).print(table)
+
+            emit(payload, as_json=as_json, human=human_list)
             return
         cr = change_request_service.get(cr_id, conn)
         if cr is None:
+            if as_json:
+                print(f'{{"error": {{"code": "not_found", "message": '
+                      f'"Change request not found: {cr_id}"}}}}', file=sys.stderr)
+                raise typer.Exit(code=1)
             typer.echo(f"[red]Change request not found: {cr_id}[/red]", err=True)
             raise typer.Exit(code=1)
-        typer.echo(f"[bold]{cr.id}[/bold] — {cr.status} — {esc(cr.summary or '')}")
-        for c in cr.changes:
-            typer.echo(f"\n[cyan]{esc(c.operation)}: {esc(c.path)}[/cyan]")
-            if c.quality_score is not None:
-                color = "green" if c.quality_score >= 80 else (
-                    "yellow" if c.quality_score >= 60 else "red"
-                )
-                flags = f" — {esc(', '.join(c.quality_flags))}" if c.quality_flags else ""
-                typer.echo(f"[{color}]quality: {c.quality_score}/100[/{color}]{flags}")
-            _print_diff(c.diff)
+
+        def human_detail() -> None:
+            typer.echo(f"[bold]{cr.id}[/bold] — {cr.status} — {esc(cr.summary or '')}")
+            for c in cr.changes:
+                typer.echo(f"\n[cyan]{esc(c.operation)}: {esc(c.path)}[/cyan]")
+                if c.quality_score is not None:
+                    color = "green" if c.quality_score >= 80 else (
+                        "yellow" if c.quality_score >= 60 else "red"
+                    )
+                    flags = f" — {esc(', '.join(c.quality_flags))}" if c.quality_flags else ""
+                    typer.echo(f"[{color}]quality: {c.quality_score}/100[/{color}]{flags}")
+                _print_diff(c.diff)
+
+        emit(cr, as_json=as_json, human=human_detail)
     finally:
         conn.close()
 
@@ -119,7 +145,9 @@ def reject(cr_id: str = typer.Argument(..., help="Change request ID.")) -> None:
     typer.echo(f"[yellow]Rejected {cr_id}.[/yellow]")
 
 
-def jobs() -> None:
+def jobs(
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
     """List registered jobs (ingest/lint/query)."""
     paths = _brain()
     conn = get_connection(paths.db_path)
@@ -127,16 +155,21 @@ def jobs() -> None:
         rows = JobRepo(conn).list()
     finally:
         conn.close()
-    if not rows:
-        typer.echo("[dim]No jobs found.[/dim]")
-        return
-    table = Table("ID", "Type", "Status", "Created", "Error")
-    for r in rows:
-        table.add_row(
-            str(r["id"]),
-            r["type"],
-            r["status"],
-            r["created_at"][:19],
-            esc((r["error"] or "")[:30]),
-        )
-    Console(file=sys.stdout).print(table)
+    payload = {"jobs": [dict(r) for r in rows]}
+
+    def human() -> None:
+        if not rows:
+            typer.echo("[dim]No jobs found.[/dim]")
+            return
+        table = Table("ID", "Type", "Status", "Created", "Error")
+        for r in rows:
+            table.add_row(
+                str(r["id"]),
+                r["type"],
+                r["status"],
+                r["created_at"][:19],
+                esc((r["error"] or "")[:30]),
+            )
+        Console(file=sys.stdout).print(table)
+
+    emit(payload, as_json=as_json, human=human)
