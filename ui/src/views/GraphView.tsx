@@ -5,6 +5,10 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { Graph } from "@/types"
 import { Button } from "@/components/ui/button"
+import { useAppStore } from "@/stores/app"
+import { loadPositions, savePositions, type Positions } from "@/lib/graphPositions"
+import type { LayoutResponse } from "@/workers/graphLayout.worker"
+import { GraphCanvas } from "./GraphCanvas"
 
 interface Node {
   id: string
@@ -17,6 +21,9 @@ interface Node {
 
 const W = 1000
 const H = 700
+// Past this many nodes we switch from one-SVG-element-per-node to an imperative
+// <canvas> renderer (#194); below it the SVG keeps the simpler hover/click UX.
+const CANVAS_THRESHOLD = 300
 
 const TYPE_COLOR: Record<string, string> = {
   concept: "#2bb673",
@@ -30,76 +37,26 @@ function colorFor(type: string) {
   return TYPE_COLOR[type] ?? "#94a3b8"
 }
 
-/** Run a few hundred force-sim iterations to lay out the graph deterministically. */
-function layout(graph: Graph): Node[] {
-  const nodes: Node[] = graph.nodes.map((n, i) => {
-    const angle = (i / Math.max(1, graph.nodes.length)) * Math.PI * 2
+/** Seed node positions from the per-brain cache, falling back to a circle. */
+function seed(graph: Graph, cached: Positions): Node[] {
+  const n = Math.max(1, graph.nodes.length)
+  return graph.nodes.map((node, i) => {
+    const c = cached[node.id]
+    const angle = (i / n) * Math.PI * 2
     return {
-      ...n,
-      tags: n.tags ?? [],
-      x: W / 2 + Math.cos(angle) * 250,
-      y: H / 2 + Math.sin(angle) * 250,
+      id: node.id,
+      title: node.title,
+      type: node.type,
+      tags: node.tags ?? [],
+      x: c ? c[0] : W / 2 + Math.cos(angle) * 250,
+      y: c ? c[1] : H / 2 + Math.sin(angle) * 250,
     }
   })
-  const index = new Map<string, number>()
-  nodes.forEach((n, i) => {
-    index.set(n.id, i)
-    index.set(n.title.toLowerCase(), i)
-  })
-  const idx = (key: string) =>
-    index.get(key) ?? index.get(key.toLowerCase())
-  const edges = graph.edges
-    .map((e) => [idx(e.from), idx(e.to)] as const)
-    .filter((e): e is readonly [number, number] => e[0] != null && e[1] != null)
-
-  const REPULSION = 12000
-  const SPRING = 0.02
-  const SPRING_LEN = 120
-  const CENTER = 0.008
-
-  for (let iter = 0; iter < 350; iter++) {
-    const fx = new Array(nodes.length).fill(0)
-    const fy = new Array(nodes.length).fill(0)
-    // repulsion
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        let dx = nodes[i].x - nodes[j].x
-        let dy = nodes[i].y - nodes[j].y
-        const d2 = dx * dx + dy * dy || 0.01
-        const f = REPULSION / d2
-        const d = Math.sqrt(d2)
-        dx /= d
-        dy /= d
-        fx[i] += dx * f
-        fy[i] += dy * f
-        fx[j] -= dx * f
-        fy[j] -= dy * f
-      }
-    }
-    // springs
-    for (const [a, b] of edges) {
-      const dx = nodes[b].x - nodes[a].x
-      const dy = nodes[b].y - nodes[a].y
-      const d = Math.sqrt(dx * dx + dy * dy) || 0.01
-      const f = (d - SPRING_LEN) * SPRING
-      fx[a] += (dx / d) * f
-      fy[a] += (dy / d) * f
-      fx[b] -= (dx / d) * f
-      fy[b] -= (dy / d) * f
-    }
-    // centering + integrate
-    for (let i = 0; i < nodes.length; i++) {
-      fx[i] += (W / 2 - nodes[i].x) * CENTER
-      fy[i] += (H / 2 - nodes[i].y) * CENTER
-      nodes[i].x += Math.max(-15, Math.min(15, fx[i]))
-      nodes[i].y += Math.max(-15, Math.min(15, fy[i]))
-    }
-  }
-  return nodes
 }
 
 export function GraphView() {
   const navigate = useNavigate()
+  const brainId = useAppStore((s) => s.activeBrainId)
   const [graph, setGraph] = useState<Graph | null>(null)
   const [nodes, setNodes] = useState<Node[]>([])
   const [selected, setSelected] = useState<Node | null>(null)
@@ -114,17 +71,91 @@ export function GraphView() {
   const dragRef = useRef<{ id: string } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
+  // Load the graph + run the force layout in a Web Worker so the main thread
+  // stays responsive on large wikis (#194). Positions stream back as ticks.
   useEffect(() => {
+    let worker: Worker | null = null
+    let raf = 0
+    let latest: Positions | null = null
+    let cancelled = false
+
+    const flush = () => {
+      raf = 0
+      if (!latest) return
+      const pos = latest
+      latest = null
+      setNodes((ns) =>
+        ns.map((n) => {
+          const p = pos[n.id]
+          return p ? { ...n, x: p[0], y: p[1] } : n
+        }),
+      )
+    }
+
     api
       .graph()
       .then((g) => {
+        if (cancelled) return
+        const cached = loadPositions(brainId)
+        const laid = seed(g, cached)
         setGraph(g)
-        const laid = layout(g)
         setNodes(laid)
         setActiveTypes(new Set(laid.map((n) => n.type)))
+        if (g.nodes.length === 0) return
+
+        // Resolve edges (by path or title) to node ids for forceLink.
+        const byKey = new Map<string, string>()
+        for (const n of laid) {
+          byKey.set(n.id, n.id)
+          byKey.set(n.title.toLowerCase(), n.id)
+        }
+        const edges = g.edges
+          .map((e) => ({
+            source: byKey.get(e.from) ?? byKey.get(e.from.toLowerCase()),
+            target: byKey.get(e.to) ?? byKey.get(e.to.toLowerCase()),
+          }))
+          .filter(
+            (e): e is { source: string; target: string } =>
+              !!e.source && !!e.target,
+          )
+
+        const cachedCount = laid.filter((n) => cached[n.id]).length
+        const alpha = cachedCount > laid.length * 0.6 ? 0.3 : 1
+
+        // Guard: no Worker in SSR / test environments — keep the seeded layout.
+        if (typeof Worker === "undefined") return
+        try {
+          worker = new Worker(
+            new URL("../workers/graphLayout.worker.ts", import.meta.url),
+            { type: "module" },
+          )
+        } catch {
+          return
+        }
+        worker.onmessage = (ev: MessageEvent<LayoutResponse>) => {
+          const msg = ev.data
+          latest = msg.positions
+          if (msg.type === "done") {
+            savePositions(brainId, msg.positions)
+          }
+          if (!raf) raf = requestAnimationFrame(flush)
+        }
+        worker.postMessage({
+          nodes: laid.map((n) => ({ id: n.id, x: n.x, y: n.y })),
+          edges,
+          width: W,
+          height: H,
+          alpha,
+        })
       })
       .catch((e) => toast.error((e as Error).message))
-  }, [])
+
+    return () => {
+      cancelled = true
+      if (raf) cancelAnimationFrame(raf)
+      worker?.terminate()
+    }
+  }, [brainId])
 
   const types = useMemo(
     () => [...new Set(nodes.map((n) => n.type))].sort(),
@@ -147,20 +178,29 @@ export function GraphView() {
   const resolve = (key: string) =>
     nodePos.get(key) ?? nodePos.get(key.toLowerCase())
 
+  // Resolved edge pairs, shared by the SVG and canvas renderers.
+  const resolvedEdges = useMemo(() => {
+    const out: [Node, Node][] = []
+    for (const e of graph?.edges ?? []) {
+      const a = resolve(e.from)
+      const b = resolve(e.to)
+      if (a && b) out.push([a, b])
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, graph])
+
   // Adjacency by node id (undirected), for focus-mode BFS and degree count.
   const adjacency = useMemo(() => {
     const adj = new Map<string, Set<string>>()
     for (const n of nodes) adj.set(n.id, new Set())
-    for (const e of graph?.edges ?? []) {
-      const a = resolve(e.from)
-      const b = resolve(e.to)
-      if (!a || !b || a.id === b.id) continue
+    for (const [a, b] of resolvedEdges) {
+      if (a.id === b.id) continue
       adj.get(a.id)!.add(b.id)
       adj.get(b.id)!.add(a.id)
     }
     return adj
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, graph])
+  }, [nodes, resolvedEdges])
 
   // Nodes within `depth` hops of the focused node (inclusive). Empty = no focus.
   const focusSet = useMemo(() => {
@@ -240,6 +280,11 @@ export function GraphView() {
   }
 
   const degree = (id: string) => adjacency.get(id)?.size ?? 0
+
+  const moveNode = (id: string, x: number, y: number) =>
+    setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, x, y } : n)))
+
+  const useCanvas = nodes.length > CANVAS_THRESHOLD
 
   return (
     <div className="relative flex-1 overflow-hidden">
@@ -341,104 +386,117 @@ export function GraphView() {
         </div>
       )}
 
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        className="h-full w-full"
-        onPointerMove={(e) => {
-          if (!dragRef.current) return
-          const { x, y } = toSvg(e)
-          const id = dragRef.current.id
-          setNodes((ns) =>
-            ns.map((n) =>
-              n.id === id ? { ...n, x: x - pan.x, y: y - pan.y } : n,
-            ),
-          )
-        }}
-        onPointerUp={() => (dragRef.current = null)}
-        onPointerLeave={() => (dragRef.current = null)}
-        onClick={() => {
-          // Click on empty background exits focus mode.
-          if (focusId) setFocusId(null)
-        }}
-      >
-        <g transform={`translate(${pan.x},${pan.y})`}>
-          {/* edges */}
-          {graph?.edges.map((e, i) => {
-            const a = resolve(e.from)
-            const b = resolve(e.to)
-            if (!a || !b) return null
-            if (!isVisible(a) || !isVisible(b)) return null
-            const inFocus =
-              !focusSet || (focusSet.has(a.id) && focusSet.has(b.id))
-            return (
-              <line
-                key={i}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke="currentColor"
-                className="text-border"
-                strokeWidth={1}
-                opacity={inFocus ? 0.5 : 0.08}
-              />
-            )
-          })}
-          {/* nodes */}
-          {nodes.map((n) => {
-            if (!isVisible(n)) return null
-            const inFocus = !focusSet || focusSet.has(n.id)
-            const isMatch = matchIds.has(n.id)
-            const isCurrent = currentMatchId === n.id
-            const isSel = selected?.id === n.id
-            const highlight = isSel || isCurrent
-            return (
-              <g
-                key={n.id}
-                transform={`translate(${n.x},${n.y})`}
-                opacity={inFocus ? (isMatch && !isCurrent ? 0.9 : 1) : 0.15}
-                className="cursor-pointer"
-                onPointerDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  dragRef.current = { id: n.id }
-                  setSelected(n)
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setFocusId(n.id)
-                }}
-                onDoubleClick={() =>
-                  navigate(`/wiki?path=${encodeURIComponent(n.id)}`)
-                }
-              >
-                <title>{`${n.title} • ${n.type} • ${degree(n.id)} connections`}</title>
-                <circle
-                  r={highlight ? 10 : isMatch ? 8 : 6}
-                  fill={colorFor(n.type)}
-                  stroke={
-                    isCurrent
-                      ? "var(--primary)"
-                      : highlight
-                        ? "var(--foreground)"
-                        : "white"
-                  }
-                  strokeWidth={highlight ? 2.5 : isMatch ? 2 : 1.5}
+      {useCanvas ? (
+        <GraphCanvas
+          nodes={nodes}
+          edges={resolvedEdges}
+          world={{ w: W, h: H }}
+          pan={pan}
+          colorFor={colorFor}
+          isVisible={isVisible}
+          focusSet={focusSet}
+          matchIds={matchIds}
+          currentMatchId={currentMatchId}
+          selectedId={selected?.id}
+          degree={degree}
+          onSelect={setSelected}
+          onFocus={setFocusId}
+          onOpen={(n) => navigate(`/wiki?path=${encodeURIComponent(n.id)}`)}
+          onBackground={() => setFocusId(null)}
+          onDrag={moveNode}
+        />
+      ) : (
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          className="h-full w-full"
+          onPointerMove={(e) => {
+            if (!dragRef.current) return
+            const { x, y } = toSvg(e)
+            moveNode(dragRef.current.id, x - pan.x, y - pan.y)
+          }}
+          onPointerUp={() => (dragRef.current = null)}
+          onPointerLeave={() => (dragRef.current = null)}
+          onClick={() => {
+            // Click on empty background exits focus mode.
+            if (focusId) setFocusId(null)
+          }}
+        >
+          <g transform={`translate(${pan.x},${pan.y})`}>
+            {/* edges */}
+            {resolvedEdges.map(([a, b], i) => {
+              if (!isVisible(a) || !isVisible(b)) return null
+              const inFocus =
+                !focusSet || (focusSet.has(a.id) && focusSet.has(b.id))
+              return (
+                <line
+                  key={i}
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke="currentColor"
+                  className="text-border"
+                  strokeWidth={1}
+                  opacity={inFocus ? 0.5 : 0.08}
                 />
-                <text
-                  x={12}
-                  y={4}
-                  className="fill-foreground"
-                  style={{ fontSize: 11, fontFamily: "var(--font-body)" }}
+              )
+            })}
+            {/* nodes */}
+            {nodes.map((n) => {
+              if (!isVisible(n)) return null
+              const inFocus = !focusSet || focusSet.has(n.id)
+              const isMatch = matchIds.has(n.id)
+              const isCurrent = currentMatchId === n.id
+              const isSel = selected?.id === n.id
+              const highlight = isSel || isCurrent
+              return (
+                <g
+                  key={n.id}
+                  transform={`translate(${n.x},${n.y})`}
+                  opacity={inFocus ? (isMatch && !isCurrent ? 0.9 : 1) : 0.15}
+                  className="cursor-pointer"
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    dragRef.current = { id: n.id }
+                    setSelected(n)
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setFocusId(n.id)
+                  }}
+                  onDoubleClick={() =>
+                    navigate(`/wiki?path=${encodeURIComponent(n.id)}`)
+                  }
                 >
-                  {n.title}
-                </text>
-              </g>
-            )
-          })}
-        </g>
-      </svg>
+                  <title>{`${n.title} • ${n.type} • ${degree(n.id)} connections`}</title>
+                  <circle
+                    r={highlight ? 10 : isMatch ? 8 : 6}
+                    fill={colorFor(n.type)}
+                    stroke={
+                      isCurrent
+                        ? "var(--primary)"
+                        : highlight
+                          ? "var(--foreground)"
+                          : "white"
+                    }
+                    strokeWidth={highlight ? 2.5 : isMatch ? 2 : 1.5}
+                  />
+                  <text
+                    x={12}
+                    y={4}
+                    className="fill-foreground"
+                    style={{ fontSize: 11, fontFamily: "var(--font-body)" }}
+                  >
+                    {n.title}
+                  </text>
+                </g>
+              )
+            })}
+          </g>
+        </svg>
+      )}
 
       {/* side panel */}
       {selected && (
