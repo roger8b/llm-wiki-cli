@@ -36,6 +36,8 @@ _CONFIG_KEYS = (
     "chunk_size_chars",
     "chunk_overlap_chars",
     "embedding_model",
+    "ask_history_turns",
+    "ask_history_max_chars",
 )
 
 # Default config written on first init.
@@ -60,6 +62,11 @@ _DEFAULTS: dict[str, object] = {
     # Local semantic search (#169). None = disabled (pure FTS). Format
     # "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     "embedding_model": None,
+    # Ask follow-up window (#190): how many prior turns of the conversation to
+    # feed back as context, and the char cap on that block (long answers
+    # truncated with "…").
+    "ask_history_turns": 4,
+    "ask_history_max_chars": 8000,
 }
 
 
@@ -100,6 +107,9 @@ class WorkspaceConfig(BaseModel):
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None
+    # Ask follow-up conversation window (#190).
+    ask_history_turns: int = 4
+    ask_history_max_chars: int = 8000
 
     @property
     def paths(self) -> BrainPaths:

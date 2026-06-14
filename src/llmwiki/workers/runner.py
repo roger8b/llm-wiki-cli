@@ -3,6 +3,7 @@ import logging
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -150,13 +151,26 @@ class JobWorker(threading.Thread):
                             if not question:
                                 raise ValueError("Missing 'question' in ask payload")
                             save = payload.get("save", False)
+                            # Follow-up conversations (#190): an absent id starts a
+                            # new conversation; prior turns become message context.
+                            conversation_id = payload.get("conversation_id") or str(uuid.uuid4())
+                            history = AskHistoryRepo(conn).recent_turns(
+                                conversation_id, limit=cfg.ask_history_turns
+                            )
                             JobRepo(conn).set_progress(job_id, "running_agent")
                             res, cr = query_service.ask(
-                                question, paths, conn, cfg, save=save, cancel_check=_cancelled
+                                question,
+                                paths,
+                                conn,
+                                cfg,
+                                save=save,
+                                cancel_check=_cancelled,
+                                history_turns=history,
                             )
 
                             result_data = res.model_dump(mode="json")
                             result_data["change_request_id"] = cr.id if cr else None
+                            result_data["conversation_id"] = conversation_id
 
                             # Persist to permanent ask history (per-brain).
                             history_id = AskHistoryRepo(conn).insert(
@@ -166,6 +180,7 @@ class JobWorker(threading.Thread):
                                     [c.model_dump(mode="json") for c in res.citations]
                                 ),
                                 change_request_id=cr.id if cr else None,
+                                conversation_id=conversation_id,
                             )
                             result_data["history_id"] = history_id
                             JobRepo(conn).complete(job_id, result=json.dumps(result_data))

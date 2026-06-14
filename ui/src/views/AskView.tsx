@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Sparkles, Send, ArrowUpRight, Trash2, X } from "lucide-react"
+import { Sparkles, Send, ArrowUpRight, Trash2, X, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { AskHistoryItem, QueryResult } from "@/types"
@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useCrStore } from "@/stores/crs"
-import { useAskStore } from "@/stores/ask"
+import { useAskStore, type AskTurn } from "@/stores/ask"
 
 const SUGGESTED = [
   "What are the trade-offs of RAG vs fine-tuning?",
@@ -19,28 +19,84 @@ const SUGGESTED = [
   "What is chunking?",
 ]
 
+// Group flat history rows into conversations. Rows sharing a conversation_id
+// form one thread (title = its first question); legacy rows (no id) each stand
+// alone. Newest conversation first.
+interface Conversation {
+  id: string | null
+  key: string
+  title: string
+  items: AskHistoryItem[]
+}
+
+function groupConversations(history: AskHistoryItem[]): Conversation[] {
+  const byKey = new Map<string, AskHistoryItem[]>()
+  for (const item of history) {
+    const key = item.conversation_id ?? `legacy-${item.id}`
+    const list = byKey.get(key) ?? []
+    list.push(item)
+    byKey.set(key, list)
+  }
+  const convos: Conversation[] = []
+  for (const [key, items] of byKey) {
+    const ordered = [...items].sort((a, b) => a.id - b.id) // chronological
+    convos.push({
+      id: ordered[0].conversation_id ?? null,
+      key,
+      title: ordered[0].question,
+      items: ordered,
+    })
+  }
+  // Most recently active conversation first (highest last-item id).
+  convos.sort((a, b) => b.items[b.items.length - 1].id - a.items[a.items.length - 1].id)
+  return convos
+}
+
+const itemToTurn = (item: AskHistoryItem): AskTurn => ({
+  question: item.question,
+  result: {
+    answer: item.answer,
+    citations: item.citations,
+    change_request_id: item.change_request_id,
+  },
+  historyId: item.id,
+})
+
+function sourcesOf(result: QueryResult): string[] {
+  return [
+    ...new Set(
+      result.citations
+        .map((c) => c.page ?? c.source)
+        .filter((x): x is string => Boolean(x)),
+    ),
+  ]
+}
+
 export function AskView() {
   const navigate = useNavigate()
-  // Question / answer / active history id live in a store so they survive
-  // navigating away from this tab and back.
   const question = useAskStore((s) => s.question)
   const setQuestion = useAskStore((s) => s.setQuestion)
-  const result = useAskStore((s) => s.result)
-  const setResult = useAskStore((s) => s.setResult)
-  const activeId = useAskStore((s) => s.activeId)
-  const setActiveId = useAskStore((s) => s.setActiveId)
-  // loading lives in the store so the in-flight query's loading UI survives
-  // navigating away and back (the async ask() keeps running and updates it).
+  const turns = useAskStore((s) => s.turns)
+  const addTurn = useAskStore((s) => s.addTurn)
+  const conversationId = useAskStore((s) => s.conversationId)
+  const setConversationId = useAskStore((s) => s.setConversationId)
+  const newConversation = useAskStore((s) => s.newConversation)
+  const loadConversation = useAskStore((s) => s.loadConversation)
   const loading = useAskStore((s) => s.loading)
   const setLoading = useAskStore((s) => s.setLoading)
+
   const [save, setSave] = useState(false)
-  const [promoting, setPromoting] = useState(false)
+  const [promotingIdx, setPromotingIdx] = useState<number | null>(null)
   const [history, setHistory] = useState<AskHistoryItem[]>([])
   const [jobId, setJobId] = useState<number | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
   const refetchCrs = useCrStore((s) => s.fetch)
   const [params] = useSearchParams()
   const askRef = useRef(false)
+  const threadEndRef = useRef<HTMLDivElement>(null)
+
+  const conversations = useMemo(() => groupConversations(history), [history])
 
   async function loadHistory() {
     try {
@@ -54,23 +110,26 @@ export function AskView() {
     loadHistory()
   }, [])
 
+  // Keep the latest turn / loading indicator in view.
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [turns.length, loading])
+
   async function ask(q: string) {
     const query = q.trim()
     if (!query) return
     setLoading(true)
-    setResult(null)
-    setActiveId(null)
+    setPendingQuestion(query)
+    setQuestion("")
     setProgress(null)
     try {
-      const startRes = await api.ask(query, save)
+      const startRes = await api.ask(query, save, conversationId)
       const startedJobId = (startRes as { job_id?: number }).job_id
       if (typeof startedJobId !== "number") {
         toast.error("Backend did not queue the question")
         return
       }
       setJobId(startedJobId)
-      // Stream the job over SSE — the answer lands the instant the worker
-      // finishes (no 1s polling granularity).
       await api.streamJob(startedJobId, {
         onProgress: (step) => setProgress(step),
         onResult: async (result) => {
@@ -79,8 +138,8 @@ export function AskView() {
             return
           }
           const res = JSON.parse(result) as QueryResult
-          setResult(res)
-          setActiveId(res.history_id ?? null)
+          addTurn({ question: query, result: res, historyId: res.history_id ?? null })
+          if (res.conversation_id) setConversationId(res.conversation_id)
           if (res.change_request_id) {
             await refetchCrs()
             toast.success(`Saved as ${res.change_request_id}`)
@@ -96,6 +155,7 @@ export function AskView() {
       setLoading(false)
       setJobId(null)
       setProgress(null)
+      setPendingQuestion(null)
     }
   }
 
@@ -114,44 +174,34 @@ export function AskView() {
     creating_change_request: "Preparing the change request…",
   }
 
-  /** Show a previously-asked answer from history without re-running the LLM. */
-  function openHistory(item: AskHistoryItem) {
-    setQuestion(item.question)
-    setResult({
-      answer: item.answer,
-      citations: item.citations,
-      change_request_id: item.change_request_id,
-    })
-    setActiveId(item.id)
-  }
-
-  async function promote() {
-    if (!result || !question.trim()) return
-    setPromoting(true)
+  async function promote(idx: number) {
+    const turn = turns[idx]
+    if (!turn) return
+    setPromotingIdx(idx)
     try {
       const { change_request_id } = await api.promoteAnswer({
-        question: question.trim(),
-        answer: result.answer,
-        history_id: activeId ?? undefined,
+        question: turn.question.trim(),
+        answer: turn.result.answer,
+        history_id: turn.historyId ?? undefined,
       })
-      setResult({ ...result, change_request_id })
+      // Replace the turn with the promoted CR id.
+      const next = [...turns]
+      next[idx] = { ...turn, result: { ...turn.result, change_request_id } }
+      useAskStore.setState({ turns: next })
       await Promise.all([refetchCrs(), loadHistory()])
       toast.success(`Promoted to wiki page — ${change_request_id}`)
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
-      setPromoting(false)
+      setPromotingIdx(null)
     }
   }
 
-  async function removeHistory(id: number, e: React.MouseEvent) {
+  async function removeConversation(c: Conversation, e: React.MouseEvent) {
     e.stopPropagation()
     try {
-      await api.deleteAskHistory(id)
-      if (activeId === id) {
-        setResult(null)
-        setActiveId(null)
-      }
+      await Promise.all(c.items.map((i) => api.deleteAskHistory(i.id)))
+      if (conversationId && c.id === conversationId) newConversation()
       await loadHistory()
     } catch (err) {
       toast.error((err as Error).message)
@@ -161,44 +211,131 @@ export function AskView() {
   async function clearHistory() {
     try {
       await api.clearAskHistory()
-      setResult(null)
-      setActiveId(null)
+      newConversation()
       await loadHistory()
     } catch (err) {
       toast.error((err as Error).message)
     }
   }
 
-  // honor ?q= from the command palette (ask once). Skip if we already have an
-  // answer for that question in the store (restored after navigating back), so
-  // returning to /ask?q=… doesn't re-run the query.
+  // honor ?q= from the command palette (ask once into a fresh conversation).
   useEffect(() => {
     const q = params.get("q")
-    if (q && !askRef.current && !(result && question === q)) {
+    if (q && !askRef.current) {
       askRef.current = true
-      setQuestion(q)
+      newConversation()
       ask(q)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params])
 
-  const sourceList = result
-    ? [
-        ...new Set(
-          result.citations
-            .map((c) => c.page ?? c.source)
-            .filter((x): x is string => Boolean(x)),
-        ),
-      ]
-    : []
+  const showSuggested = turns.length === 0 && !loading
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="mx-auto max-w-[760px]">
-        <h1 className="mb-4 flex items-center gap-2 font-display text-lg font-semibold">
-          <Sparkles className="size-5 text-primary" /> Ask the wiki
-        </h1>
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="flex items-center gap-2 font-display text-lg font-semibold">
+            <Sparkles className="size-5 text-primary" /> Ask the wiki
+          </h1>
+          {turns.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={newConversation}
+              disabled={loading}
+            >
+              <Plus className="size-4" /> New conversation
+            </Button>
+          )}
+        </div>
 
+        {/* Conversation thread */}
+        <div className="space-y-6">
+          {turns.map((turn, idx) => (
+            <div key={idx} className="space-y-2">
+              <div className="rounded-lg bg-accent/60 px-3 py-2 text-[14px] font-medium">
+                {turn.question}
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Answer
+                  </span>
+                  {turn.result.change_request_id ? (
+                    <span className="text-[12px] text-muted-foreground">
+                      Promoted → {turn.result.change_request_id}
+                    </span>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={promotingIdx === idx}
+                      onClick={() => promote(idx)}
+                    >
+                      <ArrowUpRight className="size-4" />
+                      {promotingIdx === idx ? "Promoting…" : "Promote to wiki page"}
+                    </Button>
+                  )}
+                </div>
+                <MarkdownReader
+                  content={turn.result.answer}
+                  onWikiLink={(t) => navigate(`/wiki?q=${encodeURIComponent(t)}`)}
+                />
+                {sourcesOf(turn.result).length > 0 && (
+                  <div className="mt-3 rounded-lg border bg-card p-3">
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Sources used
+                    </div>
+                    <ul className="space-y-0.5">
+                      {sourcesOf(turn.result).map((s) => (
+                        <li key={s} className="font-mono text-[12px] text-muted-foreground">
+                          · {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="space-y-3">
+              {pendingQuestion && (
+                <div className="rounded-lg bg-accent/60 px-3 py-2 text-[14px] font-medium">
+                  {pendingQuestion}
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-muted-foreground">
+                  {progress ? (PROGRESS_LABELS[progress] ?? progress) : "Thinking…"}
+                </span>
+                {jobId != null && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={cancelAsk}
+                    className="h-7 gap-1.5 text-[12px] text-muted-foreground"
+                  >
+                    <X className="size-3.5" /> Cancel
+                  </Button>
+                )}
+              </div>
+              <IndeterminateBar />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          )}
+          <div ref={threadEndRef} />
+        </div>
+
+        {turns.length > 0 && <hr className="my-5 border-border" />}
+
+        {/* Composer */}
         <div className="flex gap-2">
           <Textarea
             value={question}
@@ -206,7 +343,11 @@ export function AskView() {
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") ask(question)
             }}
-            placeholder="Ask a question grounded in your wiki…  (⌘↵ to send)"
+            placeholder={
+              turns.length > 0
+                ? "Ask a follow-up…  (⌘↵ to send)"
+                : "Ask a question grounded in your wiki…  (⌘↵ to send)"
+            }
             className="min-h-[64px] flex-1"
           />
           <Button
@@ -222,15 +363,12 @@ export function AskView() {
           Save answer as a wiki page (creates a change request)
         </label>
 
-        {!result && !loading && (
+        {showSuggested && (
           <div className="mt-3 flex flex-wrap gap-2">
             {SUGGESTED.map((s) => (
               <button
                 key={s}
-                onClick={() => {
-                  setQuestion(s)
-                  ask(s)
-                }}
+                onClick={() => ask(s)}
                 className="rounded-full border bg-card px-3 py-1 text-[12px] text-muted-foreground hover:border-primary hover:text-foreground"
               >
                 {s}
@@ -239,80 +377,7 @@ export function AskView() {
           </div>
         )}
 
-        <hr className="my-5 border-border" />
-
-        {loading && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] text-muted-foreground">
-                {progress ? (PROGRESS_LABELS[progress] ?? progress) : "Thinking…"}
-              </span>
-              {jobId != null && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={cancelAsk}
-                  className="h-7 gap-1.5 text-[12px] text-muted-foreground"
-                >
-                  <X className="size-3.5" /> Cancel
-                </Button>
-              )}
-            </div>
-            <IndeterminateBar />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
-            <Skeleton className="h-4 w-2/3" />
-          </div>
-        )}
-
-        {result && (
-          <div>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Answer
-              </span>
-              {result.change_request_id ? (
-                <span className="text-[12px] text-muted-foreground">
-                  Promoted → {result.change_request_id}
-                </span>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={promoting}
-                  onClick={promote}
-                >
-                  <ArrowUpRight className="size-4" />
-                  {promoting ? "Promoting…" : "Promote to wiki page"}
-                </Button>
-              )}
-            </div>
-            <MarkdownReader
-              content={result.answer}
-              onWikiLink={(t) =>
-                navigate(`/wiki?q=${encodeURIComponent(t)}`)
-              }
-            />
-            {sourceList.length > 0 && (
-              <div className="mt-4 rounded-lg border bg-card p-3">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Sources used
-                </div>
-                <ul className="space-y-0.5">
-                  {sourceList.map((s) => (
-                    <li key={s} className="font-mono text-[12px] text-muted-foreground">
-                      · {s}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-
-        {history.length > 0 && (
+        {conversations.length > 0 && (
           <>
             <hr className="my-5 border-border" />
             <div className="mb-2 flex items-center justify-between">
@@ -327,27 +392,34 @@ export function AskView() {
               </button>
             </div>
             <ul className="space-y-0.5">
-              {history.map((h) => (
+              {conversations.map((c) => (
                 <li
-                  key={h.id}
+                  key={c.key}
                   className={`group flex items-center gap-2 rounded px-1.5 py-1 ${
-                    activeId === h.id ? "bg-accent" : "hover:bg-accent/50"
+                    conversationId && c.id === conversationId
+                      ? "bg-accent"
+                      : "hover:bg-accent/50"
                   }`}
                 >
                   <button
-                    onClick={() => openHistory(h)}
+                    onClick={() => loadConversation(c.id, c.items.map(itemToTurn))}
                     className="flex-1 truncate text-left text-[13px] text-muted-foreground hover:text-foreground"
-                    title={h.question}
+                    title={c.title}
                   >
-                    {h.question}
-                    {h.change_request_id && (
+                    {c.title}
+                    {c.items.length > 1 && (
+                      <span className="ml-2 text-[11px] text-muted-foreground">
+                        · {c.items.length} turns
+                      </span>
+                    )}
+                    {c.items.some((i) => i.change_request_id) && (
                       <span className="ml-2 text-[11px] text-primary">↗ saved</span>
                     )}
                   </button>
                   <button
-                    onClick={(e) => removeHistory(h.id, e)}
+                    onClick={(e) => removeConversation(c, e)}
                     className="opacity-0 transition group-hover:opacity-100"
-                    aria-label="Delete from history"
+                    aria-label="Delete conversation"
                   >
                     <X className="size-3.5 text-muted-foreground hover:text-destructive" />
                   </button>

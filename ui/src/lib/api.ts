@@ -193,10 +193,14 @@ export const api = {
     request<{ type: string; body: string }[]>("/wiki/templates"),
 
   // ── query ──
-  ask: (question: string, saveAsPage = false) =>
+  ask: (question: string, saveAsPage = false, conversationId?: string | null) =>
     request<{ job_id: number }>("/query", {
       method: "POST",
-      body: JSON.stringify({ question, save_as_page: saveAsPage }),
+      body: JSON.stringify({
+        question,
+        save_as_page: saveAsPage,
+        conversation_id: conversationId ?? null,
+      }),
     }),
 
   // ── ask history + promotion ──

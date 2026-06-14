@@ -102,6 +102,7 @@ export interface QueryResult {
   suggested_page?: SuggestedPage | null
   change_request_id?: string | null
   history_id?: number
+  conversation_id?: string | null
 }
 
 export interface AskHistoryItem {
@@ -111,6 +112,7 @@ export interface AskHistoryItem {
   citations: Citation[]
   change_request_id?: string | null
   created_at: string
+  conversation_id?: string | null
 }
 
 export interface SkillStatus {

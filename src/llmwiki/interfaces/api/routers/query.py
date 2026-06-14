@@ -22,8 +22,13 @@ def _ctx() -> Any:
 def query(
     question: str = Body(..., embed=True),
     save_as_page: bool = Body(False, embed=True),
+    conversation_id: str | None = Body(None, embed=True),
 ) -> dict[str, Any]:
-    """Ask a question against the wiki (queued for background processing)."""
+    """Ask a question against the wiki (queued for background processing).
+
+    ``conversation_id`` continues an existing thread (#190); absent → the worker
+    starts a new conversation and returns its id in the job result.
+    """
     import json
 
     from ....db.repo import JobRepo
@@ -34,7 +39,13 @@ def query(
         job_repo = JobRepo(conn)
         job_id = job_repo.create(
             "ask",
-            json.dumps({"question": question, "save": save_as_page}),
+            json.dumps(
+                {
+                    "question": question,
+                    "save": save_as_page,
+                    "conversation_id": conversation_id,
+                }
+            ),
             status="queued",
         )
     finally:
