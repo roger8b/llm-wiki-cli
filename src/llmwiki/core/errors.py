@@ -36,6 +36,19 @@ class SourceAlreadyProcessedError(WikiError):
     """
 
 
+class NotFoundError(WikiError):
+    """A referenced entity (change request, page, source) does not exist."""
+
+
+class ProviderError(WikiError):
+    """An LLM/embedding provider could not be used.
+
+    Raised, for example, when a hosted provider is selected but no API key is
+    configured. The message instructs the user how to set the key. Mapped to
+    exit code 5 by the CLI (#198).
+    """
+
+
 class JobCancelledError(WikiError):
     """A running agent job was cancelled cooperatively by the user."""
 

@@ -88,7 +88,8 @@ class TestEndToEnd:
 
 
 class TestNoBrain:
-    def test_index_without_brain_exits_1(self, tmp_path: Path, monkeypatch) -> None:
+    def test_index_without_brain_exits_not_found(self, tmp_path: Path, monkeypatch) -> None:
+        # No brain → BrainNotFoundError → exit 3 (not found), standardised in #198.
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["index"])
-        assert result.exit_code == 1
+        assert result.exit_code == 3
