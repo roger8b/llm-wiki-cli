@@ -10,10 +10,11 @@ change requests (CRs) and applied by a human — never write to the wiki directl
 
 ## Workflow
 
-1. **Audit** structural health (broken `[[links]]`, orphans, frontmatter):
+1. **Audit** structural health (broken `[[links]]`, orphans, frontmatter). Use
+   `--json` when you parse the findings yourself:
    ```bash
-   wiki lint           # structural
-   wiki lint --all     # also semantic checks via the LLM
+   wiki lint --json           # structural, as {"findings": [...]}
+   wiki lint --all --json     # also semantic checks via the LLM
    ```
 2. **Propose fixes** as a change request:
    ```bash
@@ -21,7 +22,7 @@ change requests (CRs) and applied by a human — never write to the wiki directl
    ```
 3. **Review and apply** the proposed fixes:
    ```bash
-   wiki review <cr-id>
+   wiki review <cr-id> --json
    wiki apply <cr-id>
    ```
 4. Rebuild the index/metadata when needed:
@@ -29,9 +30,29 @@ change requests (CRs) and applied by a human — never write to the wiki directl
    wiki index
    ```
 
+## Long-running jobs
+
+`wiki maintain` and `wiki lint --all` call the LLM and can take a while. Track
+background work with `wiki jobs --json`; poll at a reasonable interval, not in a
+tight loop. There is no cancel subcommand — interrupt a foreground run with
+Ctrl-C (exit 130).
+
+## Errors (exit codes, see docs/cli-json.md)
+
+| exit | meaning | what to do |
+|------|---------|------------|
+| 1 | lint found errors | expected when issues exist; read the findings |
+| 3 | not found (bad CR id) | re-list with `wiki review --json` before retrying |
+| 5 | provider/LLM (no API key) | only affects `--all`/`maintain`; report it, suggest configuring the provider; don't retry blindly |
+| 130 | cancelled (Ctrl-C) | stop |
+
+With `--json`, failures print `{"error": {"code", "exit_code", "message"}}` on
+stderr and leave stdout empty.
+
 ## Guardrails
 
-- All fixes go through the CR flow (review + apply) — no direct writes.
-- `wiki/index.md` and `wiki/log.md` are generated artifacts.
+- **Never write to `wiki/` directly.** Every fix goes through the CR flow
+  (review + apply) — no exceptions.
+- `wiki/index.md` and `wiki/log.md` are generated artifacts — don't hand-edit.
 - Treat the brain as the source of truth; resolve contradictions explicitly
   rather than silently overwriting.

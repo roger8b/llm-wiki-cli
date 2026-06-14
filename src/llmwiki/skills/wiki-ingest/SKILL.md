@@ -19,21 +19,47 @@ human reviews and applies — you never write to the wiki directly.
    ```bash
    wiki ingest <file>
    ```
-3. **Review** the proposed diff:
+3. **Review** the proposed diff (use `--json` when you parse it yourself):
    ```bash
-   wiki review            # list pending CRs
-   wiki review <cr-id>    # show the diff
+   wiki review --json            # list pending CRs as JSON
+   wiki review <cr-id> --json    # full CR incl. diffs, score, warnings
    ```
 4. **Apply** (writes to `wiki/`, reindexes, logs) or **reject**:
    ```bash
    wiki apply <cr-id>
    wiki reject <cr-id>    # diffs kept for auditing
    ```
-5. Long-running ingests run as jobs: `wiki jobs`.
+
+## Long-running jobs
+
+Ingestion (especially long sources, PDFs, audio) runs as a job and can take a
+while. Track it instead of busy-waiting:
+
+```bash
+wiki jobs --json    # status/progress of each job
+```
+
+Poll at a reasonable interval (e.g. several seconds between checks), not in a
+tight loop. There is no cancel subcommand — interrupt a foreground run with
+Ctrl-C (exit 130). When `wiki ingest` returns, its CR is already listed by
+`wiki review`.
+
+## Errors (exit codes, see docs/cli-json.md)
+
+| exit | meaning | what to do |
+|------|---------|------------|
+| 3 | not found (bad file/path) | check the path; re-list sources before retrying |
+| 4 | source already processed | the content is already in the brain. **Do NOT re-ingest with `--force` on your own** — tell the user and ask first |
+| 5 | provider/LLM (no API key) | report it and suggest configuring the provider/settings; do not retry blindly |
+| 130 | cancelled (Ctrl-C) | stop |
+
+With `--json`, failures print `{"error": {"code", "exit_code", "message"}}` on
+stderr and leave stdout empty.
 
 ## Guardrails
 
 - **Never edit `raw/`** — it is the immutable evidence.
-- **Never write to `wiki/` directly.** Changes only via the CR flow above.
+- **Never write to `wiki/` directly.** Every change goes through the CR flow
+  (review + apply) above — no exceptions.
 - `wiki/index.md` and `wiki/log.md` are generated — don't hand-edit them.
 - Prefer updating an existing page over creating a near-duplicate; cite sources.
