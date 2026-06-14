@@ -42,6 +42,30 @@ describe("api.streamJob", () => {
     expect(result).toBe('{"answer":"hi"}')
   })
 
+  it("dispatches token events before the final result (#191)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        streamResponse([
+          sse("progress", { progress: "running_agent" }),
+          sse("token", { text: "Hel" }),
+          sse("token", { text: "lo" }),
+          sse("result", { result: '{"answer":"Hello world"}' }),
+        ]),
+      ),
+    )
+    const tokens: string[] = []
+    let result: string | null = null
+    await api.streamJob(1, {
+      onToken: (t) => tokens.push(t),
+      onResult: (r) => {
+        result = r
+      },
+    })
+    expect(tokens).toEqual(["Hel", "lo"])
+    expect(result).toBe('{"answer":"Hello world"}')
+  })
+
   it("dispatches the cancelled event as terminal", async () => {
     vi.stubGlobal(
       "fetch",

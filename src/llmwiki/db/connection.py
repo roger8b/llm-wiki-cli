@@ -125,6 +125,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN progress TEXT")
     if "cancel_requested" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+    if "stream_text" not in cols:  # token streaming preview (#191)
+        conn.execute("ALTER TABLE jobs ADD COLUMN stream_text TEXT")
 
     # Ask follow-up conversations (#190): group history rows by conversation.
     ask_cols = {r["name"] for r in conn.execute("PRAGMA table_info(ask_history)").fetchall()}

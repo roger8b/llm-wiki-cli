@@ -158,6 +158,16 @@ class JobWorker(threading.Thread):
                                 conversation_id, limit=cfg.ask_history_turns
                             )
                             JobRepo(conn).set_progress(job_id, "running_agent")
+                            # Stream answer tokens to jobs.stream_text; the SSE
+                            # endpoint turns growth into `token` events (#191).
+                            from ..llm_agents.streaming import TokenBuffer
+
+                            def _flush_stream(
+                                text: str, c: sqlite3.Connection = conn, j: int = job_id
+                            ) -> None:
+                                JobRepo(c).set_stream(j, text)
+
+                            token_buf = TokenBuffer(_flush_stream)
                             res, cr = query_service.ask(
                                 question,
                                 paths,
@@ -166,7 +176,9 @@ class JobWorker(threading.Thread):
                                 save=save,
                                 cancel_check=_cancelled,
                                 history_turns=history,
+                                on_token=token_buf.add,
                             )
+                            token_buf.flush()
 
                             result_data = res.model_dump(mode="json")
                             result_data["change_request_id"] = cr.id if cr else None

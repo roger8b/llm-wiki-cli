@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 
@@ -219,20 +220,36 @@ def _agent_middleware(backend: ChangeRequestBackend | None) -> list[Any]:
     return mw
 
 
-def _invoke_with_retry(agent: Any, message: str, cfg: WorkspaceConfig) -> dict[str, Any]:
+def _invoke_with_retry(
+    agent: Any,
+    message: str,
+    cfg: WorkspaceConfig,
+    on_token: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     """Call ``agent.invoke`` with bounded retry+backoff on transient errors.
 
     A flaky provider call (network blip, 5xx) re-attempts instead of failing the
     whole job. ``JobCancelledError`` is never retried — cancellation is final.
+    When ``on_token`` is set, a streaming callback forwards the model's answer
+    tokens (#191); providers that don't stream simply never fire it.
     """
     from ..core.errors import JobCancelledError
+
+    # Only build a callbacks config when streaming, and only pass it when set —
+    # keeps the call compatible with agents/fakes whose invoke() takes no config.
+    extra: dict[str, Any] = {}
+    if on_token is not None:
+        from .streaming import make_token_handler  # noqa: PLC0415
+
+        extra["config"] = {"callbacks": [make_token_handler(on_token)]}
 
     attempts = max(1, cfg.agent_max_retries)
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             state: dict[str, Any] = agent.invoke(
-                {"messages": [{"role": "user", "content": message}]}
+                {"messages": [{"role": "user", "content": message}]},
+                **extra,
             )
             return state
         except JobCancelledError:
@@ -260,14 +277,16 @@ def _invoke[T: BaseModel](
     schema: type[T],
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend | None = None,
+    on_token: Callable[[str], None] | None = None,
 ) -> T:
     """Run the agent, time it, log structured-output fallback, capture telemetry.
 
     Telemetry is stashed on ``backend.execution_meta`` (when a backend is
     present) so services can persist it into the change request / job result.
+    ``on_token`` enables answer token streaming (#191).
     """
     start = time.perf_counter()
-    state = _invoke_with_retry(agent, message, cfg)
+    state = _invoke_with_retry(agent, message, cfg, on_token)
     latency_ms = int((time.perf_counter() - start) * 1000)
 
     used_fallback = not _had_structured(state, schema)
@@ -478,6 +497,7 @@ def run_query(
     *,
     question: str,
     save: bool,
+    on_token: Callable[[str], None] | None = None,
 ) -> QueryResult:
     from deepagents import create_deep_agent
 
@@ -492,7 +512,7 @@ def run_query(
         kwargs["backend"] = backend
     agent = create_deep_agent(**kwargs)
     suffix = " Gere também suggested_page para salvar a resposta." if save else ""
-    return _invoke(agent, question + suffix, QueryResult, cfg, backend)
+    return _invoke(agent, question + suffix, QueryResult, cfg, backend, on_token=on_token)
 
 
 def run_lint(cfg: WorkspaceConfig) -> LintReport:

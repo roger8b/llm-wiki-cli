@@ -103,6 +103,7 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
 
         last_status: str | None = None
         last_progress: str | None = None
+        last_stream_len = 0
         deadline = time.monotonic() + _STREAM_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             row = repo.get(job_id)
@@ -115,6 +116,11 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
                 last_progress = progress
                 if progress:
                     yield _sse("progress", {"progress": progress})
+            # Emit only the newly-streamed slice of the answer (#191).
+            stream_text = row["stream_text"] if "stream_text" in row.keys() else None
+            if stream_text and len(stream_text) > last_stream_len:
+                yield _sse("token", {"text": stream_text[last_stream_len:]})
+                last_stream_len = len(stream_text)
             if status != last_status:
                 last_status = status
                 yield _sse("status", {"status": status})

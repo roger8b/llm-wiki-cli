@@ -83,10 +83,11 @@ def _default_runner(
     *,
     question: str,
     save: bool,
+    on_token: Callable[[str], None] | None = None,
 ) -> QueryResult:
     from ..llm_agents.factory import run_query
 
-    return run_query(cfg, backend, question=question, save=save)
+    return run_query(cfg, backend, question=question, save=save, on_token=on_token)
 
 
 def build_history_context(
@@ -126,12 +127,15 @@ def ask(
     runner: Runner | None = None,
     cancel_check: Callable[[], bool] | None = None,
     history_turns: list[tuple[str, str]] | None = None,
+    on_token: Callable[[str], None] | None = None,
 ) -> tuple[QueryResult, ChangeRequest | None]:
     """Answers the question. If ``save`` and there is a suggested page, creates a CR.
 
     ``history_turns`` (prior conversation turns, oldest first) are folded into the
     message as user context — not as a source — so follow-up questions keep the
     thread without re-stating it. The agent still cites wiki pages only.
+
+    ``on_token`` streams the answer tokens (#191) when the provider supports it.
     """
     runner = runner or _default_runner
     # Backend always present: scopes read_file to brain root. ``ask`` is a
@@ -150,7 +154,9 @@ def ask(
             "citando páginas da wiki):\n"
             f"{context}\n\nPERGUNTA ATUAL: {question}"
         )
-    result = runner(cfg, read_backend, question=agent_question, save=save)
+    # Pass on_token only when set, so simple test runners need not accept it.
+    extra = {"on_token": on_token} if on_token is not None else {}
+    result = runner(cfg, read_backend, question=agent_question, save=save, **extra)
     if read_backend.write_attempts:
         logger.warning(
             "ask(): agent attempted %d write(s) during a read-only query: %s",

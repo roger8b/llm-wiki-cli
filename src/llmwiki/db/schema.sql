@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   error            TEXT,
   progress         TEXT,
   cancel_requested INTEGER NOT NULL DEFAULT 0,
+  stream_text      TEXT,
   created_at       TEXT NOT NULL,
   completed_at     TEXT
 );

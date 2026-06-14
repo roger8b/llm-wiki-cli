@@ -82,6 +82,7 @@ export function AskView() {
   const [jobId, setJobId] = useState<number | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
+  const [streamingText, setStreamingText] = useState("")
   const refetchCrs = useCrStore((s) => s.fetch)
   const [params] = useSearchParams()
   const askRef = useRef(false)
@@ -113,6 +114,7 @@ export function AskView() {
     setPendingQuestion(query)
     setQuestion("")
     setProgress(null)
+    setStreamingText("")
     try {
       const startRes = await api.ask(query, save, conversationId)
       const startedJobId = (startRes as { job_id?: number }).job_id
@@ -123,6 +125,7 @@ export function AskView() {
       setJobId(startedJobId)
       await api.streamJob(startedJobId, {
         onProgress: (step) => setProgress(step),
+        onToken: (text) => setStreamingText((prev) => prev + text),
         onResult: async (result) => {
           if (!result) {
             toast.error("No result returned from job")
@@ -147,6 +150,7 @@ export function AskView() {
       setJobId(null)
       setProgress(null)
       setPendingQuestion(null)
+      setStreamingText("")
     }
   }
 
@@ -303,9 +307,17 @@ export function AskView() {
                 )}
               </div>
               <IndeterminateBar />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-2/3" />
+              {streamingText ? (
+                // Live preview of the answer as tokens arrive; the final
+                // `result` event replaces it with the authoritative answer.
+                <MarkdownReader content={streamingText} />
+              ) : (
+                <>
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-2/3" />
+                </>
+              )}
             </div>
           )}
           <div ref={threadEndRef} />

@@ -346,6 +346,17 @@ class JobRepo:
 
         retry_on_locked(_do)
 
+    def set_stream(self, job_id: int, text: str) -> None:
+        """Persist the streamed answer-so-far for SSE delta emission (#191)."""
+
+        def _do() -> None:
+            self.conn.execute(
+                "UPDATE jobs SET stream_text = ? WHERE id = ?", (text, job_id)
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)
+
     def request_cancel(self, job_id: int) -> None:
         """Flag a job for cooperative cancellation (read by the running agent)."""
 
