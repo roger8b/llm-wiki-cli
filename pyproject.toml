@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llm-wiki"
-version = "2.0.0"
+version = "2.0.1"
 description = "Plataforma local-first de engenharia de conhecimento mantida por LLM."
 requires-python = ">=3.12"
 dependencies = [
