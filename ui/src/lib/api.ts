@@ -252,6 +252,7 @@ export const api = {
     h: {
       onStatus?: (status: string) => void
       onProgress?: (step: string) => void
+      onToken?: (text: string) => void
       onResult?: (result: string | null) => void
       onCancelled?: (result: string | null) => void
       onError?: (message: string) => void
@@ -289,11 +290,13 @@ export const api = {
         const payload = JSON.parse(data) as {
           status?: string
           progress?: string
+          text?: string
           result?: string | null
           detail?: string
         }
         if (event === "status") h.onStatus?.(payload.status ?? "")
         else if (event === "progress") h.onProgress?.(payload.progress ?? "")
+        else if (event === "token") h.onToken?.(payload.text ?? "")
         else if (event === "result") {
           h.onResult?.(payload.result ?? null)
           return
