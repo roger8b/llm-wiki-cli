@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { AskHistoryItem, QueryResult } from "@/types"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
+import { CitationList } from "@/components/shared/CitationList"
 import { IndeterminateBar } from "@/components/shared/IndeterminateBar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -61,16 +62,6 @@ const itemToTurn = (item: AskHistoryItem): AskTurn => ({
   },
   historyId: item.id,
 })
-
-function sourcesOf(result: QueryResult): string[] {
-  return [
-    ...new Set(
-      result.citations
-        .map((c) => c.page ?? c.source)
-        .filter((x): x is string => Boolean(x)),
-    ),
-  ]
-}
 
 export function AskView() {
   const navigate = useNavigate()
@@ -284,20 +275,7 @@ export function AskView() {
                   content={turn.result.answer}
                   onWikiLink={(t) => navigate(`/wiki?q=${encodeURIComponent(t)}`)}
                 />
-                {sourcesOf(turn.result).length > 0 && (
-                  <div className="mt-3 rounded-lg border bg-card p-3">
-                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Sources used
-                    </div>
-                    <ul className="space-y-0.5">
-                      {sourcesOf(turn.result).map((s) => (
-                        <li key={s} className="font-mono text-[12px] text-muted-foreground">
-                          · {s}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                <CitationList citations={turn.result.citations} />
               </div>
             </div>
           ))}
