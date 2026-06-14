@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import {
   FileText,
   FileType,
@@ -241,20 +242,25 @@ export function SourcesView() {
     }
   }, [])
 
+  const [params] = useSearchParams()
+
   const load = useCallback(
     async (selectFirst = false) => {
       setLoading(true)
       try {
         const list = await api.listSources()
         setSources(list)
-        if (selectFirst && list[0]) openSource(list[0].path)
+        // Deep-link: ?path=raw/... opens that source directly (#192 citations).
+        const wanted = params.get("path")
+        if (wanted && list.some((s) => s.path === wanted)) openSource(wanted)
+        else if (selectFirst && list[0]) openSource(list[0].path)
       } catch (e) {
         toast.error((e as Error).message)
       } finally {
         setLoading(false)
       }
     },
-    [openSource],
+    [openSource, params],
   )
 
   useEffect(() => {

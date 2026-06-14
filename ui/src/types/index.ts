@@ -89,6 +89,8 @@ export interface Citation {
   page?: string | null
   source?: string | null
   quote?: string | null
+  /** Set by the backend (#172) when page/source resolves to nothing in the brain. */
+  invalid?: boolean
 }
 
 export interface SuggestedPage {
