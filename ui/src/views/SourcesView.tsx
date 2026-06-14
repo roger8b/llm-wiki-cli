@@ -271,6 +271,19 @@ export function SourcesView() {
     [runIngest, load, refetchCrs],
   )
 
+  // Re-ingest = "run the agent again on the same source" (force=True bypasses
+  // the content-hash dedup). Use after the wiki/model/skills have changed, or
+  // when a previous run produced an empty CR (#237 follow-up).
+  const reIngest = useCallback(
+    async (source: Source) => {
+      await runIngest(`Re-ingest ${source.path.split("/").pop()}`, () =>
+        api.ingestSource(source.path, /* force */ true),
+      )
+      await Promise.all([load(), refetchCrs()])
+    },
+    [runIngest, load, refetchCrs],
+  )
+
   const ingestMany = useCallback(
     async (srcs: Source[]) => {
       await runBatch(
@@ -364,7 +377,9 @@ export function SourcesView() {
                 variant="outline"
                 size="sm"
                 className="shrink-0 gap-1.5"
-                onClick={() => ingest(current)}
+                onClick={() =>
+                  current.status === "processed" ? reIngest(current) : ingest(current)
+                }
               >
                 <RotateCw className="size-3.5" />
                 {current.status === "processed" ? "Re-ingest" : "Ingest"}

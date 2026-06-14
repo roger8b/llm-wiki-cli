@@ -507,6 +507,47 @@ class TestBatchIngest:
         r = client.post("/api/sources/ingest", json={})
         assert r.status_code == 400
 
+    def test_force_default_false_persisted_in_payload(self, client, brain: BrainPaths) -> None:
+        """`force` is optional and defaults to False so existing clients keep working."""
+        import json
+
+        from llmwiki.db.connection import get_connection
+        from llmwiki.db.repo import JobRepo
+
+        ok = self._seed_raw(brain, "fresh.md")
+        r = client.post("/api/sources/ingest", json={"path": ok})
+        assert r.status_code == 200
+        job_id = r.json()["job_id"]
+
+        conn = get_connection(brain.db_path)
+        try:
+            row = JobRepo(conn).get(job_id)
+        finally:
+            conn.close()
+        assert row is not None
+        assert json.loads(row["payload"]).get("force") is False
+
+    def test_force_true_propagates_to_payload(self, client, brain: BrainPaths) -> None:
+        """`force=true` survives to the job payload so the worker bypasses dedup."""
+
+        import json
+
+        from llmwiki.db.connection import get_connection
+        from llmwiki.db.repo import JobRepo
+
+        ok = self._seed_raw(brain, "forced.md")
+        r = client.post("/api/sources/ingest", json={"path": ok, "force": True})
+        assert r.status_code == 200
+        job_id = r.json()["job_id"]
+
+        conn = get_connection(brain.db_path)
+        try:
+            row = JobRepo(conn).get(job_id)
+        finally:
+            conn.close()
+        assert row is not None
+        assert json.loads(row["payload"]).get("force") is True
+
 
 class TestSourceContent:
     def _seed_raw(self, brain: BrainPaths, name: str, body: str) -> str:

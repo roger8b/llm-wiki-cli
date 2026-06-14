@@ -130,7 +130,7 @@ export function ProgressDrawer() {
             <>
               {status === "done" && (
                 <span className="text-[12px] text-muted-foreground">
-                  {note ?? "Done — no changes proposed."}
+                  {note ?? "Done — no CR created (the agent wrote no pages)."}
                 </span>
               )}
               {status === "cancelled" && (
