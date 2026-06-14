@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Maximize2, Minus, Network, Plus, RotateCcw, Search, X } from "lucide-react"
+import { Home, Minus, Network, Plus, Search, X } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { Graph } from "@/types"
@@ -77,6 +77,9 @@ export function GraphView() {
   const [depth, setDepth] = useState<1 | 2>(1)
   // Camera state — pan (x, y) + zoom, shared by both renderers (#252).
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
+  // True while the user is dragging the background. Drives the cursor
+  // style (grab → grabbing) and lets us suppress focus/click while panning.
+  const [isPanning, setIsPanning] = useState(false)
   const dragRef = useRef<{ id: string } | null>(null)
   const panDragRef = useRef<{ x: number; y: number } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -97,14 +100,25 @@ export function GraphView() {
     return () => ro.disconnect()
   }, [])
 
-  // World + viewport helpers — declared up here so the wheel/focus effects
-  // below can close over them. Kept referentially stable per render via the
-  // setViewport updater form so we don't need to list them in deps.
+  // World + viewport helpers — declared up here so the wheel/focus/keyboard
+  // effects below can close over them. The setViewport updater form keeps
+  // them referentially stable per render so we don't need to list them
+  // in deps.
   const world = { w: W, h: H }
   const panByScreen = (dx: number, dy: number) =>
     setViewport((v) => panBy(v, world, screenSize, dx, dy))
   const zoomAtScreen = (anchor: { x: number; y: number }, factor: number) =>
     setViewport((v) => zoomAt(v, screenSize, world, anchor, factor))
+  const zoomIn = () =>
+    setViewport((v) =>
+      zoomAt(v, screenSize, world, { x: screenSize.w / 2, y: screenSize.h / 2 }, 1.2),
+    )
+  const zoomOut = () =>
+    setViewport((v) =>
+      zoomAt(v, screenSize, world, { x: screenSize.w / 2, y: screenSize.h / 2 }, 1 / 1.2),
+    )
+  const fitAll = () =>
+    setViewport((v) => fitToBounds(v, screenSize, world, boundsOf(nodes), 0.1))
 
   // Wheel handler (#252) — React 19 makes onWheel passive, so we attach a
   // non-passive listener explicitly to allow preventDefault. Catches wheels
@@ -132,6 +146,39 @@ export function GraphView() {
     // to omit from deps to avoid re-binding the listener on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenSize.w, screenSize.h, viewport.zoom])
+
+  // Keyboard shortcuts for zoom/pan (#252): `+`/`=` zoom in, `-` zoom out,
+  // `0` fit-to-screen. Skipped when the user is typing in an input.
+  // `fitAll` is kept in a ref so the listener stays stable even as the
+  // layout worker streams new positions every frame.
+  const fitAllRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    fitAllRef.current = fitAll
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+        return
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const r = containerRef.current!.getBoundingClientRect()
+      const local = { x: r.width / 2, y: r.height / 2 }
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault()
+        zoomAtScreen(local, 1.2)
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault()
+        zoomAtScreen(local, 1 / 1.2)
+      } else if (e.key === '0') {
+        e.preventDefault()
+        fitAllRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenSize.w, screenSize.h])
 
   // Load the graph + run the force layout in a Web Worker so the main thread
   // stays responsive on large wikis (#194). Positions stream back as ticks.
@@ -346,12 +393,6 @@ export function GraphView() {
   }
 
   // ---- Viewport helpers shared by toolbar / wheel / focus (#252) ----
-  const zoomIn = () =>
-    setViewport((v) => zoomAt(v, screenSize, world, { x: screenSize.w / 2, y: screenSize.h / 2 }, 1.2))
-  const zoomOut = () =>
-    setViewport((v) => zoomAt(v, screenSize, world, { x: screenSize.w / 2, y: screenSize.h / 2 }, 1 / 1.2))
-  const fitAll = () => setViewport((v) => fitToBounds(v, screenSize, world, boundsOf(nodes), 0.1))
-  const oneToOne = () => setViewport({ x: 0, y: 0, zoom: 1 })
 
   // Convert a pointer event in the SVG into world coordinates, respecting
   // the current viewport zoom + pan.
@@ -372,7 +413,25 @@ export function GraphView() {
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 overflow-hidden"
+      className={`relative flex-1 overflow-hidden ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
+      onPointerDown={(e) => {
+        // Only treat background clicks as pan-starts. Nodes stopPropagation
+        // inside their own handlers, so a pointerdown that bubbles up here
+        // means the user grabbed empty space.
+        if (e.target === containerRef.current) setIsPanning(true)
+      }}
+      onPointerUp={() => setIsPanning(false)}
+      onPointerCancel={() => setIsPanning(false)}
+      onPointerLeave={() => setIsPanning(false)}
+      onDoubleClick={(e) => {
+        // Google-Maps style: double-click on the empty chrome zooms in
+        // centred on the click point. (Node double-click is handled inside
+        // the canvas/SVG and opens the page.)
+        if (e.target !== containerRef.current) return
+        const r = containerRef.current!.getBoundingClientRect()
+        const local = { x: e.clientX - r.left, y: e.clientY - r.top }
+        zoomAtScreen(local, 1.4)
+      }}
     >
       {/* toolbar */}
       <div className="absolute left-4 top-4 z-10 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-2">
@@ -459,42 +518,6 @@ export function GraphView() {
         <Button size="sm" variant="ghost" className="h-[28px] gap-1 px-2" onClick={resetView}>
           <X className="size-3.5" /> reset
         </Button>
-
-        {/* viewport controls (#252) */}
-        <div className="flex items-center gap-0.5 rounded-md border bg-card p-0.5 text-[11px] shadow-sm">
-          <button
-            onClick={zoomOut}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-            title="Zoom out"
-          >
-            <Minus className="size-3.5" />
-          </button>
-          <span className="min-w-[44px] px-1 text-center text-muted-foreground tabular-nums">
-            {Math.round(viewport.zoom * 100)}%
-          </span>
-          <button
-            onClick={zoomIn}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
-            title="Zoom in"
-          >
-            <Plus className="size-3.5" />
-          </button>
-          <span className="mx-0.5 h-3 w-px bg-border" />
-          <button
-            onClick={fitAll}
-            className="flex h-6 items-center gap-1 rounded px-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-            title="Fit all nodes to screen"
-          >
-            <Maximize2 className="size-3.5" /> fit
-          </button>
-          <button
-            onClick={oneToOne}
-            className="flex h-6 items-center gap-1 rounded px-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-            title="Reset zoom to 100%"
-          >
-            <RotateCcw className="size-3.5" /> 1:1
-          </button>
-        </div>
         {focusId && (
           <span className="rounded-md border bg-primary/10 px-2 py-1 text-[11px] text-primary">
             focusing — click background to exit
@@ -665,6 +688,47 @@ export function GraphView() {
           </g>
         </svg>
       )}
+
+      {/* Zoom controls — Google-Maps-style panel, bottom-right (#252). */}
+      <div
+        role="group"
+        aria-label="Graph zoom controls"
+        className="absolute bottom-4 right-4 z-20 flex flex-col overflow-hidden rounded-md border bg-card text-foreground shadow-md"
+      >
+        <button
+          onClick={zoomIn}
+          className="flex size-8 items-center justify-center transition hover:bg-secondary active:bg-secondary/70"
+          title="Zoom in (+)"
+          aria-label="Zoom in"
+        >
+          <Plus className="size-4" />
+        </button>
+        <div className="mx-1.5 h-px bg-border" />
+        <button
+          onClick={zoomOut}
+          className="flex size-8 items-center justify-center transition hover:bg-secondary active:bg-secondary/70"
+          title="Zoom out (−)"
+          aria-label="Zoom out"
+        >
+          <Minus className="size-4" />
+        </button>
+        <div className="mx-1.5 h-px bg-border" />
+        <div
+          className="flex h-7 select-none items-center justify-center text-[10px] font-medium tabular-nums text-muted-foreground"
+          aria-live="polite"
+        >
+          {Math.round(viewport.zoom * 100)}%
+        </div>
+        <div className="mx-1.5 h-px bg-border" />
+        <button
+          onClick={fitAll}
+          className="flex size-8 items-center justify-center transition hover:bg-secondary active:bg-secondary/70"
+          title="Fit all nodes to screen (0)"
+          aria-label="Fit all nodes to screen"
+        >
+          <Home className="size-4" />
+        </button>
+      </div>
 
       {/* side panel */}
       {selected && (
