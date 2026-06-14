@@ -448,16 +448,30 @@ class AskHistoryRepo:
         answer: str,
         citations: str | None = None,
         change_request_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> int:
         cur = self.conn.execute(
             """
-            INSERT INTO ask_history (question, answer, citations, change_request_id, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO ask_history
+                (question, answer, citations, change_request_id, created_at, conversation_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (question, answer, citations, change_request_id, now_iso()),
+            (question, answer, citations, change_request_id, now_iso(), conversation_id),
         )
         self.conn.commit()
         return int(cur.lastrowid or 0)
+
+    def recent_turns(self, conversation_id: str, limit: int = 4) -> list[tuple[str, str]]:
+        """Last ``limit`` (question, answer) turns of a conversation, oldest first."""
+        rows = self.conn.execute(
+            """
+            SELECT question, answer FROM ask_history
+            WHERE conversation_id = ?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (conversation_id, limit),
+        ).fetchall()
+        return [(r["question"], r["answer"]) for r in reversed(rows)]
 
     def get(self, history_id: int) -> sqlite3.Row | None:
         return cast(

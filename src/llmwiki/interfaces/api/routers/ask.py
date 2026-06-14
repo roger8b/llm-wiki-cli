@@ -27,6 +27,7 @@ def _row_to_item(row: Any) -> dict[str, Any]:
         "citations": json.loads(row["citations"]) if row["citations"] else [],
         "change_request_id": row["change_request_id"],
         "created_at": row["created_at"],
+        "conversation_id": row["conversation_id"],
     }
 
 

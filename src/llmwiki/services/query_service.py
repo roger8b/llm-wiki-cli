@@ -89,6 +89,33 @@ def _default_runner(
     return run_query(cfg, backend, question=question, save=save)
 
 
+def build_history_context(
+    turns: list[tuple[str, str]], *, max_chars: int = 8000
+) -> str:
+    """Render prior conversation turns as a context preamble (#190).
+
+    Returns an empty string when there are no turns. Each answer is truncated
+    with "…" and the whole block is capped at ``max_chars`` (oldest turns dropped
+    first so the most recent context survives).
+    """
+    if not turns:
+        return ""
+    per_answer = max(200, max_chars // max(1, len(turns)) - 80)
+    lines: list[str] = []
+    for i, (q, a) in enumerate(turns, 1):
+        ans = a.strip().replace("\n", " ")
+        if len(ans) > per_answer:
+            ans = ans[:per_answer].rstrip() + "…"
+        lines.append(f"[{i}] P: {q.strip()}\n    R (resumo): {ans}")
+    block = "\n".join(lines)
+    if len(block) > max_chars:
+        # Drop oldest turns until under the cap.
+        while lines and len("\n".join(lines)) > max_chars:
+            lines.pop(0)
+        block = "\n".join(lines)
+    return block
+
+
 def ask(
     question: str,
     paths: BrainPaths,
@@ -98,8 +125,14 @@ def ask(
     save: bool = False,
     runner: Runner | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    history_turns: list[tuple[str, str]] | None = None,
 ) -> tuple[QueryResult, ChangeRequest | None]:
-    """Answers the question. If ``save`` and there is a suggested page, creates a CR."""
+    """Answers the question. If ``save`` and there is a suggested page, creates a CR.
+
+    ``history_turns`` (prior conversation turns, oldest first) are folded into the
+    message as user context — not as a source — so follow-up questions keep the
+    thread without re-stating it. The agent still cites wiki pages only.
+    """
     runner = runner or _default_runner
     # Backend always present: scopes read_file to brain root. ``ask`` is a
     # read-only operation, so the backend rejects writes and records any
@@ -107,7 +140,17 @@ def ask(
     # dropping them.
     read_backend = ChangeRequestBackend(paths.root, read_only=True)
     read_backend.cancel_check = cancel_check
-    result = runner(cfg, read_backend, question=question, save=save)
+    context = build_history_context(
+        history_turns or [], max_chars=cfg.ask_history_max_chars
+    )
+    agent_question = question
+    if context:
+        agent_question = (
+            "CONVERSA ANTERIOR (contexto do usuário, NÃO é fonte — continue "
+            "citando páginas da wiki):\n"
+            f"{context}\n\nPERGUNTA ATUAL: {question}"
+        )
+    result = runner(cfg, read_backend, question=agent_question, save=save)
     if read_backend.write_attempts:
         logger.warning(
             "ask(): agent attempted %d write(s) during a read-only query: %s",

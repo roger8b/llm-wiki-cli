@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS ask_history (
   answer            TEXT NOT NULL,
   citations         TEXT,
   change_request_id TEXT REFERENCES change_requests(id) ON DELETE SET NULL,
-  created_at        TEXT NOT NULL
+  created_at        TEXT NOT NULL,
+  conversation_id   TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
