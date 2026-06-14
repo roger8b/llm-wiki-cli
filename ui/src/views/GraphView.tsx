@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Network, Search, X } from "lucide-react"
+import { Maximize2, Minus, Network, Plus, RotateCcw, Search, X } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { Graph } from "@/types"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/stores/app"
 import { loadPositions, savePositions, type Positions } from "@/lib/graphPositions"
+import {
+  boundsOf,
+  fitToBounds,
+  panBy,
+  screenToWorld,
+  zoomAt,
+  type Viewport,
+} from "@/lib/graphViewport"
 import type { LayoutResponse } from "@/workers/graphLayout.worker"
 import { GraphCanvas } from "./GraphCanvas"
 
@@ -67,9 +75,63 @@ export function GraphView() {
   const [matchIdx, setMatchIdx] = useState(0)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [depth, setDepth] = useState<1 | 2>(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
+  // Camera state — pan (x, y) + zoom, shared by both renderers (#252).
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 })
   const dragRef = useRef<{ id: string } | null>(null)
+  const panDragRef = useRef<{ x: number; y: number } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  // Live size of the rendering surface; updated by ResizeObserver so the
+  // viewport math (zoom anchored to cursor, fit-to-bounds) uses real pixels.
+  const [screenSize, setScreenSize] = useState({ w: W, h: H })
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => {
+      const r = el.getBoundingClientRect()
+      setScreenSize({ w: r.width, h: r.height })
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // World + viewport helpers — declared up here so the wheel/focus effects
+  // below can close over them. Kept referentially stable per render via the
+  // setViewport updater form so we don't need to list them in deps.
+  const world = { w: W, h: H }
+  const panByScreen = (dx: number, dy: number) =>
+    setViewport((v) => panBy(v, world, screenSize, dx, dy))
+  const zoomAtScreen = (anchor: { x: number; y: number }, factor: number) =>
+    setViewport((v) => zoomAt(v, screenSize, world, anchor, factor))
+
+  // Wheel handler (#252) — React 19 makes onWheel passive, so we attach a
+  // non-passive listener explicitly to allow preventDefault. Catches wheels
+  // that land on the wrapper chrome as well as bubbling from the canvas/SVG.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const r = el.getBoundingClientRect()
+      const local = { x: e.clientX - r.left, y: e.clientY - r.top }
+      if (e.shiftKey || (e.deltaMode === 0 && Math.abs(e.deltaX) > Math.abs(e.deltaY))) {
+        // Two-finger trackpad pan arrives as deltaX/deltaY with deltaMode = 0.
+        const sx = (W / r.width) / viewport.zoom
+        const sy = (H / r.height) / viewport.zoom
+        setViewport((v) => ({ ...v, x: v.x + e.deltaX * sx, y: v.y + e.deltaY * sy }))
+      } else if (e.deltaY !== 0) {
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
+        zoomAtScreen(local, factor)
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+    // zoomAtScreen reads screenSize/zoom at call time via the updater; safe
+    // to omit from deps to avoid re-binding the listener on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenSize.w, screenSize.h, viewport.zoom])
 
   // Load the graph + run the force layout in a Web Worker so the main thread
   // stays responsive on large wikis (#194). Positions stream back as ticks.
@@ -233,8 +295,9 @@ export function GraphView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, nodes, activeTypes, tagFilter])
 
-  // Centre the viewport on a node by panning the content group.
-  const centerOn = (n: Node) => setPan({ x: W / 2 - n.x, y: H / 2 - n.y })
+  // Centre the viewport on a node (#193 search, #252 zoom + pan).
+  const centerOn = (n: Node) =>
+    setViewport((v) => ({ ...v, x: W / 2 - n.x, y: H / 2 - n.y }))
 
   // Whenever the match set changes, snap to the first match.
   useEffect(() => {
@@ -243,6 +306,18 @@ export function GraphView() {
       centerOn(matches[0])
     }
   }, [matches])
+
+  // When the user enters focus mode, fit the viewport to the neighbourhood
+  // (#252). Triggered on focusId / depth changes — not on viewport, to
+  // avoid an infinite loop while the user is panning inside the focus.
+  const focusKey = focusId && focusSet ? `${focusId}:${depth}` : null
+  useEffect(() => {
+    if (!focusKey) return
+    const ids = focusSet!
+    const points = nodes.filter((n) => ids.has(n.id)).map((n) => ({ x: n.x, y: n.y }))
+    setViewport((v) => fitToBounds(v, screenSize, world, boundsOf(points), 0.15))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey])
 
   const cycleMatch = () => {
     if (matches.length === 0) return
@@ -267,16 +342,24 @@ export function GraphView() {
     setSearch("")
     setFocusId(null)
     setSelected(null)
-    setPan({ x: 0, y: 0 })
+    setViewport({ x: 0, y: 0, zoom: 1 })
   }
 
-  function toSvg(e: React.PointerEvent): { x: number; y: number } {
+  // ---- Viewport helpers shared by toolbar / wheel / focus (#252) ----
+  const zoomIn = () =>
+    setViewport((v) => zoomAt(v, screenSize, world, { x: screenSize.w / 2, y: screenSize.h / 2 }, 1.2))
+  const zoomOut = () =>
+    setViewport((v) => zoomAt(v, screenSize, world, { x: screenSize.w / 2, y: screenSize.h / 2 }, 1 / 1.2))
+  const fitAll = () => setViewport((v) => fitToBounds(v, screenSize, world, boundsOf(nodes), 0.1))
+  const oneToOne = () => setViewport({ x: 0, y: 0, zoom: 1 })
+
+  // Convert a pointer event in the SVG into world coordinates, respecting
+  // the current viewport zoom + pan.
+  function pointerToWorld(e: React.PointerEvent): { x: number; y: number } {
     const svg = svgRef.current!
     const rect = svg.getBoundingClientRect()
-    return {
-      x: ((e.clientX - rect.left) / rect.width) * W,
-      y: ((e.clientY - rect.top) / rect.height) * H,
-    }
+    const local = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    return screenToWorld(viewport, { w: rect.width, h: rect.height }, world, local.x, local.y)
   }
 
   const degree = (id: string) => adjacency.get(id)?.size ?? 0
@@ -287,7 +370,10 @@ export function GraphView() {
   const useCanvas = nodes.length > CANVAS_THRESHOLD
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div
+      ref={containerRef}
+      className="relative flex-1 overflow-hidden"
+    >
       {/* toolbar */}
       <div className="absolute left-4 top-4 z-10 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-2">
         <h1 className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 font-display text-[13px] font-semibold shadow-sm">
@@ -373,6 +459,42 @@ export function GraphView() {
         <Button size="sm" variant="ghost" className="h-[28px] gap-1 px-2" onClick={resetView}>
           <X className="size-3.5" /> reset
         </Button>
+
+        {/* viewport controls (#252) */}
+        <div className="flex items-center gap-0.5 rounded-md border bg-card p-0.5 text-[11px] shadow-sm">
+          <button
+            onClick={zoomOut}
+            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Zoom out"
+          >
+            <Minus className="size-3.5" />
+          </button>
+          <span className="min-w-[44px] px-1 text-center text-muted-foreground tabular-nums">
+            {Math.round(viewport.zoom * 100)}%
+          </span>
+          <button
+            onClick={zoomIn}
+            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Zoom in"
+          >
+            <Plus className="size-3.5" />
+          </button>
+          <span className="mx-0.5 h-3 w-px bg-border" />
+          <button
+            onClick={fitAll}
+            className="flex h-6 items-center gap-1 rounded px-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Fit all nodes to screen"
+          >
+            <Maximize2 className="size-3.5" /> fit
+          </button>
+          <button
+            onClick={oneToOne}
+            className="flex h-6 items-center gap-1 rounded px-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+            title="Reset zoom to 100%"
+          >
+            <RotateCcw className="size-3.5" /> 1:1
+          </button>
+        </div>
         {focusId && (
           <span className="rounded-md border bg-primary/10 px-2 py-1 text-[11px] text-primary">
             focusing — click background to exit
@@ -390,8 +512,8 @@ export function GraphView() {
         <GraphCanvas
           nodes={nodes}
           edges={resolvedEdges}
-          world={{ w: W, h: H }}
-          pan={pan}
+          world={world}
+          viewport={viewport}
           colorFor={colorFor}
           isVisible={isVisible}
           focusSet={focusSet}
@@ -404,25 +526,71 @@ export function GraphView() {
           onOpen={(n) => navigate(`/wiki?path=${encodeURIComponent(n.id)}`)}
           onBackground={() => setFocusId(null)}
           onDrag={moveNode}
+          onPanBy={panByScreen}
+          onZoomAt={zoomAtScreen}
         />
       ) : (
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${W} ${H}`}
+          viewBox={`${-viewport.x} ${-viewport.y} ${W / viewport.zoom} ${H / viewport.zoom}`}
           className="h-full w-full"
-          onPointerMove={(e) => {
-            if (!dragRef.current) return
-            const { x, y } = toSvg(e)
-            moveNode(dragRef.current.id, x - pan.x, y - pan.y)
+          onPointerDown={(e) => {
+            // Started on the background (the svg root, not a node) — pan mode.
+            if (e.target === svgRef.current) {
+              panDragRef.current = {
+                x: e.clientX,
+                y: e.clientY,
+              }
+              ;(e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId)
+            }
           }}
-          onPointerUp={() => (dragRef.current = null)}
-          onPointerLeave={() => (dragRef.current = null)}
+          onPointerMove={(e) => {
+            if (dragRef.current) {
+              const w = pointerToWorld(e)
+              moveNode(dragRef.current.id, w.x, w.y)
+              return
+            }
+            if (panDragRef.current) {
+              const dx = e.clientX - panDragRef.current.x
+              const dy = e.clientY - panDragRef.current.y
+              panDragRef.current = { x: e.clientX, y: e.clientY }
+              // Convert CSS-pixel delta into world units (inverse of the
+              // current zoom + svg-to-screen scale).
+              const svg = svgRef.current!
+              const r = svg.getBoundingClientRect()
+              const sx = (W / r.width) / viewport.zoom
+              const sy = (H / r.height) / viewport.zoom
+              setViewport((v) => ({
+                ...v,
+                x: v.x - dx * sx,
+                y: v.y - dy * sy,
+              }))
+            }
+          }}
+          onPointerUp={(e) => {
+            dragRef.current = null
+            panDragRef.current = null
+            try {
+              ;(e.currentTarget as SVGSVGElement).releasePointerCapture(e.pointerId)
+            } catch {
+              // ignore
+            }
+          }}
+          onPointerLeave={(e) => {
+            dragRef.current = null
+            panDragRef.current = null
+            try {
+              ;(e.currentTarget as SVGSVGElement).releasePointerCapture(e.pointerId)
+            } catch {
+              // ignore
+            }
+          }}
           onClick={() => {
             // Click on empty background exits focus mode.
             if (focusId) setFocusId(null)
           }}
         >
-          <g transform={`translate(${pan.x},${pan.y})`}>
+          <g transform={`translate(${viewport.x},${viewport.y})`}>
             {/* edges */}
             {resolvedEdges.map(([a, b], i) => {
               if (!isVisible(a) || !isVisible(b)) return null
