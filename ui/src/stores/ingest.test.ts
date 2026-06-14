@@ -51,6 +51,32 @@ describe("useIngestStore.run note (#237 follow-up)", () => {
     expect(s.crId).toBe("CR-1")
     expect(s.note).toBe("The agent wrote none.")
   })
+
+  it("surfaces the skipped reason when dedup short-circuits the run", async () => {
+    // Mirrors the worker's payload on SourceAlreadyProcessedError — the agent
+    // never ran, so the UI must NOT show the misleading "no changes proposed".
+    vi.spyOn(api, "getJob").mockResolvedValue({
+      id: 2,
+      type: "ingest",
+      status: "done",
+      progress: null,
+      result: JSON.stringify({
+        skipped: true,
+        reason:
+          "Source already processed (hash abc123…): raw/articles/x.md. " +
+          "Use force=True to re-ingest.",
+      }),
+      error: null,
+    } as never)
+
+    await useIngestStore.getState().run("Ingesting x", async () => ({ job_id: 2 }))
+
+    const s = useIngestStore.getState()
+    expect(s.status).toBe("done")
+    expect(s.crId).toBeNull()
+    expect(s.note).toContain("Skipped:")
+    expect(s.note).toContain("Source already processed")
+  })
 })
 
 describe("useIngestStore minimize/reopen", () => {

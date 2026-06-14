@@ -123,15 +123,15 @@ export const api = {
     request<SourceContent>(
       `/sources/content?path=${encodeURIComponent(path)}`,
     ),
-  ingestSource: (path: string) =>
+  ingestSource: (path: string, force = false) =>
     request<{ job_id: number }>(
       "/sources/ingest",
-      { method: "POST", body: JSON.stringify({ path }) },
+      { method: "POST", body: JSON.stringify({ path, force }) },
     ),
-  ingestSources: (paths: string[]) =>
+  ingestSources: (paths: string[], force = false) =>
     request<{ job_ids: number[]; errors: { path: string; detail: string }[] }>(
       "/sources/ingest",
-      { method: "POST", body: JSON.stringify({ paths }) },
+      { method: "POST", body: JSON.stringify({ paths, force }) },
     ),
   uploadSource: async (file: File): Promise<Source> => {
     const form = new FormData()

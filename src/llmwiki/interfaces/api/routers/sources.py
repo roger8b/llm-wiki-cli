@@ -63,6 +63,7 @@ def get_source_content(path: str) -> dict[str, Any]:
 def ingest_source(
     path: str | None = Body(default=None, embed=True),
     paths_in: list[str] | None = Body(default=None, alias="paths", embed=True),  # noqa: B008
+    force: bool = Body(default=False, embed=True),
 ) -> dict[str, Any]:
     """Queue one or more source files for background ingestion.
 
@@ -71,6 +72,11 @@ def ingest_source(
     validated in isolation: invalid paths do not abort the batch. Returns the
     created ``job_ids`` plus per-path ``errors``. Responds 400 only when no job
     could be created.
+
+    Pass ``force=true`` to skip the content-hash dedup that normally short-
+    circuits re-ingestion of an already-processed source. The job payload
+    carries the flag; the worker forwards it to the ingest service (#237
+    follow-up: re-ingest from the UI).
     """
     import json
 
@@ -96,7 +102,8 @@ def ingest_source(
             if not target.is_file():
                 errors.append({"path": p, "detail": f"File not found: {p}"})
                 continue
-            job_id = job_repo.create("ingest", json.dumps({"source": p}), status="queued")
+            payload = json.dumps({"source": p, "force": bool(force)})
+            job_id = job_repo.create("ingest", payload, status="queued")
             job_ids.append(job_id)
     finally:
         conn.close()

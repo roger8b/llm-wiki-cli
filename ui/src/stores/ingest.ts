@@ -84,7 +84,18 @@ function parseCrId(result: string | null | undefined): string | null {
 function parseNote(result: string | null | undefined): string | null {
   if (!result) return null
   try {
-    return JSON.parse(result).note ?? null
+    const parsed = JSON.parse(result)
+    // Backend's ingest_service sets `note` when the agent ran but wrote nothing.
+    // The worker sets `skipped` + `reason` when content-hash dedup short-
+    // circuited the run (#237 follow-up: re-ingest UX). Surface both so the UI
+    // never falls back to the misleading "Done — no changes proposed." string.
+    if (typeof parsed.note === "string") return parsed.note
+    if (parsed.skipped) {
+      return parsed.reason
+        ? `Skipped: ${parsed.reason}`
+        : "Skipped — source was already ingested. Use Re-ingest to force the agent to run again."
+    }
+    return null
   } catch {
     return null
   }
