@@ -304,15 +304,31 @@ def _metadata_line(source_meta: dict[str, str | None] | None) -> str:
 def _chunk_context(
     outline: OutlinePlan | None, part: tuple[int, int] | None
 ) -> str:
-    """Render the multi-pass preamble (outline + part-i-of-n note), or ''."""
+    """Render the multi-pass preamble (outline + part-i-of-n note), or ''.
+
+    The wording is part-aware: part 1 must CREATE the pages for its concepts
+    (nothing exists yet); later parts may find pages from earlier parts and
+    should update/extend them, but still create pages for new concepts. The old
+    one-size note ("pages already exist — update instead of create") was
+    contradictory on part 1 and could make the agent write nothing.
+    """
     if part is None:
         return ""
     i, n = part
-    lines = [
-        f"PARTE {i} DE {n} DA MESMA FONTE. Esta fonte longa foi dividida em "
-        f"{n} partes. Páginas das partes anteriores JÁ EXISTEM no staging — "
-        "ATUALIZE a página existente (edit_file) em vez de duplicar o conceito.",
-    ]
+    if i == 1:
+        note = (
+            f"PARTE 1 DE {n} DA MESMA FONTE (dividida por ser longa). NADA foi "
+            "escrito ainda — CRIE (write_file) as páginas dos conceitos desta "
+            "parte normalmente. As próximas partes continuam a MESMA fonte."
+        )
+    else:
+        note = (
+            f"PARTE {i} DE {n} DA MESMA FONTE. As partes anteriores podem já ter "
+            "criado páginas — use search_pages/related_pages para encontrá-las e "
+            "ATUALIZE/estenda (edit_file) em vez de duplicar. Para conceitos ainda "
+            "NÃO cobertos, CRIE a página (write_file)."
+        )
+    lines = [note]
     if outline is not None and (outline.concepts or outline.summary):
         if outline.summary:
             lines.append(f"RESUMO DA FONTE: {outline.summary}")
