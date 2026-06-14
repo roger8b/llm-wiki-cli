@@ -134,3 +134,28 @@ class TestBuildModel:
         monkeypatch.setattr(secrets, "get_api_key", _boom)
         model = factory._build_model(_cfg(tmp_path, "ollama:llama3.1"))
         assert not isinstance(model, str)
+
+
+class TestChunkContext:
+    """Multi-pass part-i-of-n preamble must not be self-contradictory (#162 fix)."""
+
+    def test_part1_mandates_create_not_update(self) -> None:
+        from llmwiki.llm_agents.factory import _chunk_context
+
+        msg = _chunk_context(None, (1, 3))
+        assert "PARTE 1 DE 3" in msg
+        assert "CRIE" in msg
+        # the old contradictory wording must be gone on part 1
+        assert "JÁ EXISTEM" not in msg
+
+    def test_later_parts_allow_update_and_create(self) -> None:
+        from llmwiki.llm_agents.factory import _chunk_context
+
+        msg = _chunk_context(None, (2, 3))
+        assert "PARTE 2 DE 3" in msg
+        assert "edit_file" in msg and "write_file" in msg
+
+    def test_single_pass_has_no_preamble(self) -> None:
+        from llmwiki.llm_agents.factory import _chunk_context
+
+        assert _chunk_context(None, None) == ""
