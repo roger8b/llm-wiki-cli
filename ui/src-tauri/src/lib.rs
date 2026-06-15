@@ -5,6 +5,7 @@
 // opens a WebView pointing at it. The backend serves both the SPA and the /api
 // routes on the same origin, so the React app's "/api" base works unchanged.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri_plugin_notification::NotificationExt;
 
 /// Holds the running backend process so we can kill it on exit.
 struct Backend(Mutex<Option<Child>>);
@@ -26,11 +28,27 @@ struct Backend(Mutex<Option<Child>>);
 struct AppSession {
     url: String,
     token: String,
+    brain: String,
     port: u16,
     /// When false, closing the window quits (legacy behavior).
     run_in_background: AtomicBool,
     /// Tray menu item showing the running-job count; updated by the poll thread.
     jobs_item: Mutex<Option<MenuItem<Wry>>>,
+    /// Last seen `{job_id: status}` snapshot for transition detection (#205).
+    prev_jobs: Mutex<HashMap<i64, String>>,
+    /// Route to navigate to when the window is next opened (set when a
+    /// notification fires; consumed by `open_main_window`). (#205)
+    pending_route: Mutex<Option<String>>,
+}
+
+/// A native notification to fire on a job state transition (#205). Pure data so
+/// the detection logic is unit-testable without a live backend.
+#[derive(Debug, PartialEq)]
+struct JobNote {
+    title: String,
+    body: String,
+    /// SPA route to open on click (e.g. "/review", "/jobs").
+    route: String,
 }
 
 /// Ask the OS for a free TCP port by binding to :0 and reading it back.
@@ -131,16 +149,104 @@ fn pid_is_backend(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// Read the `run_in_background` preference from `<brain>/.llmwiki/desktop.json`
-/// (written by the backend, #204). Defaults to true when missing/unreadable.
-fn read_run_in_background(brain: &str) -> bool {
+/// Read a boolean preference from `<brain>/.llmwiki/desktop.json` (written by the
+/// backend, #204/#205). Defaults to `default` when missing/unreadable.
+fn read_desktop_bool(brain: &str, key: &str, default: bool) -> bool {
     let path = PathBuf::from(brain).join(".llmwiki/desktop.json");
     match std::fs::read_to_string(&path) {
         Ok(body) => serde_json::from_str::<serde_json::Value>(&body)
             .ok()
-            .and_then(|v| v.get("run_in_background").and_then(|b| b.as_bool()))
-            .unwrap_or(true),
-        Err(_) => true,
+            .and_then(|v| v.get(key).and_then(|b| b.as_bool()))
+            .unwrap_or(default),
+        Err(_) => default,
+    }
+}
+
+/// Parse a `/api/jobs` body into a `{job_id: status}` map. Pure.
+fn jobs_status_map(body: &str) -> HashMap<i64, String> {
+    let mut out = HashMap::new();
+    if let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(body) {
+        for j in items {
+            if let (Some(id), Some(status)) = (
+                j.get("id").and_then(|v| v.as_i64()),
+                j.get("status").and_then(|v| v.as_str()),
+            ) {
+                out.insert(id, status.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Detect job notifications by diffing the previous status snapshot against the
+/// current `/api/jobs` body. A notification fires only when a job we previously
+/// saw as non-terminal (queued/running) has reached a terminal state — so the
+/// first poll (empty `prev`) is silent and a job is never notified twice.
+fn detect_notifications(prev: &HashMap<i64, String>, body: &str) -> Vec<JobNote> {
+    let mut notes = Vec::new();
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(body)
+    else {
+        return notes;
+    };
+    for j in items {
+        let Some(id) = j.get("id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        let status = j.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let terminal = matches!(status, "done" | "error" | "cancelled");
+        if !terminal {
+            continue;
+        }
+        match prev.get(&id).map(String::as_str) {
+            Some("queued") | Some("running") => {}
+            _ => continue, // not seen before, or already terminal last time
+        }
+        let job_type = j.get("type").and_then(|v| v.as_str()).unwrap_or("job");
+        notes.push(build_note(job_type, status, &j));
+    }
+    notes
+}
+
+/// Build the user-facing notification for one terminal transition.
+fn build_note(job_type: &str, status: &str, job: &serde_json::Value) -> JobNote {
+    let is_ingest = job_type == "ingest";
+    match status {
+        "done" => {
+            // Ingest results carry a CR id to review; route there.
+            let cr = job
+                .get("result")
+                .and_then(|r| r.as_str())
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| v.get("cr").and_then(|c| c.as_str()).map(String::from));
+            if is_ingest {
+                let body = match cr {
+                    Some(cr) => format!("{cr} ready to review"),
+                    None => "Change request ready to review".to_string(),
+                };
+                JobNote { title: "Ingestion finished".into(), body, route: "/review".into() }
+            } else {
+                JobNote {
+                    title: "Job finished".into(),
+                    body: format!("{job_type} completed"),
+                    route: "/jobs".into(),
+                }
+            }
+        }
+        "error" => {
+            let first_line = job
+                .get("error")
+                .and_then(|e| e.as_str())
+                .map(|e| e.lines().next().unwrap_or("").to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "See Jobs for details".to_string());
+            let title = if is_ingest { "Ingestion failed" } else { "Job failed" };
+            JobNote { title: title.into(), body: first_line, route: "/jobs".into() }
+        }
+        _ => JobNote {
+            title: "Job cancelled".into(),
+            body: format!("{job_type} was cancelled"),
+            route: "/jobs".into(),
+        },
     }
 }
 
@@ -226,12 +332,13 @@ fn open_main_window(handle: &AppHandle) {
         let _ = win.unminimize();
         let _ = win.set_focus();
         show_in_dock(handle);
+        navigate_pending(handle, &win);
         return;
     }
     let session = handle.state::<AppSession>();
     let url = session.url.clone();
     let token = session.token.clone();
-    WebviewWindowBuilder::new(handle, "main", WebviewUrl::External(url.parse().unwrap()))
+    let win = WebviewWindowBuilder::new(handle, "main", WebviewUrl::External(url.parse().unwrap()))
         .title("llm-wiki")
         .inner_size(1280.0, 860.0)
         .min_inner_size(900.0, 600.0)
@@ -239,6 +346,21 @@ fn open_main_window(handle: &AppHandle) {
         .build()
         .expect("failed to build window");
     show_in_dock(handle);
+    navigate_pending(handle, &win);
+}
+
+/// If a notification queued a route (#205), navigate the SPA there. The front has
+/// no Tauri bridge, so we drive it with `location.assign` — accepted per #205.
+fn navigate_pending(handle: &AppHandle, win: &tauri::WebviewWindow) {
+    let route = handle
+        .state::<AppSession>()
+        .pending_route
+        .lock()
+        .unwrap()
+        .take();
+    if let Some(route) = route {
+        let _ = win.eval(&format!("window.location.assign({route:?})"));
+    }
 }
 
 /// Resolve the PyInstaller onedir backend executable.
@@ -290,31 +412,55 @@ fn gen_token() -> String {
     format!("{nanos:x}{:x}", std::process::id())
 }
 
-/// Background thread: every 15s, while the window is hidden, refresh the tray's
-/// "Jobs running: N" item from `GET /api/jobs`. Skips the poll entirely when a
-/// window is visible (the SPA already shows job state there).
+/// Background thread: every 15s poll `GET /api/jobs` to (a) refresh the tray's
+/// "Jobs running: N" item and (b) fire native notifications on terminal job
+/// transitions (#205). Backend down → silent (no regression). Notifications are
+/// suppressed when a window is focused, and honor the `notify_on_jobs` toggle.
 fn spawn_job_poll(handle: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(15));
-        let window_visible = handle
-            .get_webview_window("main")
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false);
-        if window_visible {
-            continue;
-        }
         let session = handle.state::<AppSession>();
-        let label = match http_get_body(session.port, "/api/jobs?limit=50", &session.token) {
-            Some(body) => match count_running_jobs(&body) {
-                0 => "No jobs running".to_string(),
-                n => format!("Jobs running: {n}"),
-            },
-            None => "Jobs: unknown".to_string(),
+
+        // Re-read the persisted background pref each tick so the Settings toggle
+        // takes effect without an app restart (consumed by hide-on-close).
+        let run_bg = read_desktop_bool(&session.brain, "run_in_background", true);
+        session.run_in_background.store(run_bg, Ordering::Relaxed);
+
+        let Some(body) = http_get_body(session.port, "/api/jobs?limit=50", &session.token) else {
+            continue;
+        };
+
+        // Tray job-count item (matters while hidden; cheap to always refresh).
+        let label = match count_running_jobs(&body) {
+            0 => "No jobs running".to_string(),
+            n => format!("Jobs running: {n}"),
         };
         let item = session.jobs_item.lock().unwrap().clone();
         if let Some(item) = item {
             let _ = item.set_text(label);
         }
+
+        // Notifications on terminal transitions (#205).
+        if read_desktop_bool(&session.brain, "notify_on_jobs", true) {
+            let prev = session.prev_jobs.lock().unwrap().clone();
+            let notes = detect_notifications(&prev, &body);
+            let focused = handle
+                .get_webview_window("main")
+                .and_then(|w| w.is_focused().ok())
+                .unwrap_or(false);
+            if !focused {
+                for note in notes {
+                    *session.pending_route.lock().unwrap() = Some(note.route.clone());
+                    let _ = handle
+                        .notification()
+                        .builder()
+                        .title(&note.title)
+                        .body(&note.body)
+                        .show();
+                }
+            }
+        }
+        *session.prev_jobs.lock().unwrap() = jobs_status_map(&body);
     });
 }
 
@@ -327,6 +473,7 @@ pub fn run() {
             open_main_window(app);
         }))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             let port = free_port();
@@ -336,13 +483,16 @@ pub fn run() {
             eprintln!("[llm-wiki] Using port={port}, brain={brain}");
 
             // Persisted desktop preference (#204); default-on for background.
-            let run_bg = read_run_in_background(&brain);
+            let run_bg = read_desktop_bool(&brain, "run_in_background", true);
             app.manage(AppSession {
                 url: url.clone(),
                 token: token.clone(),
+                brain: brain.clone(),
                 port,
                 run_in_background: AtomicBool::new(run_bg),
                 jobs_item: Mutex::new(None),
+                prev_jobs: Mutex::new(HashMap::new()),
+                pending_route: Mutex::new(None),
             });
 
             // Tray icon + menu (Open / Jobs status / Quit). All tray logic lives
@@ -469,7 +619,52 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::count_running_jobs;
+    use super::{count_running_jobs, detect_notifications, jobs_status_map};
+    use std::collections::HashMap;
+
+    fn prev(pairs: &[(i64, &str)]) -> HashMap<i64, String> {
+        pairs.iter().map(|(k, v)| (*k, v.to_string())).collect()
+    }
+
+    #[test]
+    fn first_poll_is_silent() {
+        let body = r#"[{"id":1,"type":"ingest","status":"done","result":"{\"cr\":\"CR-1\"}"}]"#;
+        assert!(detect_notifications(&prev(&[]), body).is_empty());
+    }
+
+    #[test]
+    fn ingest_done_routes_to_review_with_cr() {
+        let body = r#"[{"id":1,"type":"ingest","status":"done","result":"{\"cr\":\"CR-2026-0042\"}"}]"#;
+        let notes = detect_notifications(&prev(&[(1, "running")]), body);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Ingestion finished");
+        assert!(notes[0].body.contains("CR-2026-0042"));
+        assert_eq!(notes[0].route, "/review");
+    }
+
+    #[test]
+    fn failed_job_routes_to_jobs_with_error() {
+        let body = r#"[{"id":2,"type":"ingest","status":"error","error":"boom: bad pdf\nstacktrace"}]"#;
+        let notes = detect_notifications(&prev(&[(2, "running")]), body);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Ingestion failed");
+        assert_eq!(notes[0].body, "boom: bad pdf");
+        assert_eq!(notes[0].route, "/jobs");
+    }
+
+    #[test]
+    fn already_terminal_not_renotified() {
+        let body = r#"[{"id":1,"type":"ingest","status":"done","result":"{}"}]"#;
+        assert!(detect_notifications(&prev(&[(1, "done")]), body).is_empty());
+    }
+
+    #[test]
+    fn status_map_parses_ids() {
+        let body = r#"[{"id":1,"status":"running"},{"id":2,"status":"done"}]"#;
+        let m = jobs_status_map(body);
+        assert_eq!(m.get(&1).map(String::as_str), Some("running"));
+        assert_eq!(m.get(&2).map(String::as_str), Some("done"));
+    }
 
     #[test]
     fn counts_only_running() {
