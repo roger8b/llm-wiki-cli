@@ -289,3 +289,20 @@ export interface Job {
   created_at: string
   completed_at?: string | null
 }
+
+/** Per-model agent telemetry from GET /jobs/stats (#176, dashboard #151). */
+export interface ModelStats {
+  model: string
+  runs: number
+  tokens_in_avg: number
+  tokens_in_p95: number
+  tokens_out_avg: number
+  tokens_out_p95: number
+  latency_ms_avg: number
+  latency_ms_p95: number
+  fallback_rate: number
+  phantom_rate: number
+  applied: number
+  rejected: number
+  est_cost_usd: number | null
+}
