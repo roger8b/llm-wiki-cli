@@ -515,7 +515,12 @@ def run_query(
     return _invoke(agent, question + suffix, QueryResult, cfg, backend, on_token=on_token)
 
 
-def run_lint(cfg: WorkspaceConfig) -> LintReport:
+def run_lint(
+    cfg: WorkspaceConfig,
+    *,
+    pages: list[str] | None = None,
+    scope_name: str | None = None,
+) -> LintReport:
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
@@ -525,7 +530,18 @@ def run_lint(cfg: WorkspaceConfig) -> LintReport:
         middleware=_agent_middleware(None),
         response_format=_response_format(LintReport),
     )
-    return _invoke(agent, "Audite a wiki e liste os problemas.", LintReport, cfg)
+    if pages:
+        scope = f" (lote: {scope_name})" if scope_name else ""
+        listing = "\n".join(f"- {p}" for p in pages)
+        message = (
+            f"Audite EXATAMENTE estas páginas{scope} (leia cada uma com read_file):\n"
+            f"{listing}\n\n"
+            "Foque em problemas internos ao lote e contradições com páginas que "
+            "você consultar via search_pages. Não invente problemas."
+        )
+    else:
+        message = "Audite a wiki e liste os problemas."
+    return _invoke(agent, message, LintReport, cfg)
 
 
 def run_maintenance(

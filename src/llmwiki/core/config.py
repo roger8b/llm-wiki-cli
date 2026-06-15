@@ -38,6 +38,7 @@ _CONFIG_KEYS = (
     "embedding_model",
     "ask_history_turns",
     "ask_history_max_chars",
+    "lint_token_budget",
 )
 
 # Default config written on first init.
@@ -67,6 +68,9 @@ _DEFAULTS: dict[str, object] = {
     # truncated with "…").
     "ask_history_turns": 4,
     "ask_history_max_chars": 8000,
+    # Semantic lint in batches (#173): total estimated-token budget per
+    # `wiki lint --all` run. Batches that don't fit are deferred and reported.
+    "lint_token_budget": 60000,
 }
 
 
@@ -110,6 +114,9 @@ class WorkspaceConfig(BaseModel):
     # Ask follow-up conversation window (#190).
     ask_history_turns: int = 4
     ask_history_max_chars: int = 8000
+    # Semantic lint batching (#173). Total estimated-token budget per
+    # ``wiki lint --all`` run; batches over budget are deferred and reported.
+    lint_token_budget: int = 60000
 
     @property
     def paths(self) -> BrainPaths:

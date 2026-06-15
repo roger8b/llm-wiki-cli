@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core import frontmatter, markdown
@@ -179,6 +180,163 @@ def lint_all(
         runner = semantic_runner or _default_semantic_runner
         findings = findings + runner(cfg)
     return findings
+
+
+# ----------------------------------------------------------------------------
+# Batched semantic lint with a token budget (#173)
+# ----------------------------------------------------------------------------
+
+_SEVERITY_RANK = {Severity.info: 1, Severity.warn: 2, Severity.error: 3}
+
+
+@dataclass
+class Batch:
+    """A named group of page paths audited together in one runner invocation."""
+
+    name: str
+    pages: list[str]
+
+
+@dataclass
+class LintBatchReport:
+    """Result of a batched semantic lint run."""
+
+    findings: list[LintFinding] = field(default_factory=list)
+    processed: list[Batch] = field(default_factory=list)
+    skipped: list[Batch] = field(default_factory=list)
+
+    @property
+    def pages_covered(self) -> list[str]:
+        seen: list[str] = []
+        for b in self.processed:
+            seen.extend(b.pages)
+        return seen
+
+
+BatchRunner = Callable[[WorkspaceConfig, Batch], list[LintFinding]]
+
+
+def _estimate_tokens(paths: BrainPaths, rels: list[str]) -> int:
+    """Rough token estimate (chars / 4) for the given relative page paths."""
+    total = 0
+    for rel in rels:
+        p = paths.root / rel
+        try:
+            total += len(p.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return total // 4
+
+
+def partition_pages(
+    paths: BrainPaths, *, budget: int, scope: str | None = None
+) -> tuple[list[Batch], list[Batch]]:
+    """Group wiki pages into batches by type directory under a token ``budget``.
+
+    Returns ``(to_process, skipped)``. Pages are grouped by their type directory
+    (``concepts/``, ``entities/``, …); a directory larger than ``budget`` is
+    split alphabetically into sub-batches. Batches that don't fit the total run
+    budget are returned as ``skipped`` (never silently dropped). The first batch
+    always runs so a single oversized batch is not skipped to nothing.
+    """
+    groups: dict[str, list[str]] = {}
+    for f in _iter_wiki_files(paths.wiki):
+        rel = paths.relative(f)
+        parts = Path(rel).parts  # ("wiki", "concepts", "a.md")
+        type_dir = parts[1] if len(parts) > 2 else "_root"
+        if scope is not None and type_dir != scope:
+            continue
+        groups.setdefault(type_dir, []).append(rel)
+
+    candidates: list[Batch] = []
+    for type_dir in sorted(groups):
+        rels = sorted(groups[type_dir])
+        if _estimate_tokens(paths, rels) <= budget:
+            candidates.append(Batch(name=type_dir, pages=rels))
+            continue
+        # Directory exceeds budget → split alphabetically into sub-batches.
+        cur: list[str] = []
+        cur_tok = 0
+        idx = 1
+        for rel in rels:
+            tok = _estimate_tokens(paths, [rel])
+            if cur and cur_tok + tok > budget:
+                candidates.append(Batch(name=f"{type_dir} ({idx})", pages=cur))
+                idx += 1
+                cur, cur_tok = [], 0
+            cur.append(rel)
+            cur_tok += tok
+        if cur:
+            candidates.append(Batch(name=f"{type_dir} ({idx})", pages=cur))
+
+    to_process: list[Batch] = []
+    skipped: list[Batch] = []
+    used = 0
+    for b in candidates:
+        tok = _estimate_tokens(paths, b.pages)
+        if to_process and used + tok > budget:
+            skipped.append(b)
+        else:
+            to_process.append(b)
+            used += tok
+    return to_process, skipped
+
+
+def _consolidate(findings: list[LintFinding]) -> list[LintFinding]:
+    """Dedup findings sharing ``(kind, sorted(pages))``; keep highest severity."""
+    by_key: dict[tuple[str, tuple[str, ...]], LintFinding] = {}
+    for f in findings:
+        key = (f.kind, tuple(sorted(f.pages)))
+        cur = by_key.get(key)
+        if cur is None or _SEVERITY_RANK[f.severity] > _SEVERITY_RANK[cur.severity]:
+            by_key[key] = f
+    return list(by_key.values())
+
+
+def _default_batch_runner(cfg: WorkspaceConfig, batch: Batch) -> list[LintFinding]:
+    from ..llm_agents.factory import run_lint
+
+    report = run_lint(cfg, pages=batch.pages, scope_name=batch.name)
+    out: list[LintFinding] = []
+    for f in report.findings:
+        try:
+            sev = Severity(f.severity)
+        except ValueError:
+            sev = Severity.warn
+        out.append(LintFinding(kind=f.kind, severity=sev, message=f.message, pages=f.pages))
+    return out
+
+
+def lint_batched(
+    paths: BrainPaths,
+    cfg: WorkspaceConfig,
+    *,
+    scope: str | None = None,
+    structural: bool = True,
+    batch_runner: BatchRunner | None = None,
+) -> LintBatchReport:
+    """Run structural lint plus batched semantic lint within the token budget."""
+    findings: list[LintFinding] = []
+    if structural:
+        findings.extend(lint_structural(paths))
+        if scope is not None:
+            prefix = f"wiki/{scope}/"
+            findings = [
+                f for f in findings if any(p.startswith(prefix) for p in f.pages)
+            ]
+
+    to_process, skipped = partition_pages(
+        paths, budget=cfg.lint_token_budget, scope=scope
+    )
+    runner = batch_runner or _default_batch_runner
+    for batch in to_process:
+        findings.extend(runner(cfg, batch))
+
+    return LintBatchReport(
+        findings=_consolidate(findings),
+        processed=to_process,
+        skipped=skipped,
+    )
 
 
 def annotate_with_pending_crs(
