@@ -39,6 +39,7 @@ _CONFIG_KEYS = (
     "ask_history_turns",
     "ask_history_max_chars",
     "lint_token_budget",
+    "worker_concurrency",
 )
 
 # Default config written on first init.
@@ -71,6 +72,7 @@ _DEFAULTS: dict[str, object] = {
     # Semantic lint in batches (#173): total estimated-token budget per
     # `wiki lint --all` run. Batches that don't fit are deferred and reported.
     "lint_token_budget": 60000,
+    "worker_concurrency": 1,
 }
 
 
@@ -117,6 +119,10 @@ class WorkspaceConfig(BaseModel):
     # Semantic lint batching (#173). Total estimated-token budget per
     # ``wiki lint --all`` run; batches over budget are deferred and reported.
     lint_token_budget: int = 60000
+    # Background worker concurrency (#140, ADR 001). 1 = single-threaded (byte
+    # for byte the legacy behaviour). >1 enables a read/write split: write jobs
+    # (ingest/maintain) stay serialized while reads (ask/lint) run concurrently.
+    worker_concurrency: int = 1
 
     @property
     def paths(self) -> BrainPaths:
