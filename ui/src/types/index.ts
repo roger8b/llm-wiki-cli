@@ -176,6 +176,7 @@ export interface GraphNode {
   id: string
   title: string
   type: string
+  tags?: string[]
 }
 
 export interface GraphEdge {

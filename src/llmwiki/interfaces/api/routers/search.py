@@ -63,6 +63,9 @@ def graph() -> dict[str, Any]:
         links = LinkRepo(conn).all()
     finally:
         conn.close()
-    nodes = [{"id": p.path, "title": p.title, "type": p.type.value} for p in pages]
+    nodes = [
+        {"id": p.path, "title": p.title, "type": p.type.value, "tags": p.tags}
+        for p in pages
+    ]
     edges = [{"from": f, "to": t} for f, t, _ in links]
     return {"nodes": nodes, "edges": edges}
