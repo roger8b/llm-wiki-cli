@@ -114,3 +114,16 @@ def test_ask_json(tmp_path: Path, monkeypatch) -> None:
     assert {"answer", "citations", "suggested_page", "change_request_id"} <= obj.keys()
     assert obj["answer"] == "RAG retrieves documents."
     assert obj["citations"][0]["page"] == "wiki/concepts/rag.md"
+
+
+def test_autolink_dry_run_json(tmp_path: Path, monkeypatch) -> None:
+    root = _seed(tmp_path, monkeypatch)
+    (root / "wiki/concepts/note.md").write_text(
+        "---\ntitle: Note\ntype: concept\n---\nfalamos de RAG aqui\n",
+        encoding="utf-8",
+    )
+    r = runner.invoke(app, ["autolink", "--dry-run", "--json"])
+    assert r.exit_code == 0
+    obj = _load(r.stdout)
+    assert obj["dry_run"] is True
+    assert isinstance(obj["mentions"], list)

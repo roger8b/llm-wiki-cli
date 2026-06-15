@@ -9,7 +9,7 @@ from .review import apply, jobs_app, reject, review
 from .serve import serve
 from .skills import skills_app
 from .source import source_app
-from .wiki import ask, index, lint, log, maintain, search
+from .wiki import ask, autolink, index, lint, log, maintain, search
 
 __all__ = [
     "brain_app",
@@ -19,6 +19,7 @@ __all__ = [
     "skills_app",
     "ask",
     "apply",
+    "autolink",
     "ingest",
     "index",
     "jobs_app",
