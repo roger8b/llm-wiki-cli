@@ -97,3 +97,10 @@ CREATE TABLE IF NOT EXISTS page_tags (
   tag  TEXT NOT NULL,
   PRIMARY KEY (path, tag)
 );
+
+-- Small per-brain key/value store for bookkeeping that isn't worth a table of
+-- its own (e.g. last_curation_at for the scheduled curator, #41).
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);

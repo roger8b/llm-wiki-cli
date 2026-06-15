@@ -129,3 +129,17 @@ class ModelStats(BaseModel):
     applied: int = 0
     rejected: int = 0
     est_cost_usd: float | None = None
+
+
+class CurationReport(BaseModel):
+    """Outcome of one scheduled/manual curation run (#41). Proposes only."""
+
+    findings_total: int = 0
+    findings_already_covered: int = 0
+    resolved: int = 0
+    unresolved: int = 0
+    change_requests: list[str] = Field(default_factory=list)
+    autolink_mentions: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    ran_at: str = ""

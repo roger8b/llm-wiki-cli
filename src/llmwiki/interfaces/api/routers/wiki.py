@@ -189,3 +189,17 @@ def maintain(semantic: bool = Body(False, embed=True)) -> dict[str, Any]:
     finally:
         conn.close()
     return {"job_id": job_id}
+
+
+@router.post("/curate")
+def curate() -> dict[str, Any]:
+    """Enqueue a curation run (lint → verified fixes → auto-link) — #41."""
+    from ....db.repo import JobRepo
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        job_id = JobRepo(conn).create("curate", "{}", status="queued")
+    finally:
+        conn.close()
+    return {"job_id": job_id}

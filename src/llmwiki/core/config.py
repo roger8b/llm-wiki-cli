@@ -40,6 +40,8 @@ _CONFIG_KEYS = (
     "ask_history_max_chars",
     "lint_token_budget",
     "worker_concurrency",
+    "curation_interval_hours",
+    "curation_semantic",
 )
 
 # Default config written on first init.
@@ -73,6 +75,8 @@ _DEFAULTS: dict[str, object] = {
     # `wiki lint --all` run. Batches that don't fit are deferred and reported.
     "lint_token_budget": 60000,
     "worker_concurrency": 1,
+    "curation_interval_hours": None,
+    "curation_semantic": True,
 }
 
 
@@ -123,6 +127,11 @@ class WorkspaceConfig(BaseModel):
     # for byte the legacy behaviour). >1 enables a read/write split: write jobs
     # (ingest/maintain) stay serialized while reads (ask/lint) run concurrently.
     worker_concurrency: int = 1
+    # Scheduled curator (#41). None disables the auto-run; the backend checks
+    # hourly whether now - last_curation_at > interval. `wiki curate` always
+    # works manually. curation_semantic toggles the (costly) semantic lint pass.
+    curation_interval_hours: int | None = None
+    curation_semantic: bool = True
 
     @property
     def paths(self) -> BrainPaths:
