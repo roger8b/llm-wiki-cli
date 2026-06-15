@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from ...workers.scheduler import run_scheduler
 
     configure_logging()
+    _on_startup()
     start_worker()
     stop_event = asyncio.Event()
     scheduler_task = asyncio.create_task(run_scheduler(stop_event))
@@ -66,6 +67,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stop_event.set()
         scheduler_task.cancel()
         stop_worker()
+        _on_shutdown()
+
+
+def _on_startup() -> None:
+    """Recover orphan jobs from a prior crash and write the server lockfile (#203)."""
+    from ...core.paths import load_active_brain
+    from ...db.connection import get_connection
+    from ...workers.lifecycle import recover_interrupted_jobs, write_lock
+
+    try:
+        paths = load_active_brain()
+    except Exception:
+        return
+    try:
+        conn = get_connection(paths.db_path)
+        try:
+            n = recover_interrupted_jobs(conn)
+            if n:
+                import logging
+
+                logging.getLogger("llmwiki.workers").info(
+                    "Recovered %d orphan running job(s) as interrupted.", n
+                )
+        finally:
+            conn.close()
+    except Exception:
+        import logging
+
+        logging.getLogger("llmwiki.workers").exception("Orphan-job recovery failed")
+    port_env = os.getenv("LLMWIKI_SERVER_PORT")
+    write_lock(paths, port=int(port_env) if port_env and port_env.isdigit() else None)
+
+
+def _on_shutdown() -> None:
+    from ...core.paths import load_active_brain
+    from ...workers.lifecycle import remove_lock
+
+    try:
+        paths = load_active_brain()
+    except Exception:
+        return
+    remove_lock(paths)
 
 
 app = FastAPI(title="llm-wiki API", version="2.0.0", lifespan=lifespan)

@@ -69,16 +69,70 @@ fn http_health_ok(addr: &str) -> bool {
         .is_some_and(|s| s.starts_with("HTTP/1.1 200") || s.starts_with("HTTP/1.0 200"))
 }
 
+/// Parse the `pid` out of a `server.lock` JSON body (`{"pid": N, "port": M}`).
+fn parse_lock_pid(body: &str) -> Option<u32> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    v.get("pid")?.as_u64().map(|p| p as u32)
+}
+
+/// True if `pid` is currently a `wiki-backend` process (guards against reusing a
+/// recycled pid that now belongs to something innocent).
+fn pid_is_backend(pid: u32) -> bool {
+    Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("wiki-backend"))
+        .unwrap_or(false)
+}
+
 /// Kill stray backend processes left over from a prior run (crash / force-quit).
 ///
-/// Scoped to the desktop brain path so a separately-launched `wiki serve` on a
-/// different brain is never touched. Orphaned sidecars compete for CPU/IO and
-/// inflate startup from ~9s to 20s+.
+/// Prefers the precise `<brain>/.llmwiki/server.lock` (pid+port written by the
+/// backend, #203): validate the pid is still a `wiki-backend`, SIGTERM then
+/// SIGKILL exactly that process, and remove the lock. Falls back to the old
+/// broad `pkill -f <brain>` only when no lockfile exists (first migration) so a
+/// separately-launched `wiki serve` on another brain is never touched.
 fn kill_stray_backends(brain: &str) {
+    let lock = PathBuf::from(brain).join(".llmwiki/server.lock");
+    if let Ok(body) = std::fs::read_to_string(&lock) {
+        if let Some(pid) = parse_lock_pid(&body) {
+            if pid_is_backend(pid) {
+                let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+                std::thread::sleep(Duration::from_millis(500));
+                if pid_is_backend(pid) {
+                    let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+                }
+                eprintln!("[llm-wiki] killed stray backend pid={pid} via lockfile");
+            }
+        }
+        let _ = std::fs::remove_file(&lock);
+        return;
+    }
+    // Fallback for installs predating the lockfile.
     match Command::new("pkill").args(["-f", brain]).status() {
         Ok(status) => eprintln!("[llm-wiki] pkill stray backends (brain={brain}): {status}"),
         Err(err) => eprintln!("[llm-wiki] pkill unavailable: {err}"),
     }
+}
+
+/// Stop the backend child gracefully: SIGTERM, wait up to 5s for a clean exit
+/// (so uvicorn/FastAPI run their shutdown and the worker marks state), then
+/// SIGKILL as a last resort. Avoids the previous immediate `child.kill()`
+/// (SIGKILL) that could leave jobs `running` and risk SQLite corruption.
+fn graceful_stop(child: &mut Child) {
+    let pid = child.id();
+    let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            eprintln!("[llm-wiki] backend exited cleanly on SIGTERM (pid={pid})");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    eprintln!("[llm-wiki] backend did not exit in 5s — sending SIGKILL (pid={pid})");
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Resolve the PyInstaller onedir backend executable.
@@ -133,6 +187,15 @@ fn gen_token() -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single instance MUST be registered first (plugin docs): a second
+        // launch focuses the existing window instead of spawning a 2nd backend.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
@@ -212,10 +275,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app, event| {
-            // Kill the backend when the app exits so we don't leak a zombie.
+            // Stop the backend gracefully when the app exits (SIGTERM → wait →
+            // SIGKILL) so uvicorn runs shutdown and the worker marks job state
+            // instead of dying mid-job (#203).
             if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
                 if let Some(mut child) = app.state::<Backend>().0.lock().unwrap().take() {
-                    let _ = child.kill();
+                    graceful_stop(&mut child);
                 }
             }
         });

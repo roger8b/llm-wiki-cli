@@ -73,6 +73,11 @@ def serve(
         )
         raise typer.Exit(code=1) from None
     typer.echo(f"[green]API at[/green] http://{host}:{port}")
+    # Record the port so the app's lifespan can write it into the server lockfile
+    # (#203) for precise stray-backend cleanup by the desktop shell.
+    import os
+
+    os.environ["LLMWIKI_SERVER_PORT"] = str(port)
     # Keep idle connections open well past typical user think-time. The desktop
     # WebView (WKWebView) reuses keep-alive connections and surfaces a reset stale
     # connection as "Load failed"; the default 5s closes them while the user is
