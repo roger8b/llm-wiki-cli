@@ -170,3 +170,63 @@ class TestWorkerAndCliConcurrency:
         finally:
             conn.close()
         assert n_crs == 5
+
+
+class TestReadWriteSplit:
+    def test_ask_answers_during_long_ingest(
+        self, brain: BrainPaths, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """worker_concurrency=2: an ask job completes while a long ingest is still
+        running (read/write split, ADR 001)."""
+        import llmwiki.workers.runner as runner_mod
+        from llmwiki.llm_agents.models import QueryResult
+        from llmwiki.services import query_service
+
+        # Force the concurrent path with a 2-wide pool.
+        monkeypatch.setattr(
+            runner_mod,
+            "load_config",
+            lambda paths: WorkspaceConfig(brain_root=brain.root, worker_concurrency=2),
+        )
+        # Long ingest (write job) holds its slot.
+        monkeypatch.setattr(
+            ingest_service,
+            "_default_runner",
+            _fake_runner_factory("wiki/concepts/slow.md", delay=1.5),
+        )
+
+        # Fast ask (read job).
+        def fake_ask(cfg, backend, *, question, save, on_token=None):
+            if on_token:
+                on_token("quick")
+            return QueryResult(answer="quick answer", citations=[])
+
+        monkeypatch.setattr(query_service, "_default_runner", fake_ask)
+
+        src = _make_source(brain, "slow.md", "slow source")
+        conn = get_connection(brain.db_path)
+        try:
+            ingest_id = JobRepo(conn).create("ingest", json.dumps({"source": src}))
+            ask_id = JobRepo(conn).create("ask", json.dumps({"question": "what?"}))
+        finally:
+            conn.close()
+
+        worker = JobWorker()
+        worker.start()
+        try:
+            _wait_for_job(brain, ingest_id, "running", timeout=5.0)
+            ask_done = _wait_for_job(brain, ask_id, "done", timeout=5.0)
+            assert ask_done["error"] is None
+            # The ask finished while the ingest was still in flight.
+            conn = get_connection(brain.db_path, apply_schema=False)
+            try:
+                ingest_status = JobRepo(conn).get(ingest_id)["status"]
+            finally:
+                conn.close()
+            assert ingest_status == "running"
+            # And the ingest still completes cleanly afterwards.
+            done = _wait_for_job(brain, ingest_id, "done", timeout=20.0)
+            assert done["error"] is None
+        finally:
+            worker.stop()
+            worker.join(timeout=5)
