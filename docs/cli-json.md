@@ -41,10 +41,15 @@ The full `ChangeRequest` object, including `changes` (each with `diff`,
 ### `wiki lint --json`
 
 ```json
-{"findings": [{"kind": "broken_link", "severity": "error", "message": "…", "pages": ["wiki/a.md"]}]}
+{"findings": [{"kind": "broken_link", "severity": "error", "message": "…", "pages": ["wiki/a.md"]}], "batches": [], "skipped": []}
 ```
 
-Exit code is non-zero when any finding has `severity: "error"`.
+With `--all`, semantic auditing runs in batches grouped by type directory under
+`lint_token_budget` (config, default 60000). `batches` lists the `{name, pages}`
+processed and `skipped` lists those deferred over budget (no page is dropped
+silently). `--scope <dir>` restricts batches to one type directory. Without
+`--all`, `batches`/`skipped` are empty. Exit code is non-zero when any finding
+has `severity: "error"`.
 
 ### `wiki jobs --json`
 

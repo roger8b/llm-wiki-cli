@@ -140,34 +140,56 @@ def lint(
     semantic: bool = typer.Option(
         False, "--all/--structural", help="--all includes semantic audit via LLM."
     ),
+    scope: str | None = typer.Option(
+        None, "--scope", help="Restrict semantic batches to one type dir (e.g. concepts)."
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:
     """Audit the health of the wiki (structural; --all adds semantic via LLM)."""
     paths = _brain()
+    batches: list[lint_service.Batch] = []
+    skipped: list[lint_service.Batch] = []
     if semantic:
         cfg = load_config(paths)
         try:
-            findings = lint_service.lint_all(paths, cfg, semantic=True)
+            report = lint_service.lint_batched(paths, cfg, scope=scope)
         except WikiError:
             raise
         except Exception as exc:  # noqa: BLE001
             typer.echo(f"[red]Semantic lint failed: {exc}[/red]", err=True)
             raise typer.Exit(code=1) from exc
+        findings = report.findings
+        batches = report.processed
+        skipped = report.skipped
     else:
         findings = lint_service.lint_structural(paths)
     errors = sum(1 for f in findings if f.severity == Severity.error)
-    payload = {"findings": findings}
+    payload = {
+        "findings": findings,
+        "batches": [{"name": b.name, "pages": b.pages} for b in batches],
+        "skipped": [{"name": b.name, "pages": b.pages} for b in skipped],
+    }
 
     def human() -> None:
-        if not findings:
-            typer.echo("[green]Lint OK — no issues found.[/green]")
-            return
         color = {Severity.info: "blue", Severity.warn: "yellow", Severity.error: "red"}
         for f in findings:
             typer.echo(
                 f"[{color[f.severity]}]{f.severity.value.upper()}[/] "
                 f"{esc(f.kind)}: {esc(f.message)}"
             )
+        if not findings:
+            typer.echo("[green]Lint OK — no issues found.[/green]")
+        if semantic:
+            covered = sum(len(b.pages) for b in batches)
+            typer.echo(
+                f"\n[dim]Batches: {len(batches)} processed "
+                f"({covered} pages){f', {len(skipped)} deferred' if skipped else ''}.[/dim]"
+            )
+            for b in skipped:
+                typer.echo(
+                    f"[yellow]deferred[/] {esc(b.name)} "
+                    f"({len(b.pages)} pages) — over token budget"
+                )
 
     emit(payload, as_json=as_json, human=human)
     if errors:
