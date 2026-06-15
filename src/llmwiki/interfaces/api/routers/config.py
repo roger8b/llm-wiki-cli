@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body
 
-from ..deps import get_config
+from ..deps import get_config, get_paths
 
 router = APIRouter()
 
@@ -46,6 +46,22 @@ def patch_config_endpoint(patch: dict[str, Any] = Body(...)) -> dict[str, Any]: 
 
     update_config(patch)
     return _config_payload()
+
+
+@router.get("/desktop")
+def get_desktop_config() -> dict[str, Any]:
+    """Desktop-shell settings (read by the Tauri shell, #204)."""
+    from ....core.desktop import read_desktop
+
+    return read_desktop(get_paths())
+
+
+@router.patch("/desktop")
+def patch_desktop_config(patch: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
+    """Update desktop-shell settings (partial)."""
+    from ....core.desktop import update_desktop
+
+    return update_desktop(get_paths(), patch)
 
 
 @router.post("/test")

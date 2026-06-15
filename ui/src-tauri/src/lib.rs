@@ -9,13 +9,29 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 
 /// Holds the running backend process so we can kill it on exit.
 struct Backend(Mutex<Option<Child>>);
+
+/// Session state needed to rebuild/refocus the main window from the tray without
+/// spawning a second backend (same port/token), plus the desktop preferences the
+/// Rust shell acts on (#204).
+struct AppSession {
+    url: String,
+    token: String,
+    port: u16,
+    /// When false, closing the window quits (legacy behavior).
+    run_in_background: AtomicBool,
+    /// Tray menu item showing the running-job count; updated by the poll thread.
+    jobs_item: Mutex<Option<MenuItem<Wry>>>,
+}
 
 /// Ask the OS for a free TCP port by binding to :0 and reading it back.
 fn free_port() -> u16 {
@@ -69,6 +85,36 @@ fn http_health_ok(addr: &str) -> bool {
         .is_some_and(|s| s.starts_with("HTTP/1.1 200") || s.starts_with("HTTP/1.0 200"))
 }
 
+/// Minimal authenticated `GET` over a short-lived connection, returning the body
+/// (everything after the blank line). Used by the lightweight tray job poll so we
+/// avoid pulling in a full HTTP client just for one call every 15s.
+fn http_get_body(port: u16, path: &str, token: &str) -> Option<String> {
+    let addr = format!("127.0.0.1:{port}");
+    let sock = addr.parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&sock, Duration::from_millis(500)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let req = format!(
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nX-Wiki-Token: {token}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let idx = raw.find("\r\n\r\n")?;
+    Some(raw[idx + 4..].to_string())
+}
+
+/// Count jobs currently `running` from a `GET /api/jobs` body. Pure so it can be
+/// unit-tested without a live backend.
+fn count_running_jobs(body: &str) -> usize {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(body) else {
+        return 0;
+    };
+    items
+        .iter()
+        .filter(|j| j.get("status").and_then(|s| s.as_str()) == Some("running"))
+        .count()
+}
+
 /// Parse the `pid` out of a `server.lock` JSON body (`{"pid": N, "port": M}`).
 fn parse_lock_pid(body: &str) -> Option<u32> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
@@ -83,6 +129,19 @@ fn pid_is_backend(pid: u32) -> bool {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains("wiki-backend"))
         .unwrap_or(false)
+}
+
+/// Read the `run_in_background` preference from `<brain>/.llmwiki/desktop.json`
+/// (written by the backend, #204). Defaults to true when missing/unreadable.
+fn read_run_in_background(brain: &str) -> bool {
+    let path = PathBuf::from(brain).join(".llmwiki/desktop.json");
+    match std::fs::read_to_string(&path) {
+        Ok(body) => serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("run_in_background").and_then(|b| b.as_bool()))
+            .unwrap_or(true),
+        Err(_) => true,
+    }
 }
 
 /// Kill stray backend processes left over from a prior run (crash / force-quit).
@@ -135,6 +194,53 @@ fn graceful_stop(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// Set the macOS activation policy. `Accessory` removes the app from the Dock and
+/// Cmd-Tab while it lives only in the menubar tray; `Regular` restores it when a
+/// window is visible. No-op off macOS.
+#[cfg(target_os = "macos")]
+fn set_activation(handle: &AppHandle, policy: tauri::ActivationPolicy) {
+    let _ = handle.set_activation_policy(policy);
+}
+#[cfg(not(target_os = "macos"))]
+fn set_activation(_handle: &AppHandle, _accessory: bool) {}
+
+#[cfg(target_os = "macos")]
+fn show_in_dock(handle: &AppHandle) {
+    set_activation(handle, tauri::ActivationPolicy::Regular);
+}
+#[cfg(target_os = "macos")]
+fn hide_from_dock(handle: &AppHandle) {
+    set_activation(handle, tauri::ActivationPolicy::Accessory);
+}
+#[cfg(not(target_os = "macos"))]
+fn show_in_dock(_handle: &AppHandle) {}
+#[cfg(not(target_os = "macos"))]
+fn hide_from_dock(_handle: &AppHandle) {}
+
+/// Show/refocus the main window, recreating it (same session port/token) if it was
+/// destroyed. Centralizes window creation so both the initial boot and tray
+/// "Open" reuse the identical init script / sizing.
+fn open_main_window(handle: &AppHandle) {
+    if let Some(win) = handle.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        show_in_dock(handle);
+        return;
+    }
+    let session = handle.state::<AppSession>();
+    let url = session.url.clone();
+    let token = session.token.clone();
+    WebviewWindowBuilder::new(handle, "main", WebviewUrl::External(url.parse().unwrap()))
+        .title("llm-wiki")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(900.0, 600.0)
+        .initialization_script(&format!("window.__WIKI_TOKEN__ = {token:?};"))
+        .build()
+        .expect("failed to build window");
+    show_in_dock(handle);
+}
+
 /// Resolve the PyInstaller onedir backend executable.
 ///
 /// In a bundled `.app` the onedir folder ships under the resource dir as
@@ -184,17 +290,41 @@ fn gen_token() -> String {
     format!("{nanos:x}{:x}", std::process::id())
 }
 
+/// Background thread: every 15s, while the window is hidden, refresh the tray's
+/// "Jobs running: N" item from `GET /api/jobs`. Skips the poll entirely when a
+/// window is visible (the SPA already shows job state there).
+fn spawn_job_poll(handle: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(15));
+        let window_visible = handle
+            .get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        if window_visible {
+            continue;
+        }
+        let session = handle.state::<AppSession>();
+        let label = match http_get_body(session.port, "/api/jobs?limit=50", &session.token) {
+            Some(body) => match count_running_jobs(&body) {
+                0 => "No jobs running".to_string(),
+                n => format!("Jobs running: {n}"),
+            },
+            None => "Jobs: unknown".to_string(),
+        };
+        let item = session.jobs_item.lock().unwrap().clone();
+        if let Some(item) = item {
+            let _ = item.set_text(label);
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // Single instance MUST be registered first (plugin docs): a second
         // launch focuses the existing window instead of spawning a 2nd backend.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.unminimize();
-                let _ = win.set_focus();
-            }
+            open_main_window(app);
         }))
         .plugin(tauri_plugin_shell::init())
         .manage(Backend(Mutex::new(None)))
@@ -202,7 +332,52 @@ pub fn run() {
             let port = free_port();
             let brain = default_brain();
             let token = gen_token();
+            let url = format!("http://127.0.0.1:{port}");
             eprintln!("[llm-wiki] Using port={port}, brain={brain}");
+
+            // Persisted desktop preference (#204); default-on for background.
+            let run_bg = read_run_in_background(&brain);
+            app.manage(AppSession {
+                url: url.clone(),
+                token: token.clone(),
+                port,
+                run_in_background: AtomicBool::new(run_bg),
+                jobs_item: Mutex::new(None),
+            });
+
+            // Tray icon + menu (Open / Jobs status / Quit). All tray logic lives
+            // on the Rust side; the SPA stays unaware (#204 decision).
+            let open_i = MenuItem::with_id(app, "open", "Open llm-wiki", true, None::<&str>)?;
+            let jobs_i = MenuItem::with_id(app, "jobs", "No jobs running", false, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let sep1 = PredefinedMenuItem::separator(app)?;
+            let sep2 = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(app, &[&open_i, &sep1, &jobs_i, &sep2, &quit_i])?;
+            app.state::<AppSession>()
+                .jobs_item
+                .lock()
+                .unwrap()
+                .replace(jobs_i.clone());
+            let _tray = TrayIconBuilder::with_id("main")
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => open_main_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        open_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
 
             // Reap orphaned backends from a prior crash/force-quit before spawning.
             kill_stray_backends(&brain);
@@ -234,9 +409,7 @@ pub fn run() {
             );
 
             // Wait for readiness, then open the window pointing at the backend.
-            let url = format!("http://127.0.0.1:{port}");
             let handle = app.handle().clone();
-            let win_token = token.clone();
             let t1 = Instant::now();
             std::thread::spawn(move || {
                 let ready = wait_for_http_ready(port, Duration::from_secs(60));
@@ -250,38 +423,69 @@ pub fn run() {
                     eprintln!("[llm-wiki] Backend did not become ready in 60s — aborting");
                     return;
                 }
-                let t2 = Instant::now();
-                WebviewWindowBuilder::new(
-                    &handle,
-                    "main",
-                    WebviewUrl::External(url.parse().unwrap()),
-                )
-                .title("llm-wiki")
-                .inner_size(1280.0, 860.0)
-                .min_inner_size(900.0, 600.0)
-                // Expose the per-session token to the SPA before any page script
-                // runs. {win_token:?} emits a safely-quoted JS string literal.
-                .initialization_script(&format!("window.__WIKI_TOKEN__ = {win_token:?};"))
-                .build()
-                .expect("failed to build window");
-                eprintln!(
-                    "[llm-wiki] WebviewWindowBuilder::new() took {:.1}s",
-                    t2.elapsed().as_secs_f32()
-                );
+                open_main_window(&handle);
             });
+
+            spawn_job_poll(app.handle().clone());
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Hide-on-close: keep the backend (and any running job) alive in the
+            // tray instead of quitting, unless the user opted out (#204).
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
+                let app = window.app_handle();
+                let keep = app
+                    .try_state::<AppSession>()
+                    .map(|s| s.run_in_background.load(Ordering::Relaxed))
+                    .unwrap_or(true);
+                if keep {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    hide_from_dock(app);
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // Stop the backend gracefully when the app exits (SIGTERM → wait →
             // SIGKILL) so uvicorn runs shutdown and the worker marks job state
             // instead of dying mid-job (#203).
-            if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
+            RunEvent::ExitRequested { .. } | RunEvent::Exit => {
                 if let Some(mut child) = app.state::<Backend>().0.lock().unwrap().take() {
                     graceful_stop(&mut child);
                 }
             }
+            // Clicking the Dock icon (macOS) when no window is open reopens it.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => open_main_window(app),
+            _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_running_jobs;
+
+    #[test]
+    fn counts_only_running() {
+        let body = r#"[
+            {"id": 1, "status": "running"},
+            {"id": 2, "status": "done"},
+            {"id": 3, "status": "running"},
+            {"id": 4, "status": "queued"}
+        ]"#;
+        assert_eq!(count_running_jobs(body), 2);
+    }
+
+    #[test]
+    fn handles_empty_and_garbage() {
+        assert_eq!(count_running_jobs("[]"), 0);
+        assert_eq!(count_running_jobs("not json"), 0);
+        assert_eq!(count_running_jobs("{}"), 0);
+    }
 }

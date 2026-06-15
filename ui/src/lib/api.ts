@@ -25,6 +25,7 @@ import type {
   UrlPreview,
   SourceContent,
   WorkspaceConfig,
+  DesktopConfig,
   Job,
   ModelStats,
 } from "@/types"
@@ -385,6 +386,14 @@ export const api = {
   getConfig: () => request<WorkspaceConfig>("/config"),
   patchConfig: (patch: Partial<WorkspaceConfig>) =>
     request<WorkspaceConfig>("/config", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  // Desktop-shell settings (acted on by the Tauri tray; #204).
+  getDesktopConfig: () => request<DesktopConfig>("/config/desktop"),
+  patchDesktopConfig: (patch: Partial<DesktopConfig>) =>
+    request<DesktopConfig>("/config/desktop", {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),

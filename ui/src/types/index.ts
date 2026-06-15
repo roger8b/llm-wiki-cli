@@ -180,6 +180,12 @@ export interface WorkspaceConfig {
   whisper_language?: string | null
 }
 
+/** Desktop-shell settings, acted on by the Tauri tray (#204). */
+export interface DesktopConfig {
+  run_in_background: boolean
+  notify_on_jobs: boolean
+}
+
 export interface GraphNode {
   id: string
   title: string
