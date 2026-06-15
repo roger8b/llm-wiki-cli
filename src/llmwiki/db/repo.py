@@ -542,3 +542,27 @@ def _row_to_page(row: sqlite3.Row) -> Page:
             "confidence": row["confidence"],
         }
     )
+
+
+class MetaRepo:
+    """Per-brain key/value bookkeeping (e.g. the curator's last run time, #41)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, key: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set(self, key: str, value: str) -> None:
+        def _do() -> None:
+            self.conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+            self.conn.commit()
+
+        retry_on_locked(_do)

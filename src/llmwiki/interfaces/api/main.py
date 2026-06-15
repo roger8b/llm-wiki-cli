@@ -50,13 +50,22 @@ from .routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    import asyncio
+
     from ...core.logging import configure_logging
     from ...workers import start_worker, stop_worker
+    from ...workers.scheduler import run_scheduler
 
     configure_logging()
     start_worker()
-    yield
-    stop_worker()
+    stop_event = asyncio.Event()
+    scheduler_task = asyncio.create_task(run_scheduler(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        scheduler_task.cancel()
+        stop_worker()
 
 
 app = FastAPI(title="llm-wiki API", version="2.0.0", lifespan=lifespan)

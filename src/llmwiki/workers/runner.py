@@ -13,7 +13,13 @@ from ..core.errors import JobCancelledError, SourceAlreadyProcessedError
 from ..core.paths import BrainPaths, load_active_brain, resolve_input
 from ..db.connection import get_connection, retry_on_locked
 from ..db.repo import AskHistoryRepo, JobRepo
-from ..services import ingest_service, lint_service, maintenance_service, query_service
+from ..services import (
+    curator_service,
+    ingest_service,
+    lint_service,
+    maintenance_service,
+    query_service,
+)
 
 logger = logging.getLogger("llmwiki.workers")
 
@@ -21,7 +27,7 @@ logger = logging.getLogger("llmwiki.workers")
 # (read/write split, ADR 001) these run serialized — never two at once — while
 # read-mostly jobs (ask/lint) run concurrently, so a question answers during a
 # long ingestion instead of waiting behind it.
-_WRITE_TYPES = {"ingest", "maintain"}
+_WRITE_TYPES = {"ingest", "maintain", "curate"}
 
 
 class JobWorker(threading.Thread):
@@ -163,6 +169,18 @@ class JobWorker(threading.Thread):
                 )
                 result_data["history_id"] = history_id
                 JobRepo(conn).complete(job_id, result=json.dumps(result_data))
+
+            elif job_type == "curate":
+                report = curator_service.run_curation(
+                    paths,
+                    conn,
+                    cfg,
+                    progress=lambda step: JobRepo(conn).set_progress(job_id, step),
+                    cancel_check=_cancelled,
+                )
+                JobRepo(conn).complete(
+                    job_id, result=json.dumps(report.model_dump(mode="json"))
+                )
 
             else:
                 raise ValueError(f"Unknown job type: {job_type}")

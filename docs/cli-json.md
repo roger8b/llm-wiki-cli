@@ -95,6 +95,19 @@ Without `--dry-run`: `{"change_request_id": "CR-1", "files_changed": 1}` (or
 `{"mentions": [], "pages": 0}` when nothing matches). Code, inline code, URLs,
 markdown links, existing wikilinks, headings and self-links are never touched.
 
+### `wiki curate --json`
+
+Runs preventive maintenance — batched lint → verified fixes (#174) → auto-link
+(#44) — proposing everything as `pending_review` change requests (never applies).
+Mirrored by `POST /api/wiki/curate` (async job). A backend scheduler can run it
+automatically via `curation_interval_hours` (config; `null` = off).
+
+```json
+{"findings_total": 3, "findings_already_covered": 1, "resolved": 1, "unresolved": 1,
+ "change_requests": ["CR-1", "CR-2"], "autolink_mentions": 4,
+ "tokens_in": 5200, "tokens_out": 900, "ran_at": "2026-06-14T…"}
+```
+
 ### `wiki ask <question> --json`
 
 ```json

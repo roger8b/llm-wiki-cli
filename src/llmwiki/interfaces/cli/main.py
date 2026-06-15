@@ -25,6 +25,7 @@ from .commands import (
     ask,
     autolink,
     brain_app,
+    curate,
     evals_app,
     index,
     ingest,
@@ -127,6 +128,7 @@ app.command()(lint)
 app.command()(ask)
 app.command()(maintain)
 app.command()(autolink)
+app.command()(curate)
 app.command()(log)
 app.command()(ingest)
 app.command()(review)

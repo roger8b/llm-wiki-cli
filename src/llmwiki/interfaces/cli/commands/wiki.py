@@ -19,6 +19,7 @@ from ....search.service import hybrid_search, keyword_search
 from ....services import (
     autolink_service,
     change_request_service,
+    curator_service,
     index_service,
     lint_service,
     query_service,
@@ -359,3 +360,39 @@ def autolink(
         )
 
     emit(payload, as_json=as_json, human=human_cr)
+
+
+@handle_errors
+def curate(
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
+    """Run preventive maintenance (lint → verified fixes → auto-link) as CRs."""
+    paths = _brain()
+    cfg = load_config(paths)
+    conn = get_connection(paths.db_path)
+    try:
+        report = curator_service.run_curation(paths, conn, cfg)
+    finally:
+        conn.close()
+    payload = report.model_dump(mode="json")
+
+    def human() -> None:
+        typer.echo(
+            f"Findings: {report.findings_total} "
+            f"({report.findings_already_covered} already covered) — "
+            f"resolved {report.resolved}, unresolved {report.unresolved}."
+        )
+        if report.autolink_mentions:
+            typer.echo(f"Auto-link: {report.autolink_mentions} mentions proposed.")
+        if report.change_requests:
+            typer.echo(
+                f"[green]Change requests:[/green] {', '.join(report.change_requests)} "
+                "— review with wiki review"
+            )
+        else:
+            typer.echo("[dim]Nothing to propose — the wiki is healthy.[/dim]")
+        typer.echo(
+            f"[dim]Tokens: {report.tokens_in} in / {report.tokens_out} out.[/dim]"
+        )
+
+    emit(payload, as_json=as_json, human=human)
