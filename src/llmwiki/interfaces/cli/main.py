@@ -23,6 +23,7 @@ from ... import __version__
 from .commands import (
     apply,
     ask,
+    autolink,
     brain_app,
     evals_app,
     index,
@@ -125,6 +126,7 @@ app.command()(search)
 app.command()(lint)
 app.command()(ask)
 app.command()(maintain)
+app.command()(autolink)
 app.command()(log)
 app.command()(ingest)
 app.command()(review)

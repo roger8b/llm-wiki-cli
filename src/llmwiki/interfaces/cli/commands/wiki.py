@@ -17,6 +17,7 @@ from ....db.repo import PageRepo
 from ....search.factory import build_semantic_backend
 from ....search.service import hybrid_search, keyword_search
 from ....services import (
+    autolink_service,
     change_request_service,
     index_service,
     lint_service,
@@ -308,3 +309,53 @@ def log(
     # list while keeping the raw text for round-tripping.
     entries = [block.strip() for block in text.split("\n\n") if block.strip()]
     emit({"entries": entries, "raw": text}, as_json=as_json, human=human)
+
+@handle_errors
+def autolink(
+    scope: str | None = typer.Option(
+        None, "--scope", help="Restrict editing to one type dir (e.g. concepts)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List proposed links without creating a change request."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
+    """Wrap plain-text mentions of existing pages in [[wikilinks]] (deterministic, no LLM)."""
+    paths = _brain()
+    conn = get_connection(paths.db_path)
+    try:
+        result = autolink_service.propose_autolinks(
+            paths, conn, scope=scope, dry_run=dry_run
+        )
+    finally:
+        conn.close()
+
+    if dry_run or isinstance(result, dict):
+        report = result if isinstance(result, dict) else {"mentions": [], "pages": 0}
+        payload = {"dry_run": dry_run, **report}
+
+        def human_report() -> None:
+            raw = report.get("mentions", [])
+            mentions: list[dict[str, str]] = raw if isinstance(raw, list) else []
+            if not mentions:
+                typer.echo("[dim]No plain-text mentions to link.[/dim]")
+                return
+            for m in mentions:
+                typer.echo(f"{esc(m['page'])}: {esc(m['snippet'])} → [[{esc(m['title'])}]]")
+            typer.echo(
+                f"\n[dim]{len(mentions)} mentions across {report.get('pages', 0)} pages.[/dim]"
+            )
+
+        emit(payload, as_json=as_json, human=human_report)
+        return
+
+    cr = result
+    payload = {"change_request_id": cr.id, "files_changed": cr.files_changed}
+
+    def human_cr() -> None:
+        typer.echo(
+            f"[green]Auto-link CR created: {cr.id}[/green] ({cr.files_changed} pages) "
+            f"— review with wiki review {cr.id}"
+        )
+
+    emit(payload, as_json=as_json, human=human_cr)

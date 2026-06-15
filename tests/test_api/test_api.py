@@ -606,3 +606,19 @@ class TestJobsStats:
         assert r.status_code == 200
         stats = r.json()["stats"]
         assert any(s["model"] == "ollama:llama3.1" and s["runs"] == 1 for s in stats)
+
+
+class TestAutolink:
+    def test_dry_run_endpoint(self, client, brain: BrainPaths) -> None:
+        rag = brain.wiki / "concepts" / "rag.md"
+        rag.parent.mkdir(parents=True, exist_ok=True)
+        rag.write_text("---\ntitle: RAG\ntype: concept\n---\n# RAG\n", encoding="utf-8")
+        note = brain.wiki / "concepts" / "note.md"
+        note.write_text(
+            "---\ntitle: Note\ntype: concept\n---\nusamos RAG aqui\n", encoding="utf-8"
+        )
+        r = client.post("/api/wiki/autolink", json={"dry_run": True})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["pages"] == 1
+        assert body["mentions"][0]["target"] == "wiki/concepts/rag.md"

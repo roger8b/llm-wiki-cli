@@ -94,6 +94,28 @@ def delete_page(
     return {"change_request_id": cr.id, "files_changed": cr.files_changed}
 
 
+@router.post("/autolink")
+def autolink(
+    scope: str | None = Body(None, embed=True),
+    dry_run: bool = Body(False, embed=True),
+) -> dict[str, Any]:
+    """Propose [[wikilinks]] for plain-text mentions (deterministic, no LLM) — #44."""
+    from ....core.models import ChangeRequest
+    from ....services import autolink_service
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        result = autolink_service.propose_autolinks(
+            paths, conn, scope=scope, dry_run=dry_run
+        )
+    finally:
+        conn.close()
+    if isinstance(result, ChangeRequest):
+        return {"change_request_id": result.id, "files_changed": result.files_changed}
+    return result
+
+
 @router.get("/templates")
 def list_templates() -> list[dict[str, str]]:
     """Per-type page body templates for the New-page editor (#187)."""

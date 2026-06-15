@@ -79,6 +79,22 @@ local `ollama:` models cost `0.0`. **A/B a model swap**: run `wiki evals run`
 with each model, compare the `evals/results/*.json`, then cross-check live cost
 and quality with `wiki jobs stats`.
 
+### `wiki autolink [--scope <dir>] [--dry-run] --json`
+
+Deterministically wraps the first plain-text mention of an existing page's title
+in `[[wikilinks]]` (no LLM). `--dry-run` lists proposals without a CR; otherwise
+a single change request is created. Mirrored by `POST /api/wiki/autolink`
+(`{scope?, dry_run?}`).
+
+```json
+{"dry_run": true, "pages": 1,
+ "mentions": [{"page": "wiki/concepts/note.md", "title": "RAG", "target": "wiki/concepts/rag.md", "snippet": "…de «RAG» aqui…"}]}
+```
+
+Without `--dry-run`: `{"change_request_id": "CR-1", "files_changed": 1}` (or
+`{"mentions": [], "pages": 0}` when nothing matches). Code, inline code, URLs,
+markdown links, existing wikilinks, headings and self-links are never touched.
+
 ### `wiki ask <question> --json`
 
 ```json
