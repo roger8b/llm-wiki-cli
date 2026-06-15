@@ -65,6 +65,14 @@ def test_jobs_json(tmp_path: Path, monkeypatch) -> None:
     assert "jobs" in obj and isinstance(obj["jobs"], list)
 
 
+def test_jobs_stats_json(tmp_path: Path, monkeypatch) -> None:
+    _seed(tmp_path, monkeypatch)
+    r = runner.invoke(app, ["jobs", "stats", "--json"])
+    assert r.exit_code == 0
+    obj = _load(r.stdout)
+    assert "stats" in obj and isinstance(obj["stats"], list)
+
+
 def test_review_list_json(tmp_path: Path, monkeypatch) -> None:
     _seed(tmp_path, monkeypatch)
     r = runner.invoke(app, ["review", "--json"])
