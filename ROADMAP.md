@@ -84,27 +84,40 @@ primeiro).
   (#185, PR #231), 3.4 editor de página com preview (#186, PR #232), 3.5 criar
   página por template (#187, PR #233), 3.6 busca global no app (#188, PR #234),
   3.7 navegação por tags (#189, PR #235).
-
-- **Fase 3 — ✅ 7/7 concluídas.** 3.1 edit-before-apply (#183, PR #214), 3.2
-  apply/reject parcial (#184, PR #230), 3.3 telemetria/qualidade na revisão
-  (#185, PR #231), 3.4 editor de página com preview (#186, PR #232), 3.5 criar
-  página por template (#187, PR #233), 3.6 busca global no app (#188, PR #234),
-  3.7 navegação por tags (#189, PR #235).
+- **Fase 4 — ✅ 6/6 concluídas.** 4.1 `--json` nos comandos de leitura (#196),
+  4.2 `wiki search` com snippets e filtros (#197), 4.3 exit codes e erros
+  padronizados (#198), 4.4 modo retrieval na skill wiki-query (#199,
+  PR #245), 4.5 skills documentam jobs/--json/erros (#200, PR #245),
+  4.6 nova skill wiki-review (#201, PR #245). Epics #181 (CLI como
+  interface de agente) e #182 (Skills v3) também fechados.
 - **Fase 5 — ✅ 6/6 concluídas.** 5.1 Ask com follow-up (#190, PR #246), 5.2
   Streaming de tokens no Ask (#191, PR #248), 5.3 Citações clicáveis (#192,
   PR #247), 5.4 Grafo: filtros, busca e foco (#193, PR #249), 5.5 Grafo:
   layout performático + zoom/pan/fit (#194 + #252, merged together), 5.6
-  Ingestão por URL (#195, PR #250).
+  Ingestão por URL (#195, PR #250). Epic #180 (Graph view v2 & captura por
+  URL) também fechado.
+- **Fase 6 — ✅ concluída.** 6.1 lint semântico em lotes (#173), 6.2 loop de
+  verificação pós-manutenção (#174), 6.3 relatório comparativo por
+  modelo/provider (#176). Epic #159 também fechado. Trabalhos extras
+  que apareceram no Epic: curador agendado (#41) e auto-link de
+  plain-text para wikilinks (#44).
 
 main: 467 testes pytest verdes (+6 skip do caminho vec0, que rodam no CI
 Linux), frontend vitest 76/76 + build da SPA, ruff + mypy strict limpos.
 Issues concluídas fechadas via `Closes #N`.
 
+> **Itens obsoletos arquivados (2026-06-15):** #35 (busca semântica para
+> ask) e #39 (citações clicáveis) foram fechados como completed, pois
+> estão cobertos respectivamente por #169/#170 (Fase 2) e #192 (Fase 5).
+> #36 (CR stale/conflict) e #55 (Developer ID) permanecem abertos
+> como `priority:foundation` (atrelados a Fase 7 e a um próximo trabalho
+> de integridade de dados, respectivamente).
+
 > **Evals (#175):** não re-rodados nas histórias que mudaram prompt/fluxo
 > (1.6, 2.3, 5.x) — exigem modelo LLM configurado. Rodar `wiki evals run`
 > antes/depois e anotar no PR quando houver credencial.
 
-**Próximo: Fase 4 — CLI como interface de agente.**
+**Próximo: Fase 7 — Desktop Tauri — background, tray e integração com o SO.**
 
 ---
 
