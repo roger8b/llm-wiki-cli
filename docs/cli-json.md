@@ -57,6 +57,28 @@ has `severity: "error"`.
 {"jobs": [{"id": 1, "type": "ingest", "status": "done", "created_at": "…", "error": null}]}
 ```
 
+### `wiki jobs stats [--since YYYY-MM-DD] --json`
+
+Per-model agent telemetry aggregated from job results (and CR `meta.json` for
+runs without a job). Mirrored by the API at `GET /api/jobs/stats?since=…`
+(consumed by the observability dashboard, #151).
+
+```json
+{"stats": [{
+  "model": "ollama:llama3.1", "runs": 12,
+  "tokens_in_avg": 4200.0, "tokens_in_p95": 9000,
+  "tokens_out_avg": 800.0, "tokens_out_p95": 1500,
+  "latency_ms_avg": 5400.0, "latency_ms_p95": 12000,
+  "fallback_rate": 0.08, "phantom_rate": 0.0,
+  "applied": 7, "rejected": 2, "est_cost_usd": 0.0
+}]}
+```
+
+`est_cost_usd` is `null` for models without a known price (`core/pricing.py`);
+local `ollama:` models cost `0.0`. **A/B a model swap**: run `wiki evals run`
+with each model, compare the `evals/results/*.json`, then cross-check live cost
+and quality with `wiki jobs stats`.
+
 ### `wiki ask <question> --json`
 
 ```json

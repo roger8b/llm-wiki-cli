@@ -111,3 +111,21 @@ class LintFinding(BaseModel):
     pages: list[str] = Field(default_factory=list)
     # Id of a pending change request that already fixes one of ``pages`` (if any).
     related_cr: str | None = None
+
+
+class ModelStats(BaseModel):
+    """Aggregated agent-run telemetry for one model/provider (#176)."""
+
+    model: str
+    runs: int = 0
+    tokens_in_avg: float = 0.0
+    tokens_in_p95: int = 0
+    tokens_out_avg: float = 0.0
+    tokens_out_p95: int = 0
+    latency_ms_avg: float = 0.0
+    latency_ms_p95: int = 0
+    fallback_rate: float = 0.0
+    phantom_rate: float = 0.0
+    applied: int = 0
+    rejected: int = 0
+    est_cost_usd: float | None = None

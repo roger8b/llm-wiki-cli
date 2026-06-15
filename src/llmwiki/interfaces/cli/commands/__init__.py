@@ -5,7 +5,7 @@ from .evals import evals_app
 from .ingest import ingest
 from .mcp import mcp
 from .page import page_app
-from .review import apply, jobs, reject, review
+from .review import apply, jobs_app, reject, review
 from .serve import serve
 from .skills import skills_app
 from .source import source_app
@@ -21,7 +21,7 @@ __all__ = [
     "apply",
     "ingest",
     "index",
-    "jobs",
+    "jobs_app",
     "lint",
     "log",
     "maintain",

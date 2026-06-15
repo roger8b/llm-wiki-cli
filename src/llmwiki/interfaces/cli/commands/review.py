@@ -138,11 +138,18 @@ def reject(cr_id: str = typer.Argument(..., help="Change request ID.")) -> None:
     typer.echo(f"[yellow]Rejected {cr_id}.[/yellow]")
 
 
+jobs_app = typer.Typer(help="Inspect background jobs and agent telemetry.")
+
+
+@jobs_app.callback(invoke_without_command=True)
 @handle_errors
 def jobs(
+    ctx: typer.Context,
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
 ) -> None:
     """List registered jobs (ingest/lint/query)."""
+    if ctx.invoked_subcommand is not None:
+        return
     paths = _brain()
     conn = get_connection(paths.db_path)
     try:
@@ -163,6 +170,45 @@ def jobs(
                 r["status"],
                 r["created_at"][:19],
                 esc((r["error"] or "")[:30]),
+            )
+        Console(file=sys.stdout).print(table)
+
+    emit(payload, as_json=as_json, human=human)
+
+
+@jobs_app.command("stats")
+@handle_errors
+def jobs_stats(
+    since: str | None = typer.Option(
+        None, "--since", help="Only count runs on/after this date (YYYY-MM-DD)."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit a JSON object on stdout."),
+) -> None:
+    """Compare agent runs by model/provider (tokens, latency, fallback, cost)."""
+    from ....services import stats_service
+
+    paths = _brain()
+    conn = get_connection(paths.db_path)
+    try:
+        stats = stats_service.agent_stats(conn, paths, since=since)
+    finally:
+        conn.close()
+    payload = {"stats": [s.model_dump(mode="json") for s in stats]}
+
+    def human() -> None:
+        if not stats:
+            typer.echo("[dim]No agent runs with telemetry found.[/dim]")
+            return
+        table = Table(
+            "Model", "Runs", "Tok in avg", "Tok out avg", "Lat avg(ms)",
+            "Fallback", "Phantom", "Applied", "Rejected", "Cost($)",
+        )
+        for s in stats:
+            cost = "—" if s.est_cost_usd is None else f"{s.est_cost_usd:.4f}"
+            table.add_row(
+                s.model, str(s.runs), f"{s.tokens_in_avg:.0f}", f"{s.tokens_out_avg:.0f}",
+                f"{s.latency_ms_avg:.0f}", f"{s.fallback_rate:.0%}", f"{s.phantom_rate:.0%}",
+                str(s.applied), str(s.rejected), cost,
             )
         Console(file=sys.stdout).print(table)
 

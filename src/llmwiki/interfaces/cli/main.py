@@ -27,7 +27,7 @@ from .commands import (
     evals_app,
     index,
     ingest,
-    jobs,
+    jobs_app,
     lint,
     log,
     maintain,
@@ -53,6 +53,7 @@ app.add_typer(page_app, name="page")
 app.add_typer(brain_app, name="brain")
 app.add_typer(skills_app, name="skills")
 app.add_typer(evals_app, name="evals")
+app.add_typer(jobs_app, name="jobs")
 
 
 @app.callback()
@@ -129,7 +130,6 @@ app.command()(ingest)
 app.command()(review)
 app.command()(apply)
 app.command()(reject)
-app.command()(jobs)
 app.command()(mcp)
 app.command()(serve)
 

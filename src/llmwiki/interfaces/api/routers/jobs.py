@@ -44,6 +44,20 @@ def list_jobs(limit: int = Query(50)) -> list[dict[str, Any]]:
         conn.close()
 
 
+@router.get("/stats")
+def jobs_stats(since: str | None = Query(None)) -> dict[str, Any]:
+    """Per-model agent telemetry (tokens, latency, fallback, cost). Powers #151."""
+    from ....services import stats_service
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        stats = stats_service.agent_stats(conn, paths, since=since)
+        return {"stats": [s.model_dump(mode="json") for s in stats]}
+    finally:
+        conn.close()
+
+
 @router.get("/{job_id}")
 def get_job(job_id: int) -> dict[str, Any]:
     """Get a specific job by ID."""

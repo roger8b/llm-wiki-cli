@@ -571,3 +571,38 @@ class TestSourceContent:
     def test_outside_brain_400(self, client) -> None:
         r = client.get("/api/sources/content", params={"path": "../../etc/passwd"})
         assert r.status_code == 400
+
+
+class TestJobsStats:
+    def test_stats_endpoint_returns_payload(self, client, brain: BrainPaths) -> None:
+        import json as _json
+
+        from llmwiki.db.connection import get_connection
+        from llmwiki.db.repo import JobRepo
+
+        conn = get_connection(brain.db_path)
+        try:
+            repo = JobRepo(conn)
+            jid = repo.create("ingest", "{}", status="running")
+            repo.complete(
+                jid,
+                result=_json.dumps(
+                    {
+                        "cr": "CR-0001",
+                        "files": 1,
+                        "execution": {
+                            "model": "ollama:llama3.1",
+                            "tokens_in": 100,
+                            "tokens_out": 50,
+                            "latency_ms": 900,
+                            "used_fallback": False,
+                        },
+                    }
+                ),
+            )
+        finally:
+            conn.close()
+        r = client.get("/api/jobs/stats")
+        assert r.status_code == 200
+        stats = r.json()["stats"]
+        assert any(s["model"] == "ollama:llama3.1" and s["runs"] == 1 for s in stats)
