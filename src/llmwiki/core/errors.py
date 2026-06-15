@@ -67,3 +67,12 @@ class EmptyExtractionError(WikiError):
     Raised, for example, for a scanned PDF with no text layer. Prevents an
     empty/garbage source from reaching the LLM. OCR is out of scope.
     """
+
+
+class FetchError(WikiError):
+    """A remote URL could not be downloaded (network error, 404, timeout).
+
+    Raised by ``sources.manager.add_url`` before any extraction so the caller
+    can show a clear network-level message. Mapped to a provider/IO error by
+    the CLI.
+    """

@@ -65,10 +65,14 @@ def extract_metadata(path: Path) -> dict[str, str | None]:
     }
 
 
-def extract_source(path: Path) -> ExtractedSource:
-    """Main-content text plus provenance metadata (issue #163)."""
+def extract_source_from_html(html: str, label: str) -> ExtractedSource:
+    """Main-content text + provenance metadata from an HTML *string*.
+
+    Shared by the file extractor and URL ingestion (#195), which already holds
+    the downloaded markup in memory and shouldn't round-trip through disk.
+    ``label`` is only used in the empty-content error message.
+    """
     trafilatura = _load_trafilatura()
-    html = path.read_text(encoding="utf-8", errors="replace")
     text: str | None = trafilatura.extract(  # type: ignore[attr-defined]
         html,
         output_format="markdown",
@@ -77,7 +81,7 @@ def extract_source(path: Path) -> ExtractedSource:
     )
     if not text or not text.strip():
         raise EmptyExtractionError(
-            f"No main content detected in {path.name} "
+            f"No main content detected in {label} "
             "(empty page, paywall, or JavaScript-rendered content)."
         )
     meta = trafilatura.extract_metadata(html)  # type: ignore[attr-defined]
@@ -88,3 +92,9 @@ def extract_source(path: Path) -> ExtractedSource:
         date=getattr(meta, "date", None) if meta is not None else None,
         url=getattr(meta, "url", None) if meta is not None else None,
     )
+
+
+def extract_source(path: Path) -> ExtractedSource:
+    """Main-content text plus provenance metadata (issue #163)."""
+    html = path.read_text(encoding="utf-8", errors="replace")
+    return extract_source_from_html(html, path.name)

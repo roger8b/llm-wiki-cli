@@ -22,6 +22,7 @@ import type {
   SearchResult,
   SkillsStatus,
   Source,
+  UrlPreview,
   SourceContent,
   WorkspaceConfig,
   Job,
@@ -158,6 +159,16 @@ export const api = {
     request<Source>("/sources/text", {
       method: "POST",
       body: JSON.stringify({ title, content }),
+    }),
+  previewUrlSource: (url: string) =>
+    request<UrlPreview>("/sources/url/preview", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  addUrlSource: (url: string) =>
+    request<Source & { already_present: boolean }>("/sources/url", {
+      method: "POST",
+      body: JSON.stringify({ url }),
     }),
 
   // ── wiki pages ──

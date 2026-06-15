@@ -73,6 +73,14 @@ export interface SourceContent {
   content: string
 }
 
+export interface UrlPreview {
+  url: string
+  title?: string | null
+  author?: string | null
+  date?: string | null
+  preview: string
+}
+
 export interface PageMeta {
   path: string
   title: string

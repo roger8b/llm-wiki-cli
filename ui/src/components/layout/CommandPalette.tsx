@@ -127,6 +127,12 @@ export function CommandPalette() {
           >
             New wiki page
           </CommandItem>
+          <CommandItem
+            value="Capture URL web article source ingest"
+            onSelect={() => go("/sources?add=url")}
+          >
+            Capture URL…
+          </CommandItem>
         </CommandGroup>
 
         {pages.length > 0 && (

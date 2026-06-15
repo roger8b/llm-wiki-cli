@@ -13,7 +13,7 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { timeAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { Source, SourceContent } from "@/types"
+import type { Source, SourceContent, UrlPreview } from "@/types"
 import { useIngestStore } from "@/stores/ingest"
 import { useCrStore } from "@/stores/crs"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
@@ -66,18 +66,25 @@ function AddSourceDialog({
   onOpenChange,
   onAdded,
   onAddedMany,
+  initialTab = "file",
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onAdded: (s: Source, ingest: boolean) => void
   onAddedMany: (sources: Source[], ingest: boolean) => void
+  initialTab?: "file" | "text" | "url"
 }) {
-  const [tab, setTab] = useState<"file" | "text">("file")
+  const [tab, setTab] = useState<"file" | "text" | "url">(initialTab)
+  useEffect(() => {
+    if (open) setTab(initialTab)
+  }, [open, initialTab])
   const [dragover, setDragover] = useState(false)
   const [ingestNow, setIngestNow] = useState(true)
   const [busy, setBusy] = useState(false)
   const [title, setTitle] = useState("")
   const [text, setText] = useState("")
+  const [url, setUrl] = useState("")
+  const [preview, setPreview] = useState<UrlPreview | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleFiles = useCallback(
@@ -122,6 +129,36 @@ function AddSourceDialog({
     }
   }
 
+  async function previewUrl() {
+    if (!url.trim()) return
+    setBusy(true)
+    setPreview(null)
+    try {
+      setPreview(await api.previewUrlSource(url.trim()))
+    } catch (e) {
+      toast.error(`Could not fetch: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function addUrl() {
+    if (!url.trim()) return
+    setBusy(true)
+    try {
+      const src = await api.addUrlSource(url.trim())
+      if (src.already_present) toast.info("This article was already captured.")
+      onAdded(src, ingestNow && !src.already_present)
+      onOpenChange(false)
+      setUrl("")
+      setPreview(null)
+    } catch (e) {
+      toast.error(`Failed: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[520px]">
@@ -130,7 +167,7 @@ function AddSourceDialog({
         </DialogHeader>
 
         <div className="flex gap-1 border-b">
-          {(["file", "text"] as const).map((t) => (
+          {(["file", "text", "url"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -139,7 +176,7 @@ function AddSourceDialog({
                 tab === t && "border-b-primary font-medium text-primary",
               )}
             >
-              {t === "file" ? "Upload file" : "Paste text"}
+              {t === "file" ? "Upload file" : t === "text" ? "Paste text" : "From URL"}
             </button>
           ))}
         </div>
@@ -179,7 +216,7 @@ function AddSourceDialog({
               onChange={(e) => handleFiles(e.target.files)}
             />
           </button>
-        ) : (
+        ) : tab === "text" ? (
           <div className="space-y-2">
             <Input
               placeholder="Title"
@@ -192,6 +229,47 @@ function AddSourceDialog({
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input
+                placeholder="https://example.com/article"
+                value={url}
+                onChange={(e) => {
+                  setUrl(e.target.value)
+                  setPreview(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    previewUrl()
+                  }
+                }}
+              />
+              <Button
+                variant="secondary"
+                onClick={previewUrl}
+                disabled={busy || !url.trim()}
+              >
+                {busy ? "Fetching…" : "Preview"}
+              </Button>
+            </div>
+            {preview && (
+              <div className="rounded-md border bg-muted/40 p-3 text-[12px]">
+                <div className="font-medium text-foreground">
+                  {preview.title || "(untitled)"}
+                </div>
+                {(preview.author || preview.date) && (
+                  <div className="mt-0.5 text-muted-foreground">
+                    {[preview.author, preview.date].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+                <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-muted-foreground">
+                  {preview.preview}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -207,6 +285,14 @@ function AddSourceDialog({
           <div className="flex justify-end">
             <Button onClick={addText} disabled={busy || !title.trim() || !text.trim()}>
               Add & {ingestNow ? "Ingest" : "Save"} →
+            </Button>
+          </div>
+        )}
+
+        {tab === "url" && (
+          <div className="flex justify-end">
+            <Button onClick={addUrl} disabled={busy || !url.trim()}>
+              Capture & {ingestNow ? "Ingest" : "Save"} →
             </Button>
           </div>
         )}
@@ -242,7 +328,19 @@ export function SourcesView() {
     }
   }, [])
 
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
+  const [addTab, setAddTab] = useState<"file" | "text" | "url">("file")
+
+  // Deep-link: ?add=url (from the command palette) opens the URL capture tab.
+  useEffect(() => {
+    const add = params.get("add")
+    if (!add) return
+    setAddTab(add === "url" || add === "text" ? add : "file")
+    setDialogOpen(true)
+    const next = new URLSearchParams(params)
+    next.delete("add")
+    setParams(next, { replace: true })
+  }, [params, setParams])
 
   const load = useCallback(
     async (selectFirst = false) => {
@@ -425,6 +523,7 @@ export function SourcesView() {
       <AddSourceDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        initialTab={addTab}
         onAdded={(src, doIngest) => {
           load()
           if (doIngest) ingest(src)

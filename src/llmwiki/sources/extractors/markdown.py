@@ -26,4 +26,17 @@ def extract_source(path: Path) -> ExtractedSource:
         title = fm_title.strip()
     else:
         title = markdown.extract_title(body)
-    return ExtractedSource(text=text, title=title)
+
+    def _str(key: str) -> str | None:
+        val = meta.get(key) if meta else None
+        return val.strip() if isinstance(val, str) and val.strip() else None
+
+    # Carry capture provenance (url/author/date) from frontmatter so web
+    # sources ingested via #195 keep their origin in the page `sources` (#163).
+    return ExtractedSource(
+        text=text,
+        title=title,
+        author=_str("author"),
+        date=_str("date"),
+        url=_str("url"),
+    )
