@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
@@ -376,6 +377,30 @@ fn read_clipboard_text(handle: &AppHandle) -> String {
     text
 }
 
+/// True if the process was launched with `--hidden` (autostart at login starts in
+/// the tray with no window, #207). Pure so it's unit-testable.
+fn has_hidden_flag(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--hidden")
+}
+
+/// Enable/disable launch-at-login (#207). Invoked from the SPA via the Tauri
+/// bridge (`withGlobalTauri`).
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mgr = app.autolaunch();
+    if enabled {
+        mgr.enable().map_err(|e| e.to_string())
+    } else {
+        mgr.disable().map_err(|e| e.to_string())
+    }
+}
+
+/// Read the real OS launch-at-login state so the Settings toggle reflects reality.
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
 /// The global quick-capture shortcut: Cmd+Shift+K (Ctrl+Shift+K off macOS).
 fn capture_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK)
@@ -518,6 +543,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // Autostart at login, launched hidden into the tray (#207).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
+        .invoke_handler(tauri::generate_handler![set_autostart, get_autostart])
         // Global shortcut (Cmd/Ctrl+Shift+K) → quick capture. The handler fires
         // for any registered shortcut; we match on the capture combo (#206).
         .plugin(
@@ -615,7 +646,15 @@ pub fn run() {
                 child_pid
             );
 
-            // Wait for readiness, then open the window pointing at the backend.
+            // Autostart launches with `--hidden`: keep the backend + tray alive
+            // but don't pop a window in the user's face on login (#207).
+            let hidden = has_hidden_flag(&std::env::args().collect::<Vec<_>>());
+            if hidden {
+                hide_from_dock(&app.handle());
+            }
+
+            // Wait for readiness, then open the window pointing at the backend
+            // (unless we started hidden — then only the tray is live).
             let handle = app.handle().clone();
             let t1 = Instant::now();
             std::thread::spawn(move || {
@@ -630,7 +669,9 @@ pub fn run() {
                     eprintln!("[llm-wiki] Backend did not become ready in 60s — aborting");
                     return;
                 }
-                open_main_window(&handle);
+                if !hidden {
+                    open_main_window(&handle);
+                }
             });
 
             spawn_job_poll(app.handle().clone());
@@ -718,6 +759,15 @@ mod tests {
     fn already_terminal_not_renotified() {
         let body = r#"[{"id":1,"type":"ingest","status":"done","result":"{}"}]"#;
         assert!(detect_notifications(&prev(&[(1, "done")]), body).is_empty());
+    }
+
+    #[test]
+    fn hidden_flag_detected() {
+        use super::has_hidden_flag;
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(has_hidden_flag(&s(&["app", "--hidden"])));
+        assert!(!has_hidden_flag(&s(&["app"])));
+        assert!(!has_hidden_flag(&s(&["app", "--other"])));
     }
 
     #[test]

@@ -8,13 +8,39 @@ import { Switch } from "@/components/ui/switch"
  * Desktop-shell preferences (#204). Only meaningful inside the Tauri app — the
  * Rust tray reads these from <brain>/.llmwiki/desktop.json. Harmless in a browser.
  */
+/** Tauri bridge invoke (withGlobalTauri); undefined in a plain browser. */
+function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> | null {
+  const bridge = (globalThis as { __TAURI__?: { core?: { invoke?: Function } } }).__TAURI__
+  const invoke = bridge?.core?.invoke
+  return invoke ? (invoke(cmd, args) as Promise<T>) : null
+}
+
 export function DesktopSettings() {
   const [cfg, setCfg] = useState<DesktopConfig | null>(null)
   const [saving, setSaving] = useState(false)
+  // Launch-at-login lives in the OS (Tauri plugin), not the backend config.
+  const [autostart, setAutostart] = useState<boolean | null>(null)
 
   useEffect(() => {
     api.getDesktopConfig().then(setCfg).catch(() => setCfg(null))
+    tauriInvoke<boolean>("get_autostart")
+      ?.then(setAutostart)
+      .catch(() => setAutostart(null))
   }, [])
+
+  async function toggleAutostart(enabled: boolean) {
+    const p = tauriInvoke<void>("set_autostart", { enabled })
+    if (!p) return
+    setSaving(true)
+    try {
+      await p
+      setAutostart(enabled)
+    } catch {
+      toast.error("Could not change launch-at-login")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function update(patch: Partial<DesktopConfig>) {
     setSaving(true)
@@ -52,7 +78,13 @@ export function DesktopSettings() {
           onCheckedChange={(v) => update({ run_in_background: v })}
         />
       </div>
-      <div className="flex items-center gap-4 px-4 py-3">
+      <div
+        className={
+          autostart === null
+            ? "flex items-center gap-4 px-4 py-3"
+            : "flex items-center gap-4 border-b px-4 py-3"
+        }
+      >
         <div className="flex-1">
           <span className="block text-[13.5px] font-medium">Notify on jobs</span>
           <span className="mt-0.5 block text-[12px] text-muted-foreground">
@@ -65,6 +97,22 @@ export function DesktopSettings() {
           onCheckedChange={(v) => update({ notify_on_jobs: v })}
         />
       </div>
+      {autostart !== null && (
+        <div className="flex items-center gap-4 px-4 py-3">
+          <div className="flex-1">
+            <span className="block text-[13.5px] font-medium">Start at login</span>
+            <span className="mt-0.5 block text-[12px] text-muted-foreground">
+              Launch hidden in the tray when you log in, so the brain is always
+              available.
+            </span>
+          </div>
+          <Switch
+            checked={autostart}
+            disabled={saving}
+            onCheckedChange={toggleAutostart}
+          />
+        </div>
+      )}
     </div>
   )
 }
