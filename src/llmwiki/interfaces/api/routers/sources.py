@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 
@@ -164,6 +165,23 @@ def _url_timeout(paths: Any) -> int:
     return load_config(paths).request_timeout
 
 
+def _truncate_preview(text: str, limit: int = 500) -> str:
+    """Cut ``text`` at the last paragraph/line/space boundary before ``limit``.
+
+    Avoids slicing mid-code-block (or mid-word) so the markdown preview the UI
+    receives never starts a fence it does not close. Mirrors the fallback in
+    ``manager.add_url`` for consistency.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for sep in ("\n\n", "\n", " "):
+        idx = cut.rfind(sep)
+        if idx > limit // 2:  # ponytail: keep at least half the budget
+            return cut[:idx].rstrip() + "…"
+    return cut.rstrip() + "…"
+
+
 @router.post("/url/preview")
 def preview_url_source(url: str = Body(..., embed=True)) -> dict[str, Any]:
     """Fetch + extract a URL without saving — title and a short preview (#195)."""
@@ -179,10 +197,10 @@ def preview_url_source(url: str = Body(..., embed=True)) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "url": url,
-        "title": extracted.title,
+        "title": extracted.title or urlparse(url).netloc or url,
         "author": extracted.author,
         "date": extracted.date,
-        "preview": extracted.text[:500],
+        "preview": _truncate_preview(extracted.text),
     }
 
 

@@ -231,9 +231,10 @@ function AddSourceDialog({
             />
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex gap-2">
+          <div className="space-y-2 min-w-0">
+            <div className="flex gap-2 min-w-0">
               <Input
+                className="min-w-0 flex-1"
                 placeholder="https://example.com/article"
                 value={url}
                 onChange={(e) => {
@@ -265,9 +266,9 @@ function AddSourceDialog({
                     {[preview.author, preview.date].filter(Boolean).join(" · ")}
                   </div>
                 )}
-                <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-muted-foreground">
-                  {preview.preview}
-                </p>
+                <div className="mt-2 max-h-40 overflow-y-auto rounded-sm bg-background/50 p-2 text-muted-foreground">
+                  <MarkdownReader content={preview.preview} className="text-[12px] leading-snug" />
+                </div>
               </div>
             )}
           </div>
