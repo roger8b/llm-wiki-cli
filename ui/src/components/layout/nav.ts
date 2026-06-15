@@ -6,6 +6,7 @@ import {
   Network,
   ShieldCheck,
   ListTodo,
+  BarChart3,
   Settings,
   type LucideIcon,
 } from "lucide-react"
@@ -29,5 +30,6 @@ export const PRIMARY_NAV: NavItem[] = [
 
 export const SECONDARY_NAV: NavItem[] = [
   { to: "/jobs", label: "Jobs", icon: ListTodo, badge: "jobs" },
+  { to: "/observability", label: "Insights", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: Settings },
 ]

@@ -26,6 +26,7 @@ import type {
   SourceContent,
   WorkspaceConfig,
   Job,
+  ModelStats,
 } from "@/types"
 
 // All endpoints live under /api (both dev and prod) so SPA client routes
@@ -78,7 +79,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = res.statusText
     try {
       const body = await res.json()
-      detail = body.detail ?? detail
+      const d = body.detail ?? detail
+      // FastAPI validation errors put an array/object in `detail`; stringify so
+      // it never surfaces as "[object Object]".
+      detail = typeof d === "string" ? d : JSON.stringify(d)
     } catch {
       // non-JSON error body — keep statusText
     }
@@ -247,6 +251,10 @@ export const api = {
   // ── jobs ──
   listJobs: () => request<Job[]>("/jobs"),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),
+  jobsStats: (since?: string) =>
+    request<{ stats: ModelStats[] }>(
+      `/jobs/stats${since ? `?since=${encodeURIComponent(since)}` : ""}`,
+    ),
   /**
    * Subscribe to a job's progress + final result over SSE (fetch + stream, so
    * the X-Wiki-Token header is sent — EventSource can't). Resolves when the

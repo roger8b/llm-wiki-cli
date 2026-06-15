@@ -50,6 +50,9 @@ const SettingsView = lazyWithRetry(() =>
 const GraphView = lazyWithRetry(() =>
   import("@/views/GraphView").then((m) => ({ default: m.GraphView })),
 )
+const InsightsView = lazyWithRetry(() =>
+  import("@/views/InsightsView").then((m) => ({ default: m.InsightsView })),
+)
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return (
@@ -108,6 +111,7 @@ export const router = createBrowserRouter([
       { path: "graph", element: <Lazy><GraphView /></Lazy> },
       { path: "lint", element: <Lazy><LintView /></Lazy> },
       { path: "jobs", element: <Lazy><JobsView /></Lazy> },
+      { path: "observability", element: <Lazy><InsightsView /></Lazy> },
       { path: "settings", element: <Lazy><SettingsView /></Lazy> },
     ],
   },
