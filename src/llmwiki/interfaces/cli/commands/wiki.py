@@ -265,6 +265,16 @@ def maintain(
             f"[green]Maintenance CR created: {cr.id}[/green] "
             f"({cr.files_changed} files)"
         )
+        warns = cr.warnings or []
+        unresolved = [w for w in warns if w.startswith("unresolved:")]
+        unverifiable = [w for w in warns if w.startswith("unverifiable:")]
+        resolved = max(0, len(findings) - len(unresolved) - len(unverifiable))
+        typer.echo(
+            f"[dim]Verification: {resolved} resolved, "
+            f"{len(unresolved)} unresolved, {len(unverifiable)} unverifiable.[/dim]"
+        )
+        for w in unresolved + unverifiable:
+            typer.echo(f"  [yellow]{esc(w)}[/yellow]")
         if apply_now:
             change_request_service.apply(cr.id, paths, conn)
             typer.echo(f"[green]Applied {cr.id}.[/green]")

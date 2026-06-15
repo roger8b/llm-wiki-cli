@@ -183,6 +183,87 @@ def lint_all(
 
 
 # ----------------------------------------------------------------------------
+# Post-maintenance verification of findings against disk+staging (#174)
+# ----------------------------------------------------------------------------
+
+_STRUCTURAL_KINDS = {
+    "broken_link",
+    "missing_frontmatter",
+    "invalid_frontmatter",
+    "invalid_page_type",
+}
+_SEMANTIC_KINDS = {"possible_duplicate", "contradiction", "gap", "stale"}
+
+
+def finding_id(f: LintFinding) -> str:
+    """Stable identity for a finding (kind + sorted pages)."""
+    return f"{f.kind}:{','.join(sorted(f.pages))}"
+
+
+def disk_staging_files(paths: BrainPaths, staging: dict[str, str]) -> dict[str, str]:
+    """Disk wiki pages overlaid with the staging area (staging wins)."""
+    files = {
+        paths.relative(f): f.read_text(encoding="utf-8") for f in _iter_wiki_files(paths.wiki)
+    }
+    for norm, content in staging.items():
+        if norm.startswith("wiki/") and norm.endswith(".md"):
+            files[norm] = content
+    return files
+
+
+def _incoming_counts(files: dict[str, str], known_titles: dict[str, str]) -> dict[str, int]:
+    incoming: dict[str, int] = {rel: 0 for rel in files}
+    for rel, text in files.items():
+        try:
+            frontmatter.parse(text)
+        except InvalidFrontmatterError:
+            continue
+        for target in markdown.extract_wikilinks(text):
+            dest = _resolve_wikilink(target, known_titles)
+            if dest is not None and dest != rel:
+                incoming[dest] = incoming.get(dest, 0) + 1
+    return incoming
+
+
+def verify_findings(
+    findings: list[LintFinding],
+    files: dict[str, str],
+    *,
+    touched: set[str],
+) -> dict[str, str]:
+    """Classify each finding against a disk+staging view of the wiki.
+
+    Returns ``{finding_id: "resolved"|"unresolved"|"unverifiable"}``.
+    Structural findings are re-checked deterministically; semantic findings
+    cannot be verified structurally — they are ``unverifiable`` when the agent
+    touched at least one involved page, otherwise ``unresolved``.
+    """
+    known = titles_from_contents(files)
+    fresh = lint_contents(files, known_titles=known)
+    fresh_keys = {(g.kind, p) for g in fresh for p in g.pages}
+    incoming = _incoming_counts(files, known)
+
+    verdicts: dict[str, str] = {}
+    for f in findings:
+        fid = finding_id(f)
+        if f.kind in _SEMANTIC_KINDS:
+            verdicts[fid] = (
+                "unverifiable" if any(p in touched for p in f.pages) else "unresolved"
+            )
+        elif f.kind == "orphan_page":
+            page = f.pages[0] if f.pages else None
+            verdicts[fid] = (
+                "resolved" if page is not None and incoming.get(page, 0) > 0 else "unresolved"
+            )
+        elif f.kind in _STRUCTURAL_KINDS:
+            still_present = any((f.kind, p) in fresh_keys for p in f.pages)
+            verdicts[fid] = "unresolved" if still_present else "resolved"
+        else:
+            verdicts[fid] = "unverifiable"
+    return verdicts
+
+
+# ----------------------------------------------------------------------------
 # Batched semantic lint with a token budget (#173)
 # ----------------------------------------------------------------------------
 
