@@ -85,26 +85,30 @@ primeiro).
   página por template (#187, PR #233), 3.6 busca global no app (#188, PR #234),
   3.7 navegação por tags (#189, PR #235).
 
-- **Fase 3 — ✅ 7/7 concluídas.** 3.1 edit-before-apply (#183, PR #214), 3.2
-  apply/reject parcial (#184, PR #230), 3.3 telemetria/qualidade na revisão
-  (#185, PR #231), 3.4 editor de página com preview (#186, PR #232), 3.5 criar
-  página por template (#187, PR #233), 3.6 busca global no app (#188, PR #234),
-  3.7 navegação por tags (#189, PR #235).
+- **Fase 4 — ✅ concluída.** Epic #181: 4.1 `--json` (#196, PR #242), 4.2
+  search com snippets/filtros (#197, PR #243), 4.3 exit codes/erros (#198,
+  PR #244). Epic #182 skills v3 (#199/#200/#201, PR #245).
 - **Fase 5 — ✅ 6/6 concluídas.** 5.1 Ask com follow-up (#190, PR #246), 5.2
   Streaming de tokens no Ask (#191, PR #248), 5.3 Citações clicáveis (#192,
   PR #247), 5.4 Grafo: filtros, busca e foco (#193, PR #249), 5.5 Grafo:
   layout performático + zoom/pan/fit (#194 + #252, merged together), 5.6
-  Ingestão por URL (#195, PR #250).
+  Ingestão por URL (#195, PR #250). Epic #180 fechado.
+- **Fase 6 — ✅ 7/7 concluídas (Epic #159 fechado).** 6.1 lint em lotes (#173,
+  PR #254), 6.2 verificação pós-manutenção (#174, PR #255), 6.3 stats por
+  modelo/provider (#176, PR #256), 6.4 auto-link (#44, PR #257), 6.5 dashboard
+  de observabilidade (#151, PR #258), 6.6 concorrência do worker + ADR 001
+  (#140, PR #259), 6.7 curador agendado (#41, PR #260).
 
-main: 467 testes pytest verdes (+6 skip do caminho vec0, que rodam no CI
-Linux), frontend vitest 76/76 + build da SPA, ruff + mypy strict limpos.
+main: 526 testes pytest verdes (+6 skip do caminho vec0, que rodam no CI
+Linux), frontend vitest 81/81 + build da SPA, ruff + mypy strict limpos.
 Issues concluídas fechadas via `Closes #N`.
 
 > **Evals (#175):** não re-rodados nas histórias que mudaram prompt/fluxo
-> (1.6, 2.3, 5.x) — exigem modelo LLM configurado. Rodar `wiki evals run`
+> (1.6, 2.3, 5.x, 6.1) — exigem modelo LLM configurado. Rodar `wiki evals run`
 > antes/depois e anotar no PR quando houver credencial.
 
-**Próximo: Fase 4 — CLI como interface de agente.**
+**Próximo: Fase 7 — Desktop Tauri: background & integração com o SO
+(Epic #202: #203–#208).**
 
 ---
 
