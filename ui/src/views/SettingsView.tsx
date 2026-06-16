@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { BrainSettings } from "@/components/settings/BrainSettings"
+import { DesktopSettings } from "@/components/settings/DesktopSettings"
 
 type Provider = "ollama" | ProviderName
 
@@ -485,6 +486,7 @@ export function SettingsView() {
                 <>
                   <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">General</div>
                   <BrainSettings />
+                  <DesktopSettings />
                 </>
               )}
 
