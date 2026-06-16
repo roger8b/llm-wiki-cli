@@ -10,6 +10,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -30,7 +31,7 @@ logger = logging.getLogger("llmwiki.services.ingest")
 
 # Live-progress event sink: ``emit(kind, payload)`` appends to ``job_events``
 # (#272). ``None`` disables eventing (e.g. CLI runs without a job timeline).
-EventEmitter = Callable[[str, dict[str, object]], None]
+EventEmitter = Callable[[str, "dict[str, object] | None"], None]
 
 
 def _make_event_emitter(
@@ -64,17 +65,63 @@ def _make_event_emitter(
     return emit, close
 
 
-def _emit_step(
-    emit: EventEmitter | None, job_repo: JobRepo, job_id: int, name: str
-) -> None:
-    """Set the coarse progress label AND append a ``step`` timeline event (#272).
+class _StepTracker:
+    """Time each pipeline step and emit start/end timeline events (#272, #273).
 
-    ``set_progress`` is kept for backward compatibility (the old single-label UI
-    and `ask` streaming); the event is additive.
+    ``step(name)`` closes the previous step (emitting an ``end`` event with its
+    ``duration_ms``) and opens a new one, also setting the coarse ``progress``
+    label for backward compatibility. ``finish()`` closes the last step. The
+    accumulated ``durations`` map (step name -> ms) is persisted into the job
+    result so per-step timing is auditable — the foundation for the #276
+    baseline. ``pages_staged`` is stamped on each event so the UI sees the
+    staging count grow live.
     """
-    job_repo.set_progress(job_id, name)
-    if emit is not None:
-        emit("step", {"name": name})
+
+    def __init__(self, emit: EventEmitter | None, job_repo: JobRepo, job_id: int) -> None:
+        self.emit: EventEmitter | None = emit
+        self._job_repo = job_repo
+        self._job_id = job_id
+        self._name: str | None = None
+        self._start: float | None = None
+        self.durations: dict[str, int] = {}
+        self.pages_staged = 0
+
+    def _close(self) -> None:
+        if self._name is None or self._start is None:
+            return
+        duration_ms = int((time.perf_counter() - self._start) * 1000)
+        # Accumulate (repeated step names like "chunk 1/3" sum together).
+        self.durations[self._name] = self.durations.get(self._name, 0) + duration_ms
+        if self.emit is not None:
+            self.emit(
+                "step",
+                {
+                    "name": self._name,
+                    "status": "end",
+                    "duration_ms": duration_ms,
+                    "pages_staged": self.pages_staged,
+                },
+            )
+        self._name = None
+        self._start = None
+
+    def step(self, name: str) -> None:
+        self._close()
+        self._name = name
+        self._start = time.perf_counter()
+        self._job_repo.set_progress(self._job_id, name)
+        if self.emit is not None:
+            self.emit("step", {"name": name, "status": "start", "pages_staged": self.pages_staged})
+
+    def telemetry(self, meta: ExecutionMeta | None, **extra: object) -> None:
+        """Emit a per-pass telemetry event from the factory-captured meta."""
+        if self.emit is None or meta is None:
+            return
+        payload: dict[str, object] = {**meta.to_dict(), "pages_staged": self.pages_staged, **extra}
+        self.emit("telemetry", payload)
+
+    def finish(self) -> None:
+        self._close()
 
 # runner(cfg, backend, *, source_path, source_text, source_meta[, outline, part])
 #   -> IngestionResult
@@ -270,7 +317,7 @@ def _self_correct(
     paths: BrainPaths,
     job_repo: JobRepo,
     job_id: int,
-    emit: EventEmitter | None = None,
+    tracker: _StepTracker | None = None,
 ) -> list[str]:
     """Lint the staging and let the agent fix structural issues before the CR (#166).
 
@@ -293,7 +340,8 @@ def _self_correct(
             attempt,
             cfg.agent_fix_retries,
         )
-        _emit_step(emit, job_repo, job_id, "fixing_structural_issues")
+        if tracker is not None:
+            tracker.step("fixing_structural_issues")
         runner(
             cfg,
             backend,
@@ -304,6 +352,8 @@ def _self_correct(
         )
         if backend.execution_meta is not None:
             metas.append(backend.execution_meta)
+            if tracker is not None:
+                tracker.telemetry(backend.execution_meta, phase="fix", attempt=attempt)
         findings = _lint_staging(paths, backend.staging)
     backend.execution_meta = ExecutionMeta.merge(metas)
     if findings:
@@ -329,7 +379,7 @@ def _run_passes(
     job_repo: JobRepo,
     job_id: int,
     cancel_check: Callable[[], bool] | None,
-    emit: EventEmitter | None = None,
+    tracker: _StepTracker | None = None,
 ) -> IngestionResult:
     """Multi-pass ingestion of a long source over a SINGLE shared backend (#162).
 
@@ -348,7 +398,8 @@ def _run_passes(
     n = len(chunks)
     logger.info("ingest(%s): long source -> %d chunks", source_path, n)
 
-    _emit_step(emit, job_repo, job_id, "outlining")
+    if tracker is not None:
+        tracker.step("outlining")
     summaries = [c[:500] for c in chunks]
     outline = outline_runner(cfg, source_meta=source_meta, chunk_summaries=summaries)
 
@@ -357,7 +408,8 @@ def _run_passes(
     for i, chunk in enumerate(chunks):
         if cancel_check is not None and cancel_check():
             raise JobCancelledError("cancelled between chunk passes")
-        _emit_step(emit, job_repo, job_id, f"chunk {i + 1}/{n}")
+        if tracker is not None:
+            tracker.step(f"chunk {i + 1}/{n}")
         result = runner(
             cfg,
             backend,
@@ -370,6 +422,10 @@ def _run_passes(
         results.append(result)
         if backend.execution_meta is not None:
             metas.append(backend.execution_meta)
+            # Per-pass telemetry the instant the chunk finishes (#273) — not only
+            # in the merged total below.
+            if tracker is not None:
+                tracker.telemetry(backend.execution_meta, phase="chunk", part=i + 1, of=n)
 
     backend.execution_meta = ExecutionMeta.merge(metas)
     return _merge_results(results)
@@ -380,7 +436,7 @@ def _extract_for_job(
     cfg: WorkspaceConfig,
     job_repo: JobRepo,
     job_id: int,
-    emit: EventEmitter | None = None,
+    tracker: _StepTracker | None = None,
 ) -> ExtractedSource:
     """Extract a source's text + metadata, reporting progress on the job.
 
@@ -389,6 +445,15 @@ def _extract_for_job(
     """
     from ..sources.extractors import extract, source_type
 
+    # Always report the coarse progress label; add the timeline step only when a
+    # tracker is present (it is in ``ingest()``; absent when this helper is
+    # called directly, e.g. in extraction unit tests).
+    def report(step: str) -> None:
+        if tracker is not None:
+            tracker.step(step)
+        else:
+            job_repo.set_progress(job_id, step)
+
     if source_type(source_file) == "audio":
         from ..sources.extractors import audio
 
@@ -396,9 +461,9 @@ def _extract_for_job(
             source_file,
             model=cfg.whisper_model,
             language=cfg.whisper_language,
-            progress=lambda step: _emit_step(emit, job_repo, job_id, step),
+            progress=report,
         )
-    _emit_step(emit, job_repo, job_id, "extracting")
+    report("extracting")
     return extract(source_file)
 
 
@@ -439,10 +504,22 @@ def ingest(
     # Live-progress event sink (#272): its own connection so the agent's tool
     # callbacks (possibly off-thread) never share the service connection.
     emit, close_events = _make_event_emitter(paths, job_id)
+    backend: ChangeRequestBackend | None = None
+    tracker = _StepTracker(emit, job_repo, job_id)
+
+    def event_sink(kind: str, payload: dict[str, object] | None = None) -> None:
+        # Keep the live staging count current and stamp it on every event (#273).
+        if backend is not None:
+            tracker.pages_staged = len(backend.staging)
+        if isinstance(payload, dict):
+            payload.setdefault("pages_staged", tracker.pages_staged)
+        emit(kind, payload)
+
+    tracker.emit = event_sink
     try:
         # Extraction runs INSIDE the job: audio transcription (#76) is slow, so
         # progress is reported and a failure is recorded on the job.
-        extracted = _extract_for_job(source_file, cfg, job_repo, job_id, emit)
+        extracted = _extract_for_job(source_file, cfg, job_repo, job_id, tracker)
         text = extracted.text
         source_meta: dict[str, str | None] = {
             "title": extracted.title,
@@ -453,7 +530,7 @@ def ingest(
         backend = ChangeRequestBackend(paths.root)
         backend.cancel_check = cancel_check
         backend.dedup_check = _make_dedup_check(paths)
-        backend.on_event = emit
+        backend.on_event = event_sink
         if len(text) > cfg.chunk_threshold_chars:
             result = _run_passes(
                 cfg,
@@ -466,13 +543,14 @@ def ingest(
                 job_repo=job_repo,
                 job_id=job_id,
                 cancel_check=cancel_check,
-                emit=emit,
+                tracker=tracker,
             )
         else:
-            _emit_step(emit, job_repo, job_id, "running_agent")
+            tracker.step("running_agent")
             result = runner(
                 cfg, backend, source_path=rel, source_text=text, source_meta=source_meta
             )
+            tracker.telemetry(backend.execution_meta, phase="single", part=1, of=1)
         # Self-correction: lint the staging and let the agent fix structural
         # issues before the CR; leftover findings become CR warnings (#166).
         warnings = _self_correct(
@@ -485,11 +563,11 @@ def ingest(
             paths=paths,
             job_repo=job_repo,
             job_id=job_id,
-            emit=emit,
+            tracker=tracker,
         )
         for warning in warnings:
-            emit("warning", {"message": warning})
-        _emit_step(emit, job_repo, job_id, "creating_change_request")
+            event_sink("warning", {"message": warning})
+        tracker.step("creating_change_request")
         changes = backend.collect_changes()
         _audit_result(result, changes, rel)
         meta = backend.execution_meta
@@ -504,16 +582,19 @@ def ingest(
             execution=execution,
             warnings=warnings,
         )
+        # Close the last step so its duration lands before we read the map (#273).
+        tracker.finish()
         result_payload: dict[str, object] = {
             "cr": cr.id,
             "files": cr.files_changed,
             "execution": execution,
+            "durations_ms": tracker.durations,
         }
         if not changes:
             # Explain the empty CR so the "no changes" outcome isn't silent.
             note = _empty_cr_note(result, meta)
             result_payload["note"] = note
-            emit("warning", {"message": note})
+            event_sink("warning", {"message": note})
         job_repo.complete(job_id, result=json.dumps(result_payload))
         return cr
     except JobCancelledError as exc:
