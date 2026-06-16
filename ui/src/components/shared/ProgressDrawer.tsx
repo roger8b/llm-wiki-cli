@@ -2,18 +2,24 @@ import { useNavigate } from "react-router-dom"
 import { Check, Loader2, X, AlertCircle, Ban } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { IndeterminateBar } from "@/components/shared/IndeterminateBar"
+import { IngestionProgress } from "@/components/shared/IngestionProgress"
 import { useIngestStore } from "@/stores/ingest"
 import { cn } from "@/lib/utils"
 
 export function ProgressDrawer() {
   const navigate = useNavigate()
-  const { open, title, steps, status, crId, note, error, close, clear, items, jobIds, cancelling, cancel } =
-    useIngestStore()
+  const {
+    open, title, steps, status, crId, note, error, close, clear, items,
+    events, pagesStaged, jobIds, cancelling, cancel,
+  } = useIngestStore()
 
   if (!open) return null
 
   const running = status === "running"
   const isBatch = items.length > 0
+  // Once live ingestion events arrive, render the rich timeline instead of the
+  // flat cosmetic step list (#274).
+  const hasLiveTimeline = !isBatch && events.length > 0
   const canCancel = running && jobIds.length > 0
 
   return (
@@ -39,8 +45,10 @@ export function ProgressDrawer() {
 
       {running && <IndeterminateBar className="rounded-none" />}
 
-      <div className="max-h-[240px] space-y-1.5 overflow-y-auto px-4 py-3 font-mono text-[12px]">
-        {isBatch
+      <div className="max-h-[280px] space-y-1.5 overflow-y-auto px-4 py-3 font-mono text-[12px]">
+        {hasLiveTimeline ? (
+          <IngestionProgress events={events} pagesStaged={pagesStaged} running={running} />
+        ) : isBatch
           ? items.map((it) => (
               <div key={it.name} className="flex items-center gap-2">
                 {it.status === "done" ? (

@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { api } from "@/lib/api"
+import type { IngestEvent } from "@/types"
 
 type IngestStatus = "idle" | "running" | "done" | "error" | "cancelled"
 type FileStatus = "queued" | "running" | "done" | "error" | "cancelled"
@@ -21,6 +22,10 @@ interface IngestState {
   error: string | null
   /** Per-file progress for batch ingests (empty for single-file runs). */
   items: BatchItem[]
+  /** Live ingestion timeline events for the current single-file run (#274). */
+  events: IngestEvent[]
+  /** Pages written to staging so far (from the latest event that carried it). */
+  pagesStaged: number
   /** Job ids backing the current run (1 for single, N for batch) — for cancel. */
   jobIds: number[]
   /** True once the user has requested cancellation of the current run. */
@@ -101,6 +106,12 @@ function parseNote(result: string | null | undefined): string | null {
   }
 }
 
+/** A human label for a step event's machine name (reuses PROGRESS_LABELS). */
+function stepLabel(name: string | undefined): string | null {
+  if (!name) return null
+  return PROGRESS_LABELS[name] ?? name
+}
+
 export const useIngestStore = create<IngestState>((set, get) => ({
   open: false,
   title: "",
@@ -110,6 +121,8 @@ export const useIngestStore = create<IngestState>((set, get) => ({
   note: null,
   error: null,
   items: [],
+  events: [],
+  pagesStaged: 0,
   jobIds: [],
   cancelling: false,
 
@@ -123,6 +136,8 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       note: null,
       error: null,
       items: [],
+      events: [],
+      pagesStaged: 0,
       jobIds: [],
       cancelling: false,
     })
@@ -146,34 +161,54 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       if (res && typeof res === "object" && "job_id" in res) {
         const jobId = res.job_id
         set({ jobIds: [jobId] })
-        let lastProgress: string | null = null
-        // Poll job status + real progress
-        while (true) {
-          const job = await api.getJob(jobId)
-          const label = progressLabel(job.progress)
-          if (label && label !== lastProgress) {
-            lastProgress = label
+        // Live timeline over SSE (#274): tool calls, page writes, telemetry and
+        // step durations stream in instead of a 1s poll on a single label.
+        let lastResult: string | null = null
+        let terminal: "cancelled" | "error" | null = null
+        await api.streamJob(jobId, {
+          onProgress: (step) => {
+            // Fallback label for backends that only set coarse progress.
+            const label = progressLabel(step)
+            if (label && get().events.length === 0) {
+              clearInterval(timer)
+              set({ steps: [label] })
+            }
+          },
+          onIngestEvent: (ev) => {
             clearInterval(timer)
-            set({ steps: [label] })
-          }
-          if (job.status === "done") {
-            clearInterval(timer)
-            set({
-              status: "done",
-              crId: parseCrId(job.result),
-              note: parseNote(job.result),
-            })
-            break
-          } else if (job.status === "cancelled") {
-            clearInterval(timer)
-            set({ status: "cancelled" })
-            break
-          } else if (job.status === "error") {
-            clearInterval(timer)
-            set({ status: "error", error: job.error || "Job failed" })
-            break
-          }
-          await new Promise((resolve) => setTimeout(resolve, 1000))
+            const events = [...get().events, ev]
+            const patch: Partial<IngestState> = { events }
+            const staged = ev.payload?.pages_staged
+            if (typeof staged === "number") patch.pagesStaged = staged
+            // Mirror step labels into the legacy `steps` list for the drawer.
+            if (ev.kind === "step" && ev.payload?.status !== "end") {
+              const label = stepLabel(ev.payload?.name)
+              if (label) patch.steps = [...get().steps.filter(Boolean), label]
+            }
+            set(patch)
+          },
+          onResult: (result) => {
+            lastResult = result
+          },
+          onCancelled: () => {
+            terminal = "cancelled"
+          },
+          onError: (msg) => {
+            terminal = "error"
+            set({ error: msg })
+          },
+        })
+        clearInterval(timer)
+        if (terminal === "cancelled") {
+          set({ status: "cancelled" })
+        } else if (terminal === "error") {
+          set({ status: "error", error: get().error || "Job failed" })
+        } else {
+          set({
+            status: "done",
+            crId: parseCrId(lastResult),
+            note: parseNote(lastResult),
+          })
         }
       } else {
         const change_request_id = res ? (res as any).change_request_id : null
@@ -196,6 +231,8 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       note: null,
       error: null,
       items: files.map((f) => ({ name: f.name, status: "queued" as FileStatus })),
+      events: [],
+      pagesStaged: 0,
       jobIds: [],
       cancelling: false,
     })
@@ -278,6 +315,8 @@ export const useIngestStore = create<IngestState>((set, get) => ({
       note: null,
       error: null,
       items: [],
+      events: [],
+      pagesStaged: 0,
       jobIds: [],
       cancelling: false,
     }),

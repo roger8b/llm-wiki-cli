@@ -296,6 +296,40 @@ export interface Job {
   completed_at?: string | null
 }
 
+/** One live-progress event from a job's ingestion timeline (#272/#274). */
+export type IngestEventKind =
+  | "step"
+  | "tool_start"
+  | "tool_end"
+  | "page_write"
+  | "page_read"
+  | "telemetry"
+  | "warning"
+
+export interface IngestEvent {
+  id: number
+  kind: IngestEventKind
+  ts: string
+  payload: {
+    name?: string
+    status?: "start" | "end"
+    duration_ms?: number
+    pages_staged?: number
+    tool?: string
+    args?: string
+    path?: string
+    op?: string
+    message?: string
+    tokens_in?: number
+    tokens_out?: number
+    tool_calls?: number
+    phase?: string
+    part?: number
+    of?: number
+    [k: string]: unknown
+  }
+}
+
 /** Per-model agent telemetry from GET /jobs/stats (#176, dashboard #151). */
 export interface ModelStats {
   model: string
