@@ -102,6 +102,20 @@ class ChangeRequestBackend(FilesystemBackend):
         # Paths already warned about as possible duplicates — a second write to
         # the same path is the agent's deliberate confirmation and goes through.
         self._dedup_warned: set[str] = set()
+        # Optional live-progress sink (#272): called ``(kind, payload)`` for
+        # discrete events. Set by services to feed a job's event timeline. The
+        # backend uses it for ``page_write``; the agent factory routes tool
+        # calls through the same sink. Payloads carry paths/metadata only —
+        # never a page body.
+        self.on_event: Callable[[str, dict[str, object]], None] | None = None
+
+    def _emit_page_event(self, norm: str, operation: str) -> None:
+        if self.on_event is None:
+            return
+        try:
+            self.on_event("page_write", {"path": norm, "op": operation})
+        except Exception:  # noqa: BLE001 — telemetry must never break a write
+            logger.debug("on_event sink failed for '%s'", norm, exc_info=True)
 
     # --- normalization --------------------------------------------------
     @staticmethod
@@ -191,7 +205,9 @@ class ChangeRequestBackend(FilesystemBackend):
         dup = self._dedup_block(norm, content)
         if dup is not None:
             return dup
+        operation = "update" if self._current(norm) is not None else "create"
         self.staging[norm] = content
+        self._emit_page_event(norm, operation)
         return WriteResult(path=file_path)
 
     def edit(
@@ -225,6 +241,7 @@ class ChangeRequestBackend(FilesystemBackend):
             )
         count = -1 if replace_all else 1
         self.staging[norm] = current.replace(old_string, new_string, count)
+        self._emit_page_event(norm, "update")
         return EditResult(path=file_path, occurrences=occurrences)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:

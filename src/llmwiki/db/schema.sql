@@ -104,3 +104,18 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- Append-only event log for a job's live progress (#272). One row per discrete
+-- event (step started/ended, tool call, page written, telemetry, warning) so the
+-- UI can render a real timeline instead of a single overwritten progress label.
+-- ``payload`` holds metadata only (path, tool name, counters) — never the page
+-- body — and the SSE endpoint replays rows after the client's last seen id.
+CREATE TABLE IF NOT EXISTS job_events (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id  INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  ts      TEXT NOT NULL,
+  kind    TEXT NOT NULL,
+  payload TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_events_job ON job_events(job_id, id);

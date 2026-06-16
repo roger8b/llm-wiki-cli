@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from ..core.errors import SourceAlreadyProcessedError
 from ..core.misc import sha256
 from ..core.models import ChangeRequest, FileChange, SourceStatus
 from ..core.paths import BrainPaths
-from ..db.repo import JobRepo, SourceRepo
+from ..db.repo import JobEventRepo, JobRepo, SourceRepo
 from ..llm_agents.backend import ChangeRequestBackend
 from ..llm_agents.models import IngestionResult, OutlinePlan
 from ..llm_agents.telemetry import ExecutionMeta
@@ -26,6 +27,54 @@ from . import change_request_service
 from .change_request_service import create_from_changes
 
 logger = logging.getLogger("llmwiki.services.ingest")
+
+# Live-progress event sink: ``emit(kind, payload)`` appends to ``job_events``
+# (#272). ``None`` disables eventing (e.g. CLI runs without a job timeline).
+EventEmitter = Callable[[str, dict[str, object]], None]
+
+
+def _make_event_emitter(
+    paths: BrainPaths, job_id: int
+) -> tuple[EventEmitter, Callable[[], None]]:
+    """Build a thread-safe live-event sink for a job (#272).
+
+    The agent's tool callbacks and the backend's page-write hook may fire from a
+    different thread than the service, so the dedicated connection is guarded by
+    a lock. Eventing is best-effort — a failure here never breaks the ingest.
+    """
+    from ..db.connection import get_connection
+
+    conn = get_connection(paths.db_path, apply_schema=False)
+    repo = JobEventRepo(conn)
+    lock = threading.Lock()
+
+    def emit(kind: str, payload: dict[str, object] | None = None) -> None:
+        try:
+            with lock:
+                repo.append(job_id, kind, payload)
+        except Exception:  # noqa: BLE001 — telemetry must never break ingest
+            logger.debug("job event emit failed (kind=%s)", kind, exc_info=True)
+
+    def close() -> None:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    return emit, close
+
+
+def _emit_step(
+    emit: EventEmitter | None, job_repo: JobRepo, job_id: int, name: str
+) -> None:
+    """Set the coarse progress label AND append a ``step`` timeline event (#272).
+
+    ``set_progress`` is kept for backward compatibility (the old single-label UI
+    and `ask` streaming); the event is additive.
+    """
+    job_repo.set_progress(job_id, name)
+    if emit is not None:
+        emit("step", {"name": name})
 
 # runner(cfg, backend, *, source_path, source_text, source_meta[, outline, part])
 #   -> IngestionResult
@@ -221,6 +270,7 @@ def _self_correct(
     paths: BrainPaths,
     job_repo: JobRepo,
     job_id: int,
+    emit: EventEmitter | None = None,
 ) -> list[str]:
     """Lint the staging and let the agent fix structural issues before the CR (#166).
 
@@ -243,7 +293,7 @@ def _self_correct(
             attempt,
             cfg.agent_fix_retries,
         )
-        job_repo.set_progress(job_id, "fixing_structural_issues")
+        _emit_step(emit, job_repo, job_id, "fixing_structural_issues")
         runner(
             cfg,
             backend,
@@ -279,6 +329,7 @@ def _run_passes(
     job_repo: JobRepo,
     job_id: int,
     cancel_check: Callable[[], bool] | None,
+    emit: EventEmitter | None = None,
 ) -> IngestionResult:
     """Multi-pass ingestion of a long source over a SINGLE shared backend (#162).
 
@@ -297,7 +348,7 @@ def _run_passes(
     n = len(chunks)
     logger.info("ingest(%s): long source -> %d chunks", source_path, n)
 
-    job_repo.set_progress(job_id, "outlining")
+    _emit_step(emit, job_repo, job_id, "outlining")
     summaries = [c[:500] for c in chunks]
     outline = outline_runner(cfg, source_meta=source_meta, chunk_summaries=summaries)
 
@@ -306,7 +357,7 @@ def _run_passes(
     for i, chunk in enumerate(chunks):
         if cancel_check is not None and cancel_check():
             raise JobCancelledError("cancelled between chunk passes")
-        job_repo.set_progress(job_id, f"chunk {i + 1}/{n}")
+        _emit_step(emit, job_repo, job_id, f"chunk {i + 1}/{n}")
         result = runner(
             cfg,
             backend,
@@ -325,7 +376,11 @@ def _run_passes(
 
 
 def _extract_for_job(
-    source_file: Path, cfg: WorkspaceConfig, job_repo: JobRepo, job_id: int
+    source_file: Path,
+    cfg: WorkspaceConfig,
+    job_repo: JobRepo,
+    job_id: int,
+    emit: EventEmitter | None = None,
 ) -> ExtractedSource:
     """Extract a source's text + metadata, reporting progress on the job.
 
@@ -341,9 +396,9 @@ def _extract_for_job(
             source_file,
             model=cfg.whisper_model,
             language=cfg.whisper_language,
-            progress=lambda step: job_repo.set_progress(job_id, step),
+            progress=lambda step: _emit_step(emit, job_repo, job_id, step),
         )
-    job_repo.set_progress(job_id, "extracting")
+    _emit_step(emit, job_repo, job_id, "extracting")
     return extract(source_file)
 
 
@@ -381,10 +436,13 @@ def ingest(
     job_repo = JobRepo(conn)
     if job_id is None:
         job_id = job_repo.create("ingest", json.dumps({"source": rel}), status="running")
+    # Live-progress event sink (#272): its own connection so the agent's tool
+    # callbacks (possibly off-thread) never share the service connection.
+    emit, close_events = _make_event_emitter(paths, job_id)
     try:
         # Extraction runs INSIDE the job: audio transcription (#76) is slow, so
         # progress is reported and a failure is recorded on the job.
-        extracted = _extract_for_job(source_file, cfg, job_repo, job_id)
+        extracted = _extract_for_job(source_file, cfg, job_repo, job_id, emit)
         text = extracted.text
         source_meta: dict[str, str | None] = {
             "title": extracted.title,
@@ -395,6 +453,7 @@ def ingest(
         backend = ChangeRequestBackend(paths.root)
         backend.cancel_check = cancel_check
         backend.dedup_check = _make_dedup_check(paths)
+        backend.on_event = emit
         if len(text) > cfg.chunk_threshold_chars:
             result = _run_passes(
                 cfg,
@@ -407,9 +466,10 @@ def ingest(
                 job_repo=job_repo,
                 job_id=job_id,
                 cancel_check=cancel_check,
+                emit=emit,
             )
         else:
-            job_repo.set_progress(job_id, "running_agent")
+            _emit_step(emit, job_repo, job_id, "running_agent")
             result = runner(
                 cfg, backend, source_path=rel, source_text=text, source_meta=source_meta
             )
@@ -425,8 +485,11 @@ def ingest(
             paths=paths,
             job_repo=job_repo,
             job_id=job_id,
+            emit=emit,
         )
-        job_repo.set_progress(job_id, "creating_change_request")
+        for warning in warnings:
+            emit("warning", {"message": warning})
+        _emit_step(emit, job_repo, job_id, "creating_change_request")
         changes = backend.collect_changes()
         _audit_result(result, changes, rel)
         meta = backend.execution_meta
@@ -448,7 +511,9 @@ def ingest(
         }
         if not changes:
             # Explain the empty CR so the "no changes" outcome isn't silent.
-            result_payload["note"] = _empty_cr_note(result, meta)
+            note = _empty_cr_note(result, meta)
+            result_payload["note"] = note
+            emit("warning", {"message": note})
         job_repo.complete(job_id, result=json.dumps(result_payload))
         return cr
     except JobCancelledError as exc:
@@ -457,6 +522,8 @@ def ingest(
     except Exception as exc:  # noqa: BLE001
         job_repo.complete(job_id, error=str(exc))
         raise
+    finally:
+        close_events()
 
 
 __all__ = ["ingest", "change_request_service"]

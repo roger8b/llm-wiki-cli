@@ -225,23 +225,33 @@ def _invoke_with_retry(
     message: str,
     cfg: WorkspaceConfig,
     on_token: Callable[[str], None] | None = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Call ``agent.invoke`` with bounded retry+backoff on transient errors.
 
     A flaky provider call (network blip, 5xx) re-attempts instead of failing the
     whole job. ``JobCancelledError`` is never retried — cancellation is final.
     When ``on_token`` is set, a streaming callback forwards the model's answer
-    tokens (#191); providers that don't stream simply never fire it.
+    tokens (#191); providers that don't stream simply never fire it. When
+    ``on_event`` is set, tool calls are forwarded as live progress events (#272).
     """
     from ..core.errors import JobCancelledError
 
-    # Only build a callbacks config when streaming, and only pass it when set —
-    # keeps the call compatible with agents/fakes whose invoke() takes no config.
-    extra: dict[str, Any] = {}
+    # Only build a callbacks config when streaming/eventing, and only pass it
+    # when set — keeps the call compatible with agents/fakes whose invoke()
+    # takes no config.
+    callbacks: list[Any] = []
     if on_token is not None:
         from .streaming import make_token_handler  # noqa: PLC0415
 
-        extra["config"] = {"callbacks": [make_token_handler(on_token)]}
+        callbacks.append(make_token_handler(on_token))
+    if on_event is not None:
+        from .streaming import make_ingestion_event_handler  # noqa: PLC0415
+
+        callbacks.append(make_ingestion_event_handler(on_event))
+    extra: dict[str, Any] = {}
+    if callbacks:
+        extra["config"] = {"callbacks": callbacks}
 
     attempts = max(1, cfg.agent_max_retries)
     last_exc: Exception | None = None
@@ -278,15 +288,17 @@ def _invoke[T: BaseModel](
     cfg: WorkspaceConfig,
     backend: ChangeRequestBackend | None = None,
     on_token: Callable[[str], None] | None = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> T:
     """Run the agent, time it, log structured-output fallback, capture telemetry.
 
     Telemetry is stashed on ``backend.execution_meta`` (when a backend is
     present) so services can persist it into the change request / job result.
-    ``on_token`` enables answer token streaming (#191).
+    ``on_token`` enables answer token streaming (#191); ``on_event`` enables
+    live tool-call progress events (#272).
     """
     start = time.perf_counter()
-    state = _invoke_with_retry(agent, message, cfg, on_token)
+    state = _invoke_with_retry(agent, message, cfg, on_token, on_event)
     latency_ms = int((time.perf_counter() - start) * 1000)
 
     used_fallback = not _had_structured(state, schema)
@@ -441,7 +453,9 @@ def run_ingestion(
             outline=outline,
             part=part,
         )
-    return _invoke(agent, message, IngestionResult, cfg, backend)
+    # Route the agent's tool calls through the same live-event sink the backend
+    # uses for page writes (#272), so the job timeline sees both.
+    return _invoke(agent, message, IngestionResult, cfg, backend, on_event=backend.on_event)
 
 
 def _outline_message(
