@@ -9,6 +9,14 @@ class TestDesktopConfig:
         cfg = read_desktop(brain)
         assert cfg["run_in_background"] is True
         assert cfg["notify_on_jobs"] is True
+        assert cfg["notify_granularity"] == "terminal"  # #275
+
+    def test_notify_granularity_persists(self, brain: BrainPaths) -> None:
+        out = update_desktop(brain, {"notify_granularity": "all"})
+        assert out["notify_granularity"] == "all"
+        assert read_desktop(brain)["notify_granularity"] == "all"
+        # Wrong type is ignored, default kept.
+        assert update_desktop(brain, {"notify_granularity": 1})["notify_granularity"] == "all"
 
     def test_update_persists_and_merges(self, brain: BrainPaths) -> None:
         out = update_desktop(brain, {"run_in_background": False})

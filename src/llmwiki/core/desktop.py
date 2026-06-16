@@ -19,9 +19,12 @@ logger = logging.getLogger("llmwiki.core")
 DESKTOP_NAME = "desktop.json"
 
 # Defaults applied when a key is missing or the file does not exist.
+# ``notify_granularity`` (#275): "terminal" notifies only on finish/error,
+# "all" also pings when an ingestion starts. Read by the Rust tray.
 _DEFAULTS: dict[str, Any] = {
     "run_in_background": True,
     "notify_on_jobs": True,
+    "notify_granularity": "terminal",
 }
 
 

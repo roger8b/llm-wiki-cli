@@ -184,6 +184,8 @@ export interface WorkspaceConfig {
 export interface DesktopConfig {
   run_in_background: boolean
   notify_on_jobs: boolean
+  /** "terminal" = finish/error only; "all" = also ping on ingest start (#275). */
+  notify_granularity?: "terminal" | "all"
 }
 
 export interface GraphNode {

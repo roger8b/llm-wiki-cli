@@ -97,6 +97,20 @@ export function DesktopSettings() {
           onCheckedChange={(v) => update({ notify_on_jobs: v })}
         />
       </div>
+      <div className="flex items-center gap-4 border-b px-4 py-3">
+        <div className="flex-1">
+          <span className="block text-[13.5px] font-medium">Notify when ingestion starts</span>
+          <span className="mt-0.5 block text-[12px] text-muted-foreground">
+            Also ping when an ingestion begins, not only when it finishes. The
+            tray always shows the current step while it runs.
+          </span>
+        </div>
+        <Switch
+          checked={cfg.notify_granularity === "all"}
+          disabled={saving || !cfg.notify_on_jobs}
+          onCheckedChange={(v) => update({ notify_granularity: v ? "all" : "terminal" })}
+        />
+      </div>
       {autostart !== null && (
         <div className="flex items-center gap-4 px-4 py-3">
           <div className="flex-1">
