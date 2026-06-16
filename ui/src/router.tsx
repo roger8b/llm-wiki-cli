@@ -53,6 +53,9 @@ const GraphView = lazyWithRetry(() =>
 const InsightsView = lazyWithRetry(() =>
   import("@/views/InsightsView").then((m) => ({ default: m.InsightsView })),
 )
+const CaptureView = lazyWithRetry(() =>
+  import("@/views/CaptureView").then((m) => ({ default: m.CaptureView })),
+)
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return (
@@ -115,4 +118,6 @@ export const router = createBrowserRouter([
       { path: "settings", element: <Lazy><SettingsView /></Lazy> },
     ],
   },
+  // Quick capture (#206): standalone, outside the AppShell (no sidebar).
+  { path: "/capture", element: <Lazy><CaptureView /></Lazy> },
 ])

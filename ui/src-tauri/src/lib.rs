@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 /// Holds the running backend process so we can kill it on exit.
@@ -363,6 +365,47 @@ fn navigate_pending(handle: &AppHandle, win: &tauri::WebviewWindow) {
     }
 }
 
+/// Read the clipboard text, capped so a huge clipboard doesn't bloat the window
+/// init script. Empty on failure (quick-capture then opens blank).
+fn read_clipboard_text(handle: &AppHandle) -> String {
+    let mut text = handle.clipboard().read_text().unwrap_or_default();
+    const CAP: usize = 10_000;
+    if text.len() > CAP {
+        text.truncate(CAP);
+    }
+    text
+}
+
+/// The global quick-capture shortcut: Cmd+Shift+K (Ctrl+Shift+K off macOS).
+fn capture_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK)
+}
+
+/// Open (or focus) the small always-on-top quick-capture window at `/capture`,
+/// prefilled with the clipboard. Works with the main window closed since the
+/// backend stays alive in the background (#204/#206).
+fn open_capture_window(handle: &AppHandle) {
+    if let Some(win) = handle.get_webview_window("capture") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+    let session = handle.state::<AppSession>();
+    let token = session.token.clone();
+    let url = format!("{}/capture", session.url);
+    let clip = read_clipboard_text(handle);
+    let init = format!("window.__WIKI_TOKEN__ = {token:?}; window.__WIKI_CAPTURE__ = {clip:?};");
+    WebviewWindowBuilder::new(handle, "capture", WebviewUrl::External(url.parse().unwrap()))
+        .title("Quick capture")
+        .inner_size(520.0, 320.0)
+        .always_on_top(true)
+        .center()
+        .initialization_script(&init)
+        .build()
+        .expect("failed to build capture window");
+    show_in_dock(handle);
+}
+
 /// Resolve the PyInstaller onedir backend executable.
 ///
 /// In a bundled `.app` the onedir folder ships under the resource dir as
@@ -474,6 +517,20 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // Global shortcut (Cmd/Ctrl+Shift+K) → quick capture. The handler fires
+        // for any registered shortcut; we match on the capture combo (#206).
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() == ShortcutState::Pressed
+                        && shortcut == &capture_shortcut()
+                    {
+                        open_capture_window(app);
+                    }
+                })
+                .build(),
+        )
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             let port = free_port();
@@ -577,6 +634,11 @@ pub fn run() {
             });
 
             spawn_job_poll(app.handle().clone());
+
+            // Register the global quick-capture shortcut once (#206).
+            if let Err(err) = app.global_shortcut().register(capture_shortcut()) {
+                eprintln!("[llm-wiki] could not register quick-capture shortcut: {err}");
+            }
 
             Ok(())
         })
