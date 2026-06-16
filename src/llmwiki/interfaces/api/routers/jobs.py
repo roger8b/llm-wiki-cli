@@ -98,7 +98,7 @@ def cancel_job(job_id: int) -> dict[str, Any]:
         conn.close()
 
 
-def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
+def _job_event_stream(paths: Any, job_id: int, after_event_id: int = 0) -> Iterator[str]:
     """Server-Sent Events for a job's lifecycle.
 
     Pushes ``status`` on every state change and a terminal ``result``/``error``
@@ -106,11 +106,12 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
     answer (or job outcome) lands immediately. Runs in a worker thread (sync
     generator), so the ``time.sleep`` poll never blocks the event loop.
     """
-    from ....db.repo import JobRepo
+    from ....db.repo import JobEventRepo, JobRepo
 
     conn = open_conn(paths)
     try:
         repo = JobRepo(conn)
+        event_repo = JobEventRepo(conn)
         if repo.get(job_id) is None:
             yield _sse("error", {"detail": "Job not found."})
             return
@@ -118,6 +119,7 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
         last_status: str | None = None
         last_progress: str | None = None
         last_stream_len = 0
+        last_event_id = max(0, after_event_id)
         deadline = time.monotonic() + _STREAM_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             row = repo.get(job_id)
@@ -130,6 +132,19 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
                 last_progress = progress
                 if progress:
                     yield _sse("progress", {"progress": progress})
+            # Replay any new live-progress events appended since the last poll
+            # (#274). Cursor by row id so a reconnecting client never re-sees one.
+            for ev in event_repo.since(job_id, last_event_id):
+                last_event_id = ev["id"]
+                yield _sse(
+                    "ingest_event",
+                    {
+                        "id": ev["id"],
+                        "kind": ev["kind"],
+                        "ts": ev["ts"],
+                        "payload": json.loads(ev["payload"]) if ev["payload"] else {},
+                    },
+                )
             # Emit only the newly-streamed slice of the answer (#191).
             stream_text = row["stream_text"] if "stream_text" in row.keys() else None
             if stream_text and len(stream_text) > last_stream_len:
@@ -156,11 +171,15 @@ def _job_event_stream(paths: Any, job_id: int) -> Iterator[str]:
 
 
 @router.get("/{job_id}/events")
-def job_events(job_id: int) -> StreamingResponse:
-    """Stream a job's progress + final result over SSE."""
+def job_events(job_id: int, after_event_id: int = Query(0)) -> StreamingResponse:
+    """Stream a job's progress + final result over SSE.
+
+    ``after_event_id`` lets a reconnecting client resume the ingestion event
+    timeline (#274) without re-seeing events it already rendered.
+    """
     paths = _ctx()
     return StreamingResponse(
-        _job_event_stream(paths, job_id),
+        _job_event_stream(paths, job_id, after_event_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

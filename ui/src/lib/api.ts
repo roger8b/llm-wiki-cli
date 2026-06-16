@@ -27,6 +27,7 @@ import type {
   WorkspaceConfig,
   DesktopConfig,
   Job,
+  IngestEvent,
   ModelStats,
 } from "@/types"
 
@@ -273,17 +274,22 @@ export const api = {
       onStatus?: (status: string) => void
       onProgress?: (step: string) => void
       onToken?: (text: string) => void
+      onIngestEvent?: (ev: IngestEvent) => void
       onResult?: (result: string | null) => void
       onCancelled?: (result: string | null) => void
       onError?: (message: string) => void
     },
+    // Resume the ingestion timeline after this event id, so a reconnect never
+    // re-renders events the client already saw (#274).
+    afterEventId = 0,
   ): Promise<void> => {
+    const qs = afterEventId > 0 ? `?after_event_id=${afterEventId}` : ""
     let res: Response
     try {
-      res = await fetch(`${BASE}/jobs/${id}/events`, { headers: authHeaders() })
+      res = await fetch(`${BASE}/jobs/${id}/events${qs}`, { headers: authHeaders() })
     } catch {
       // network drop (e.g. WebView stale keep-alive) — one retry
-      res = await fetch(`${BASE}/jobs/${id}/events`, { headers: authHeaders() })
+      res = await fetch(`${BASE}/jobs/${id}/events${qs}`, { headers: authHeaders() })
     }
     if (!res.ok || !res.body) {
       h.onError?.(`stream failed (${res.status})`)
@@ -313,10 +319,11 @@ export const api = {
           text?: string
           result?: string | null
           detail?: string
-        }
+        } & Partial<IngestEvent>
         if (event === "status") h.onStatus?.(payload.status ?? "")
         else if (event === "progress") h.onProgress?.(payload.progress ?? "")
         else if (event === "token") h.onToken?.(payload.text ?? "")
+        else if (event === "ingest_event") h.onIngestEvent?.(payload as IngestEvent)
         else if (event === "result") {
           h.onResult?.(payload.result ?? null)
           return

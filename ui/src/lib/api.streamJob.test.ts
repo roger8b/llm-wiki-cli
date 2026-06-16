@@ -89,4 +89,40 @@ describe("api.streamJob", () => {
     expect(cancelled).toBe('{"cancelled":true}')
     expect(resulted).toBe(false)
   })
+
+  it("dispatches ingest_event frames to onIngestEvent (#274)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        streamResponse([
+          sse("ingest_event", {
+            id: 1,
+            kind: "step",
+            ts: "t",
+            payload: { name: "extracting", status: "start" },
+          }),
+          sse("ingest_event", {
+            id: 2,
+            kind: "page_write",
+            ts: "t",
+            payload: { path: "wiki/concepts/rag.md", op: "create", pages_staged: 1 },
+          }),
+          sse("result", { result: '{"cr":"CR-1"}' }),
+        ]),
+      ),
+    )
+    const kinds: string[] = []
+    await api.streamJob(1, {
+      onIngestEvent: (ev) => kinds.push(ev.kind),
+      onResult: () => {},
+    })
+    expect(kinds).toEqual(["step", "page_write"])
+  })
+
+  it("passes after_event_id as a query param for reconnect (#274)", async () => {
+    const fetchMock = vi.fn(async () => streamResponse([sse("result", { result: null })]))
+    vi.stubGlobal("fetch", fetchMock)
+    await api.streamJob(7, { onResult: () => {} }, 42)
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/jobs/7/events?after_event_id=42")
+  })
 })

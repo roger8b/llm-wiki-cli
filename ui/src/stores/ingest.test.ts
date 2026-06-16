@@ -35,14 +35,11 @@ describe("useIngestStore.run note (#237 follow-up)", () => {
   afterEach(() => vi.restoreAllMocks())
 
   it("surfaces the empty-CR note from the job result", async () => {
-    vi.spyOn(api, "getJob").mockResolvedValue({
-      id: 1,
-      type: "ingest",
-      status: "done",
-      progress: null,
-      result: JSON.stringify({ cr: "CR-1", files: 0, note: "The agent wrote none." }),
-      error: null,
-    } as never)
+    // run() now drives the job over SSE (#274): the terminal `result` arrives
+    // via onResult, and the note is parsed from that result string.
+    vi.spyOn(api, "streamJob").mockImplementation(async (_id, h) => {
+      h.onResult?.(JSON.stringify({ cr: "CR-1", files: 0, note: "The agent wrote none." }))
+    })
 
     await useIngestStore.getState().run("Ingesting x", async () => ({ job_id: 1 }))
 
@@ -55,19 +52,16 @@ describe("useIngestStore.run note (#237 follow-up)", () => {
   it("surfaces the skipped reason when dedup short-circuits the run", async () => {
     // Mirrors the worker's payload on SourceAlreadyProcessedError — the agent
     // never ran, so the UI must NOT show the misleading "no changes proposed".
-    vi.spyOn(api, "getJob").mockResolvedValue({
-      id: 2,
-      type: "ingest",
-      status: "done",
-      progress: null,
-      result: JSON.stringify({
-        skipped: true,
-        reason:
-          "Source already processed (hash abc123…): raw/articles/x.md. " +
-          "Use force=True to re-ingest.",
-      }),
-      error: null,
-    } as never)
+    vi.spyOn(api, "streamJob").mockImplementation(async (_id, h) => {
+      h.onResult?.(
+        JSON.stringify({
+          skipped: true,
+          reason:
+            "Source already processed (hash abc123…): raw/articles/x.md. " +
+            "Use force=True to re-ingest.",
+        }),
+      )
+    })
 
     await useIngestStore.getState().run("Ingesting x", async () => ({ job_id: 2 }))
 
@@ -76,6 +70,28 @@ describe("useIngestStore.run note (#237 follow-up)", () => {
     expect(s.crId).toBeNull()
     expect(s.note).toContain("Skipped:")
     expect(s.note).toContain("Source already processed")
+  })
+
+  it("builds a live timeline from ingest events and finishes done", async () => {
+    vi.spyOn(api, "streamJob").mockImplementation(async (_id, h) => {
+      h.onIngestEvent?.({
+        id: 1, kind: "step", ts: "t",
+        payload: { name: "running_agent", status: "start", pages_staged: 0 },
+      })
+      h.onIngestEvent?.({
+        id: 2, kind: "page_write", ts: "t",
+        payload: { path: "wiki/concepts/rag.md", op: "create", pages_staged: 1 },
+      })
+      h.onResult?.(JSON.stringify({ cr: "CR-2", files: 1 }))
+    })
+
+    await useIngestStore.getState().run("Ingesting x", async () => ({ job_id: 3 }))
+
+    const s = useIngestStore.getState()
+    expect(s.status).toBe("done")
+    expect(s.crId).toBe("CR-2")
+    expect(s.events).toHaveLength(2)
+    expect(s.pagesStaged).toBe(1)
   })
 })
 
