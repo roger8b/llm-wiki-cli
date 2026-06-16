@@ -445,6 +445,15 @@ def _extract_for_job(
     """
     from ..sources.extractors import extract, source_type
 
+    # Always report the coarse progress label; add the timeline step only when a
+    # tracker is present (it is in ``ingest()``; absent when this helper is
+    # called directly, e.g. in extraction unit tests).
+    def report(step: str) -> None:
+        if tracker is not None:
+            tracker.step(step)
+        else:
+            job_repo.set_progress(job_id, step)
+
     if source_type(source_file) == "audio":
         from ..sources.extractors import audio
 
@@ -452,10 +461,9 @@ def _extract_for_job(
             source_file,
             model=cfg.whisper_model,
             language=cfg.whisper_language,
-            progress=lambda step: tracker.step(step) if tracker is not None else None,
+            progress=report,
         )
-    if tracker is not None:
-        tracker.step("extracting")
+    report("extracting")
     return extract(source_file)
 
 
