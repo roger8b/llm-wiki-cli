@@ -380,6 +380,44 @@ class JobRepo:
         ).fetchall()
 
 
+class JobEventRepo:
+    """Append-only event log for a job's live progress (#272).
+
+    One row per discrete event (``step``, ``tool_start``, ``tool_end``,
+    ``page_write``, ``page_read``, ``telemetry``, ``warning``). ``payload`` is a
+    JSON object with metadata only (path, tool name, counters) — never a page
+    body. Readers (the SSE endpoint) replay rows after the last id they saw.
+    """
+
+    KINDS = frozenset(
+        {"step", "tool_start", "tool_end", "page_write", "page_read", "telemetry", "warning"}
+    )
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def append(self, job_id: int, kind: str, payload: dict[str, object] | None = None) -> int:
+        """Append one event; returns its row id. Best-effort (retries on lock)."""
+
+        def _do() -> int:
+            cur = self.conn.execute(
+                "INSERT INTO job_events (job_id, ts, kind, payload) VALUES (?, ?, ?, ?)",
+                (job_id, now_iso(), kind, json.dumps(payload) if payload is not None else None),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid or 0)
+
+        return retry_on_locked(_do)
+
+    def since(self, job_id: int, after_id: int = 0) -> list[sqlite3.Row]:
+        """Events for ``job_id`` with id greater than ``after_id`` (chronological)."""
+        return self.conn.execute(
+            "SELECT id, job_id, ts, kind, payload FROM job_events "
+            "WHERE job_id = ? AND id > ? ORDER BY id ASC",
+            (job_id, after_id),
+        ).fetchall()
+
+
 class ChangeRequestRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn

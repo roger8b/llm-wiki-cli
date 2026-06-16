@@ -60,6 +60,51 @@ class TokenBuffer:
         return self._acc
 
 
+def _arg_preview(raw: Any, *, limit: int = 120) -> str:
+    """Short, body-free preview of a tool's input for the event log (#272).
+
+    Tool inputs to the ingestion agent are small (a query string, a page path),
+    but ``write_file``/``edit_file`` carry the full page content — which must
+    never reach the event log. We keep only the leading slice and, for dict
+    inputs, drop obvious content fields.
+    """
+    if isinstance(raw, dict):
+        trimmed = {
+            k: v
+            for k, v in raw.items()
+            if k not in {"content", "new_string", "old_string", "new_content"}
+        }
+        text = ", ".join(f"{k}={v}" for k, v in trimmed.items())
+    else:
+        text = str(raw)
+    text = " ".join(text.split())
+    return text[:limit]
+
+
+def make_ingestion_event_handler(on_event: Callable[[str, dict[str, Any]], None]) -> Any:
+    """LangChain callback that turns tool calls into ``tool_start``/``tool_end``
+    events for a job's live timeline (#272).
+
+    Imported lazily (like :func:`make_token_handler`) so importing this module
+    never requires langchain. Only metadata is forwarded — tool names and a
+    trimmed, content-free argument preview — never page bodies.
+    """
+    from langchain_core.callbacks import BaseCallbackHandler  # noqa: PLC0415
+
+    class _IngestionEventHandler(BaseCallbackHandler):
+        def on_tool_start(
+            self, serialized: dict[str, Any], input_str: str, **_: Any
+        ) -> None:
+            name = (serialized or {}).get("name", "tool")
+            on_event("tool_start", {"tool": name, "args": _arg_preview(input_str)})
+
+        def on_tool_end(self, output: Any, **kwargs: Any) -> None:
+            name = kwargs.get("name") or "tool"
+            on_event("tool_end", {"tool": name})
+
+    return _IngestionEventHandler()
+
+
 def make_token_handler(on_token: Callable[[str], None]) -> Any:
     """Build a LangChain callback handler that forwards new tokens to ``on_token``.
 
