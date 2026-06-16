@@ -165,6 +165,19 @@ fn read_desktop_bool(brain: &str, key: &str, default: bool) -> bool {
     }
 }
 
+/// Read a string-valued desktop setting (e.g. `notify_granularity`), falling
+/// back to `default` when missing/unreadable (#275).
+fn read_desktop_str(brain: &str, key: &str, default: &str) -> String {
+    let path = PathBuf::from(brain).join(".llmwiki/desktop.json");
+    match std::fs::read_to_string(&path) {
+        Ok(body) => serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get(key).and_then(|s| s.as_str()).map(String::from))
+            .unwrap_or_else(|| default.to_string()),
+        Err(_) => default.to_string(),
+    }
+}
+
 /// Parse a `/api/jobs` body into a `{job_id: status}` map. Pure.
 fn jobs_status_map(body: &str) -> HashMap<i64, String> {
     let mut out = HashMap::new();
@@ -210,18 +223,110 @@ fn detect_notifications(prev: &HashMap<i64, String>, body: &str) -> Vec<JobNote>
     notes
 }
 
+/// Human label for an ingestion progress step (#275), mirroring the web
+/// `IngestionProgress` labels so the tray reads the same as the panel.
+fn ingest_progress_label(progress: &str) -> String {
+    match progress {
+        "extracting" => "reading source".into(),
+        "outlining" => "planning concepts".into(),
+        "running_agent" => "writing pages".into(),
+        "fixing_structural_issues" => "fixing issues".into(),
+        "creating_change_request" => "finishing".into(),
+        other => other.to_string(), // "chunk 2/4" passes through verbatim
+    }
+}
+
+/// The tray "jobs" line. When an ingest job is running, surface its live step
+/// ("Ingesting: chunk 2/4") so background progress is visible without opening
+/// the window (#275). Otherwise fall back to a plain running count.
+fn tray_jobs_label(body: &str) -> String {
+    let n = count_running_jobs(body);
+    if n == 0 {
+        return "No jobs running".into();
+    }
+    let items = match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(serde_json::Value::Array(items)) => items,
+        _ => return format!("Jobs running: {n}"),
+    };
+    // Prefer the ingest job's step, since that's the slow, user-watched one.
+    let ingest_step = items.iter().find_map(|j| {
+        let running = j.get("status").and_then(|v| v.as_str()) == Some("running");
+        let ingest = j.get("type").and_then(|v| v.as_str()) == Some("ingest");
+        if running && ingest {
+            j.get("progress")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(ingest_progress_label)
+        } else {
+            None
+        }
+    });
+    match ingest_step {
+        Some(step) => format!("Ingesting: {step}"),
+        None => format!("Jobs running: {n}"),
+    }
+}
+
+/// Notifications for jobs that have just *started* (queued/none -> running),
+/// fired only when the user opted into "all" transitions (#275). Terminal
+/// notifications are always handled by `detect_notifications`.
+fn detect_start_notifications(prev: &HashMap<i64, String>, body: &str) -> Vec<JobNote> {
+    let mut notes = Vec::new();
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(body)
+    else {
+        return notes;
+    };
+    for j in items {
+        let Some(id) = j.get("id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        if j.get("status").and_then(|v| v.as_str()) != Some("running") {
+            continue;
+        }
+        // Only the queued->running (or first-seen-as-running) edge, once.
+        if prev.get(&id).map(String::as_str) == Some("running") {
+            continue; // already running last poll
+        }
+        if j.get("type").and_then(|v| v.as_str()) != Some("ingest") {
+            continue; // ingestion is the long job worth a start ping
+        }
+        notes.push(JobNote {
+            title: "Ingestion started".into(),
+            body: "Reading the source and updating the wiki".into(),
+            route: "/jobs".into(),
+        });
+    }
+    notes
+}
+
 /// Build the user-facing notification for one terminal transition.
 fn build_note(job_type: &str, status: &str, job: &serde_json::Value) -> JobNote {
     let is_ingest = job_type == "ingest";
     match status {
         "done" => {
             // Ingest results carry a CR id to review; route there.
-            let cr = job
+            let result = job
                 .get("result")
                 .and_then(|r| r.as_str())
-                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+            let cr = result
+                .as_ref()
                 .and_then(|v| v.get("cr").and_then(|c| c.as_str()).map(String::from));
+            // A "phantom" ingest: the agent wrote nothing (empty CR / note set).
+            // Surface it as a distinct notification, not a misleading "ready".
+            let empty = result.as_ref().is_some_and(|v| {
+                v.get("note").is_some()
+                    || v.get("files").and_then(|f| f.as_i64()) == Some(0)
+                    || v.get("skipped").and_then(|s| s.as_bool()) == Some(true)
+            });
             if is_ingest {
+                if empty {
+                    return JobNote {
+                        title: "Ingestion finished — no pages written".into(),
+                        body: "The agent proposed no changes for this source".into(),
+                        route: "/jobs".into(),
+                    };
+                }
                 let body = match cr {
                     Some(cr) => format!("{cr} ready to review"),
                     None => "Change request ready to review".to_string(),
@@ -345,7 +450,7 @@ fn open_main_window(handle: &AppHandle) {
         .title("llm-wiki")
         .inner_size(1280.0, 860.0)
         .min_inner_size(900.0, 600.0)
-        .initialization_script(&format!("window.__WIKI_TOKEN__ = {token:?};"))
+        .initialization_script(format!("window.__WIKI_TOKEN__ = {token:?};"))
         .build()
         .expect("failed to build window");
     show_in_dock(handle);
@@ -362,7 +467,7 @@ fn navigate_pending(handle: &AppHandle, win: &tauri::WebviewWindow) {
         .unwrap()
         .take();
     if let Some(route) = route {
-        let _ = win.eval(&format!("window.location.assign({route:?})"));
+        let _ = win.eval(format!("window.location.assign({route:?})"));
     }
 }
 
@@ -499,19 +604,21 @@ fn spawn_job_poll(handle: AppHandle) {
         };
 
         // Tray job-count item (matters while hidden; cheap to always refresh).
-        let label = match count_running_jobs(&body) {
-            0 => "No jobs running".to_string(),
-            n => format!("Jobs running: {n}"),
-        };
+        // Surfaces the live ingest step ("Ingesting: chunk 2/4") when one runs.
         let item = session.jobs_item.lock().unwrap().clone();
         if let Some(item) = item {
-            let _ = item.set_text(label);
+            let _ = item.set_text(tray_jobs_label(&body));
         }
 
-        // Notifications on terminal transitions (#205).
+        // Notifications on job transitions (#205, #275).
         if read_desktop_bool(&session.brain, "notify_on_jobs", true) {
             let prev = session.prev_jobs.lock().unwrap().clone();
-            let notes = detect_notifications(&prev, &body);
+            let mut notes = detect_notifications(&prev, &body);
+            // "all" granularity also pings on the start of an ingestion (#275);
+            // default "terminal" keeps only the finish/error notifications.
+            if read_desktop_str(&session.brain, "notify_granularity", "terminal") == "all" {
+                notes.extend(detect_start_notifications(&prev, &body));
+            }
             let focused = handle
                 .get_webview_window("main")
                 .and_then(|w| w.is_focused().ok())
@@ -622,7 +729,7 @@ pub fn run() {
 
             // Spawn the FastAPI backend (PyInstaller onedir exe). The token goes
             // via env (not argv) so it doesn't leak in `ps`.
-            let exe = resolve_backend_exe(&app.handle());
+            let exe = resolve_backend_exe(app.handle());
             eprintln!("[llm-wiki] backend exe: {}", exe.display());
             let t0 = Instant::now();
             let child = Command::new(&exe)
@@ -650,7 +757,7 @@ pub fn run() {
             // but don't pop a window in the user's face on login (#207).
             let hidden = has_hidden_flag(&std::env::args().collect::<Vec<_>>());
             if hidden {
-                hide_from_dock(&app.handle());
+                hide_from_dock(app.handle());
             }
 
             // Wait for readiness, then open the window pointing at the backend
@@ -722,7 +829,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{count_running_jobs, detect_notifications, jobs_status_map};
+    use super::{
+        count_running_jobs, detect_notifications, detect_start_notifications,
+        ingest_progress_label, jobs_status_map, tray_jobs_label,
+    };
     use std::collections::HashMap;
 
     fn prev(pairs: &[(i64, &str)]) -> HashMap<i64, String> {
@@ -794,5 +904,58 @@ mod tests {
         assert_eq!(count_running_jobs("[]"), 0);
         assert_eq!(count_running_jobs("not json"), 0);
         assert_eq!(count_running_jobs("{}"), 0);
+    }
+
+    // --- #275: native ingestion progress -------------------------------
+
+    #[test]
+    fn tray_label_shows_ingest_step() {
+        let body = r#"[
+            {"id": 1, "type": "ingest", "status": "running", "progress": "chunk 2/4"},
+            {"id": 2, "type": "ask", "status": "running"}
+        ]"#;
+        assert_eq!(tray_jobs_label(body), "Ingesting: chunk 2/4");
+    }
+
+    #[test]
+    fn tray_label_maps_known_steps() {
+        let body = r#"[{"id":1,"type":"ingest","status":"running","progress":"running_agent"}]"#;
+        assert_eq!(tray_jobs_label(body), "Ingesting: writing pages");
+        assert_eq!(ingest_progress_label("extracting"), "reading source");
+    }
+
+    #[test]
+    fn tray_label_falls_back_to_count_and_empty() {
+        // Running jobs but none is an ingest with progress → plain count.
+        let body = r#"[{"id":1,"type":"ask","status":"running"}]"#;
+        assert_eq!(tray_jobs_label(body), "Jobs running: 1");
+        assert_eq!(tray_jobs_label("[]"), "No jobs running");
+        assert_eq!(tray_jobs_label("garbage"), "No jobs running");
+    }
+
+    #[test]
+    fn start_notification_fires_once_on_queued_to_running() {
+        let body = r#"[{"id": 7, "type": "ingest", "status": "running"}]"#;
+        // First time we see it running (was queued) → one "started" note.
+        let notes = detect_start_notifications(&prev(&[(7, "queued")]), body);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Ingestion started");
+        // Still running next poll → no repeat.
+        assert!(detect_start_notifications(&prev(&[(7, "running")]), body).is_empty());
+        // Non-ingest jobs don't get a start ping.
+        let ask = r#"[{"id": 8, "type": "ask", "status": "running"}]"#;
+        assert!(detect_start_notifications(&prev(&[(8, "queued")]), ask).is_empty());
+    }
+
+    #[test]
+    fn phantom_ingest_done_is_distinct_from_ready() {
+        let empty = serde_json::json!({"status": "done"});
+        // files: 0 → phantom note, routes to /jobs not /review.
+        let body = r#"[{"id": 1, "type": "ingest", "status": "done", "result": "{\"cr\":\"CR-1\",\"files\":0,\"note\":\"none\"}"}]"#;
+        let notes = detect_notifications(&prev(&[(1, "running")]), body);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Ingestion finished — no pages written");
+        assert_eq!(notes[0].route, "/jobs");
+        let _ = empty;
     }
 }
