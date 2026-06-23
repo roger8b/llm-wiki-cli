@@ -58,6 +58,23 @@ def jobs_stats(since: str | None = Query(None)) -> dict[str, Any]:
         conn.close()
 
 
+@router.get("/stats/steps")
+def jobs_step_stats(recent: int = Query(20)) -> dict[str, Any]:
+    """Per-step ingestion timing aggregated over recent runs + regression flag.
+
+    Powers the "Performance da ingestão" aggregate card (#280), built on the
+    per-step ``durations_ms`` persisted by #276.
+    """
+    from ....services import stats_service
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        return stats_service.step_stats(conn, recent=recent)
+    finally:
+        conn.close()
+
+
 @router.get("/{job_id}")
 def get_job(job_id: int) -> dict[str, Any]:
     """Get a specific job by ID."""

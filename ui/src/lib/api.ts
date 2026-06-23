@@ -29,6 +29,7 @@ import type {
   Job,
   IngestEvent,
   ModelStats,
+  StepStats,
 } from "@/types"
 
 // All endpoints live under /api (both dev and prod) so SPA client routes
@@ -256,6 +257,11 @@ export const api = {
   jobsStats: (since?: string) =>
     request<{ stats: ModelStats[] }>(
       `/jobs/stats${since ? `?since=${encodeURIComponent(since)}` : ""}`,
+    ),
+  /** Per-step ingestion timing aggregated over recent runs + regression (#280). */
+  jobsStepStats: (recent?: number) =>
+    request<StepStats>(
+      `/jobs/stats/steps${recent != null ? `?recent=${recent}` : ""}`,
     ),
   /**
    * Subscribe to a job's progress + final result over SSE (fetch + stream, so
