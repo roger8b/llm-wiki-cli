@@ -14,14 +14,21 @@ from ..db.connection import get_connection
 from ..db.repo import LinkRepo, PageRepo
 from ..search.service import SearchHit, hybrid_search
 
+# Memoized wiki_stats keyed by the DB file's (mtime_ns, size). An ingestion run
+# fires this on every pass, but the committed DB doesn't change mid-run (staged
+# pages live in the CR overlay, not the DB), so PageRepo.list() ran once per
+# pass for an identical answer (#278). The signature key auto-invalidates the
+# moment the DB actually changes (e.g. a CR is applied + reindexed), so other
+# callers (ask/API) never see a stale count.
+_stats_cache: dict[str, tuple[tuple[int, int], str]] = {}
 
-def wiki_stats(paths: BrainPaths) -> str:
-    """One-line summary of the wiki's current state, for the agent's message.
 
-    Counts indexed pages per type via a short-lived connection (same pattern as
-    the domain tools). An empty wiki returns an explicit hint so the agent knows
-    every page it writes will be new.
-    """
+def reset_wiki_stats_cache() -> None:
+    """Drop the memoized wiki_stats entries (used by tests for isolation)."""
+    _stats_cache.clear()
+
+
+def _compute_wiki_stats(paths: BrainPaths) -> str:
     conn = get_connection(paths.db_path)
     try:
         pages = PageRepo(conn).list()
@@ -36,6 +43,29 @@ def wiki_stats(paths: BrainPaths) -> str:
         f"{t.value}: {counts[t.value]}" for t in PageType if counts.get(t.value)
     ]
     return f"{len(pages)} páginas — " + ", ".join(ordered)
+
+
+def wiki_stats(paths: BrainPaths) -> str:
+    """One-line summary of the wiki's current state, for the agent's message.
+
+    Counts indexed pages per type, memoized by the DB file signature so repeated
+    passes in a single run don't re-scan the whole page table (#278). An empty
+    wiki returns an explicit hint so the agent knows every page it writes is new.
+    """
+    key = str(paths.db_path)
+    try:
+        st = paths.db_path.stat()
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        sig = None  # no DB file yet — compute (and don't cache) the empty hint
+    if sig is not None:
+        cached = _stats_cache.get(key)
+        if cached is not None and cached[0] == sig:
+            return cached[1]
+    result = _compute_wiki_stats(paths)
+    if sig is not None:
+        _stats_cache[key] = (sig, result)
+    return result
 
 
 # Max results and snippet shown by the search tool (#171).

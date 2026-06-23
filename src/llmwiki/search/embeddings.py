@@ -57,12 +57,27 @@ def _build_openai(name: str, cfg: WorkspaceConfig) -> Any | None:
     return OpenAIEmbeddings(**kwargs)
 
 
-def build_embedder(cfg: WorkspaceConfig) -> _LangchainEmbedder | None:
-    """Build an embedder from ``cfg.embedding_model`` or return ``None``.
+def _embedder_key(cfg: WorkspaceConfig) -> tuple[str | None, str | None, str | None]:
+    """Cache key capturing everything ``_build_embedder`` reads from ``cfg``."""
+    ollama = cfg.providers.get("ollama")
+    openai = cfg.providers.get("openai")
+    return (
+        cfg.embedding_model,
+        ollama.base_url if ollama else None,
+        openai.base_url if openai else None,
+    )
 
-    ``None`` means semantic search is off (no model configured) or the required
-    provider package is unavailable — callers then use pure FTS.
-    """
+
+# Process-wide cache so the embedder (model/client construction is the costly
+# part) is built once and reused across every search_pages/related_pages tool
+# call within an ingestion run instead of being rebuilt per call (#278). Keyed
+# by the config fields the build reads, so a config change yields a fresh
+# embedder. The per-connection vector store stays per-call (it wraps the
+# short-lived SQLite connection each tool opens for thread safety).
+_embedder_cache: dict[tuple[str | None, str | None, str | None], _LangchainEmbedder | None] = {}
+
+
+def _build_embedder(cfg: WorkspaceConfig) -> _LangchainEmbedder | None:
     spec = cfg.embedding_model
     if not spec:
         return None
@@ -77,3 +92,23 @@ def build_embedder(cfg: WorkspaceConfig) -> _LangchainEmbedder | None:
         logger.warning("unsupported embedding provider %r (use ollama: or openai:).", provider)
         return None
     return _LangchainEmbedder(impl) if impl is not None else None
+
+
+def build_embedder(cfg: WorkspaceConfig) -> _LangchainEmbedder | None:
+    """Build (or reuse) an embedder from ``cfg.embedding_model`` or return ``None``.
+
+    ``None`` means semantic search is off (no model configured) or the required
+    provider package is unavailable — callers then use pure FTS. The result is
+    memoized per config (#278) so repeated tool calls don't rebuild the client.
+    """
+    key = _embedder_key(cfg)
+    if key in _embedder_cache:
+        return _embedder_cache[key]
+    embedder = _build_embedder(cfg)
+    _embedder_cache[key] = embedder
+    return embedder
+
+
+def reset_embedder_cache() -> None:
+    """Drop the memoized embedders (used by tests for isolation)."""
+    _embedder_cache.clear()
