@@ -36,6 +36,7 @@ _CONFIG_KEYS = (
     "chunk_threshold_chars",
     "chunk_size_chars",
     "chunk_overlap_chars",
+    "ingest_chunk_concurrency",
     "embedding_model",
     "ask_history_turns",
     "ask_history_max_chars",
@@ -66,6 +67,9 @@ _DEFAULTS: dict[str, object] = {
     "chunk_threshold_chars": 24000,
     "chunk_size_chars": 16000,
     "chunk_overlap_chars": 1000,
+    # Parallel chunk passes for long-source ingestion (#277). 1 = serial (the
+    # legacy shared-backend behaviour); >1 runs chunk passes concurrently.
+    "ingest_chunk_concurrency": 3,
     # Local semantic search (#169). None = disabled (pure FTS). Format
     # "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     "embedding_model": None,
@@ -121,6 +125,11 @@ class WorkspaceConfig(BaseModel):
     chunk_threshold_chars: int = 24000
     chunk_size_chars: int = 16000
     chunk_overlap_chars: int = 1000
+    # Parallel chunk passes for long sources (#277). 1 = serial (legacy shared
+    # backend; chunk N sees pages staged by N-1). >1 runs passes concurrently on
+    # isolated backends, merged deterministically (lowest chunk index wins a path
+    # collision) — for long multi-chunk sources this is the main latency win.
+    ingest_chunk_concurrency: int = 3
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None
