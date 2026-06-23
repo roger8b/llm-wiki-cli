@@ -421,30 +421,116 @@ def _run_passes(
     outline = outline_runner(cfg, source_meta=source_meta, chunk_summaries=summaries)
 
     metas: list[ExecutionMeta] = []
-    results: list[IngestionResult] = []
-    for i, chunk in enumerate(chunks):
+    concurrency = max(1, cfg.ingest_chunk_concurrency)
+    if concurrency == 1 or n == 1:
+        # Serial path (#162): the shared backend's staging overlay lets chunk N
+        # see pages staged by chunk N-1 — free intra-source dedup.
+        results: list[IngestionResult] = []
+        for i, chunk in enumerate(chunks):
+            if cancel_check is not None and cancel_check():
+                raise JobCancelledError("cancelled between chunk passes")
+            if tracker is not None:
+                tracker.step(f"chunk {i + 1}/{n}")
+            result = runner(
+                cfg,
+                backend,
+                source_path=source_path,
+                source_text=chunk,
+                source_meta=source_meta,
+                outline=outline,
+                part=(i + 1, n),
+            )
+            results.append(result)
+            if backend.execution_meta is not None:
+                metas.append(backend.execution_meta)
+                # Per-pass telemetry the instant the chunk finishes (#273) — not
+                # only in the merged total below.
+                if tracker is not None:
+                    tracker.telemetry(backend.execution_meta, phase="chunk", part=i + 1, of=n)
+
+        backend.execution_meta = ExecutionMeta.merge(metas)
+        return _merge_results(results)
+
+    # Parallel path (#277): each chunk runs on its OWN isolated backend so the
+    # passes don't contend on a single staging dict. Stagings are merged into the
+    # shared backend deterministically — the HIGHEST chunk index wins a path
+    # collision, mirroring the serial shared-backend semantics where a later
+    # chunk's write overwrites an earlier one — so the resulting CR is identical
+    # to the serial run and independent of thread scheduling. Cancellation is
+    # cooperative: workers probe ``cancel_check`` and the first failure tears the
+    # pool down.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    if cancel_check is not None and cancel_check():
+        raise JobCancelledError("cancelled between chunk passes")
+    logger.info(
+        "ingest(%s): running %d chunk passes with concurrency %d",
+        source_path,
+        n,
+        concurrency,
+    )
+
+    def _run_chunk(
+        i: int, chunk: str
+    ) -> tuple[int, IngestionResult, dict[str, str], ExecutionMeta | None]:
         if cancel_check is not None and cancel_check():
-            raise JobCancelledError("cancelled between chunk passes")
-        if tracker is not None:
-            tracker.step(f"chunk {i + 1}/{n}")
+            raise JobCancelledError("cancelled before chunk pass")
+        chunk_backend = ChangeRequestBackend(cfg.brain_root)
+        chunk_backend.cancel_check = cancel_check
+        chunk_backend.dedup_check = backend.dedup_check
         result = runner(
             cfg,
-            backend,
+            chunk_backend,
             source_path=source_path,
             source_text=chunk,
             source_meta=source_meta,
             outline=outline,
             part=(i + 1, n),
         )
-        results.append(result)
-        if backend.execution_meta is not None:
-            metas.append(backend.execution_meta)
-            # Per-pass telemetry the instant the chunk finishes (#273) — not only
-            # in the merged total below.
-            if tracker is not None:
-                tracker.telemetry(backend.execution_meta, phase="chunk", part=i + 1, of=n)
+        return i, result, dict(chunk_backend.staging), chunk_backend.execution_meta
 
+    indexed: list[tuple[int, IngestionResult]] = []
+    staged_from: dict[str, int] = {}  # path -> winning chunk index
+    collisions = 0
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(_run_chunk, i, c) for i, c in enumerate(chunks)]
+        try:
+            for fut in as_completed(futures):
+                i, result, staging, meta = fut.result()  # re-raises cancellation
+                indexed.append((i, result))
+                # Merge into the shared backend. New paths are added; on a
+                # collision the higher chunk index wins (matches serial overwrite
+                # order). The staged count only ever grows, so the live
+                # ``pages_staged`` telemetry stays monotonic regardless of which
+                # pass finished first.
+                for path, content in staging.items():
+                    prev = staged_from.get(path)
+                    if prev is None:
+                        backend.staging[path] = content
+                        staged_from[path] = i
+                    else:
+                        collisions += 1
+                        if i > prev:
+                            backend.staging[path] = content
+                            staged_from[path] = i
+                if meta is not None:
+                    metas.append(meta)
+                if tracker is not None:
+                    tracker.pages_staged = len(backend.staging)
+                    tracker.step(f"chunk {i + 1}/{n}")
+                    tracker.telemetry(meta, phase="chunk", part=i + 1, of=n)
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+
+    if collisions:
+        logger.info(
+            "ingest(%s): %d path collision(s) merged across parallel chunks",
+            source_path,
+            collisions,
+        )
     backend.execution_meta = ExecutionMeta.merge(metas)
+    results = [r for _, r in sorted(indexed, key=lambda t: t[0])]
     return _merge_results(results)
 
 
