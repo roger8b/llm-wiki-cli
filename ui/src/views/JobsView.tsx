@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 import { ListTodo, Loader2, AlertCircle, RefreshCw, Ban } from "lucide-react"
 import { useJobStore } from "@/stores/jobs"
 import type { Job } from "@/types"
+import { IngestionPerf } from "@/components/shared/IngestionPerf"
+import { IngestionPerfAggregate } from "@/components/shared/IngestionPerfAggregate"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -202,6 +204,8 @@ export function JobsView() {
           <span className="ml-auto">Click a row for details</span>
         </div>
 
+        <IngestionPerfAggregate />
+
         {error && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-[13px] text-destructive">
             <AlertCircle className="size-4 shrink-0" />
@@ -355,6 +359,8 @@ function JobDetailsDialog({
                 </div>
               </div>
             )}
+
+            <IngestionPerf result={job.result} />
 
             <DialogFooter>
               {active && (

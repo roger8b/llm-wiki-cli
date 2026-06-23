@@ -168,3 +168,92 @@ def agent_stats(
     stats = [_build(model, group) for model, group in by_model.items()]
     stats.sort(key=lambda s: s.runs, reverse=True)
     return stats
+
+
+# Fraction over the prior baseline at which the latest ingestion is flagged as a
+# regression in the dashboard (#280).
+_REGRESSION_THRESHOLD = 0.25
+
+
+def _ingest_durations(conn: sqlite3.Connection, *, limit: int) -> list[dict[str, int]]:
+    """Per-step ``durations_ms`` maps of the most recent finished ingest jobs.
+
+    Newest first. Only ``done`` ingest jobs that actually persisted a timing map
+    (#276) are returned — partial/failed runs are skipped.
+    """
+    rows = conn.execute(
+        "SELECT result FROM jobs "
+        "WHERE type = 'ingest' AND status = 'done' AND result IS NOT NULL "
+        "ORDER BY created_at DESC LIMIT ?",
+        [limit],
+    ).fetchall()
+    out: list[dict[str, int]] = []
+    for row in rows:
+        try:
+            result = json.loads(row["result"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        durations = result.get("durations_ms") if isinstance(result, dict) else None
+        if isinstance(durations, dict) and durations:
+            clean = {str(k): int(v) for k, v in durations.items() if isinstance(v, (int, float))}
+            if clean:
+                out.append(clean)
+    return out
+
+
+def step_stats(conn: sqlite3.Connection, *, recent: int = 20) -> dict[str, object]:
+    """Aggregate per-step ingestion timing across recent runs, for the dashboard.
+
+    Returns the average and latest duration per pipeline step over the last
+    ``recent`` finished ingest jobs, plus a regression flag comparing the latest
+    run's total against the average total of the runs before it (#280). Chunk
+    passes (``chunk i/n``) are folded into a single ``chunk`` bucket so the shape
+    is stable across sources with different chunk counts.
+    """
+
+    def _bucket(name: str) -> str:
+        return "chunk" if name.startswith("chunk ") else name
+
+    runs = _ingest_durations(conn, limit=recent)
+    # Per-step sample lists, summing chunk passes within each run first.
+    per_step: dict[str, list[int]] = {}
+    totals: list[int] = []
+    for run in runs:
+        folded: dict[str, int] = {}
+        for name, ms in run.items():
+            folded[_bucket(name)] = folded.get(_bucket(name), 0) + ms
+        for name, ms in folded.items():
+            per_step.setdefault(name, []).append(ms)
+        totals.append(sum(folded.values()))
+
+    latest = runs[0] if runs else {}
+    latest_folded: dict[str, int] = {}
+    for name, ms in latest.items():
+        latest_folded[_bucket(name)] = latest_folded.get(_bucket(name), 0) + ms
+
+    steps = [
+        {
+            "name": name,
+            "avg_ms": _avg(samples),
+            "last_ms": latest_folded.get(name, 0),
+            "count": len(samples),
+        }
+        for name, samples in per_step.items()
+    ]
+    steps.sort(key=lambda s: float(s["avg_ms"]), reverse=True)
+
+    latest_total = sum(latest_folded.values())
+    prior = totals[1:]  # everything before the latest run
+    baseline_avg = _avg(prior)
+    is_regression = bool(
+        prior and baseline_avg > 0 and latest_total > baseline_avg * (1 + _REGRESSION_THRESHOLD)
+    )
+    return {
+        "runs": len(runs),
+        "steps": steps,
+        "regression": {
+            "is_regression": is_regression,
+            "latest_total_ms": latest_total,
+            "baseline_avg_ms": baseline_avg,
+        },
+    }

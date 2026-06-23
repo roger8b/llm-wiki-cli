@@ -298,6 +298,24 @@ export interface Job {
   completed_at?: string | null
 }
 
+/** Aggregated per-step ingestion timing for the dashboard (#280). */
+export interface StepStat {
+  name: string
+  avg_ms: number
+  last_ms: number
+  count: number
+}
+
+export interface StepStats {
+  runs: number
+  steps: StepStat[]
+  regression: {
+    is_regression: boolean
+    latest_total_ms: number
+    baseline_avg_ms: number
+  }
+}
+
 /** One live-progress event from a job's ingestion timeline (#272/#274). */
 export type IngestEventKind =
   | "step"
