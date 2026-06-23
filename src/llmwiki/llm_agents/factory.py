@@ -71,8 +71,26 @@ def _cached_prompt(name: str, cfg: WorkspaceConfig) -> Any:
     )
 
 
-def _build_model(cfg: WorkspaceConfig) -> Any:
+def resolve_model(cfg: WorkspaceConfig, operation: str | None = None) -> str:
+    """Effective model string for an operation (#279).
+
+    ``operation`` is one of ``"ingest"``, ``"ask"``, ``"maintain"``. When
+    ``cfg.models`` has an override for it, that wins; otherwise the global
+    ``cfg.model`` is used. ``None`` always resolves to ``cfg.model``.
+    """
+    if operation:
+        override = cfg.models.get(operation)
+        if override:
+            return override
+    return cfg.model
+
+
+def _build_model(cfg: WorkspaceConfig, operation: str | None = None) -> Any:
     """Build the correct model object for the DeepAgent from the config.
+
+    The effective model is resolved per ``operation`` (#279): an ingestion pass
+    can run a stronger model than ``ask`` via ``cfg.models``. Falls back to the
+    global ``cfg.model`` when no override applies.
 
     Ollama models (local or cloud) are returned as a ChatOllama instance that
     forces ``stream=False`` at the HTTP level.  The langchain_ollama default is
@@ -85,7 +103,7 @@ def _build_model(cfg: WorkspaceConfig) -> Any:
     the workspace config and apply to Ollama models. Other providers are
     returned as the model string (DeepAgents resolves them).
     """
-    model_str = cfg.model
+    model_str = resolve_model(cfg, operation)
     provider, _, name = model_str.partition(":")
 
     if provider != "ollama":
@@ -465,7 +483,7 @@ def run_ingestion(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=_build_model(cfg),
+        model=_build_model(cfg, "ingest"),
         tools=domain_tools(cfg.paths, cfg),
         system_prompt=_cached_prompt("ingestion.md", cfg),
         backend=backend,
@@ -522,7 +540,7 @@ def run_outline(
 
     backend = ChangeRequestBackend(cfg.brain_root, read_only=True)
     agent = create_deep_agent(
-        model=_build_model(cfg),
+        model=_build_model(cfg, "ingest"),
         tools=domain_tools(cfg.paths, cfg),
         system_prompt=_cached_prompt("outline.md", cfg),
         backend=backend,
@@ -546,7 +564,7 @@ def run_query(
     from deepagents import create_deep_agent
 
     kwargs: dict[str, Any] = {
-        "model": _build_model(cfg),
+        "model": _build_model(cfg, "ask"),
         "tools": domain_tools(cfg.paths, cfg),
         "system_prompt": _cached_prompt("query.md", cfg),
         "middleware": _agent_middleware(backend),
@@ -568,7 +586,7 @@ def run_lint(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=_build_model(cfg),
+        model=_build_model(cfg, "maintain"),
         tools=domain_tools(cfg.paths, cfg),
         system_prompt=_cached_prompt("lint.md", cfg),
         middleware=_agent_middleware(None),
@@ -597,7 +615,7 @@ def run_maintenance(
     from deepagents import create_deep_agent
 
     agent = create_deep_agent(
-        model=_build_model(cfg),
+        model=_build_model(cfg, "maintain"),
         tools=domain_tools(cfg.paths, cfg),
         system_prompt=_cached_prompt("maintenance.md", cfg),
         backend=backend,

@@ -12,7 +12,12 @@ from llmwiki.llm_agents.models import IngestionResult
 from llmwiki.services import ingest_service
 
 GOOD = "---\ntitle: RAG\ntype: concept\nconfidence: high\n---\n# RAG\nBody.\n"
-BAD = "# RAG without frontmatter\nBody.\n"  # missing_frontmatter
+# A broken wikilink is a finding code can't settle deterministically (#279), so
+# it still drives the LLM fix loop. (missing_frontmatter is now auto-fixed in
+# code — see test_ingest_conditional_fix.py.)
+BAD = (
+    "---\ntitle: RAG\ntype: concept\nconfidence: high\n---\n# RAG\nSee [[Ghost Page]].\n"
+)
 
 
 def _src(brain: BrainPaths, text: str = "about rag") -> Path:
@@ -70,7 +75,7 @@ class TestSelfCorrect:
         finally:
             conn.close()
         assert calls["n"] == 2  # one fix pass
-        assert received[1] and any("missing_frontmatter" in f for f in received[1])
+        assert received[1] and any("broken_link" in f for f in received[1])
         assert cr.warnings == []
         assert cr.changes[0].new_content == GOOD
 
@@ -84,7 +89,7 @@ class TestSelfCorrect:
             cr = ingest_service.ingest(_src(brain), brain, conn, _cfg(brain), runner=runner)
         finally:
             conn.close()
-        assert cr.warnings and any("missing_frontmatter" in w for w in cr.warnings)
+        assert cr.warnings and any("broken_link" in w for w in cr.warnings)
         assert _meta(cr)["warnings"] == cr.warnings
 
     def test_retries_zero_disables_loop(self, brain: BrainPaths) -> None:
@@ -103,7 +108,7 @@ class TestSelfCorrect:
         finally:
             conn.close()
         assert calls["n"] == 1  # no fix pass attempted
-        assert cr.warnings and any("missing_frontmatter" in w for w in cr.warnings)
+        assert cr.warnings and any("broken_link" in w for w in cr.warnings)
 
     def test_sibling_link_in_staging_not_flagged(self, brain: BrainPaths) -> None:
         def runner(cfg, backend, *, source_path, source_text, source_meta=None, **kw):

@@ -325,6 +325,23 @@ def _self_correct(
     passes (empty when clean). A clean first pass costs zero extra invocations.
     """
     findings = _lint_staging(paths, backend.staging)
+    if not findings:
+        return findings
+    # Deterministic code fixes first: clear trivial findings (missing
+    # frontmatter, directory-implied page type) with ZERO LLM invocations (#279).
+    # Only the findings code can't settle reach the agent below.
+    from . import lint_service
+
+    fixed = lint_service.autofix_contents(backend.staging)
+    if fixed:
+        for path, content in fixed.items():
+            backend.write(path, content)
+        logger.info(
+            "ingest(%s): code auto-fixed %d page(s) before any fix invoke (#279)",
+            source_path,
+            len(fixed),
+        )
+        findings = _lint_staging(paths, backend.staging)
     if not findings or cfg.agent_fix_retries <= 0:
         return findings
     # Keep the pre-fix telemetry (e.g. the multi-pass aggregate) and fold each
