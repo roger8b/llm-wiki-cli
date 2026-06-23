@@ -115,6 +115,69 @@ def lint_contents(
     return findings
 
 
+# wiki/<dir>/ -> PageType value, for inferring a page's type from its location.
+# Mirrors page_service.DIR (research/source_summary share the research/ dir, so
+# that directory maps to the plain "research" type).
+_DIR_TO_TYPE = {
+    "concepts": "concept",
+    "entities": "entity",
+    "synthesis": "synthesis",
+    "decisions": "decision",
+    "projects": "project",
+    "research": "research",
+}
+
+
+def _inferred_type(rel: str) -> str | None:
+    """Type implied by ``wiki/<dir>/page.md``, or ``None`` if not derivable."""
+    parts = Path(rel).parts  # ("wiki", "concepts", "x.md")
+    if len(parts) >= 3 and parts[0] == "wiki":
+        return _DIR_TO_TYPE.get(parts[1])
+    return None
+
+
+def autofix_contents(files: dict[str, str]) -> dict[str, str]:
+    """Deterministic, LLM-free repair of trivial structural findings (#279).
+
+    Returns ``{path: fixed_content}`` for the pages that changed — the caller
+    re-stages them. Handles the findings code can settle without guessing:
+
+    - ``missing_frontmatter``: synthesize minimal frontmatter (title from the H1
+      or the filename stem, ``type`` inferred from ``wiki/<dir>/``,
+      ``confidence: medium``);
+    - ``invalid_page_type``: correct ``type`` to the one the directory implies;
+    - on any page we are already rewriting, stamp ``updated_at`` to today.
+
+    Pages whose type cannot be inferred, or whose frontmatter is unparseable,
+    are left untouched for the LLM fix pass — code never guesses.
+    """
+    from ..core.misc import today
+
+    fixed: dict[str, str] = {}
+    for rel in sorted(files):
+        text = files[rel]
+        inferred = _inferred_type(rel)
+        try:
+            meta, body = frontmatter.parse(text)
+        except InvalidFrontmatterError:
+            continue  # malformed YAML — not safe to repair in code
+        changed = False
+        if not meta:
+            if inferred is None:
+                continue  # don't fabricate a type we can't derive
+            title = markdown.extract_title(body) or Path(rel).stem.replace("-", " ").title()
+            meta = {"title": title, "type": inferred, "confidence": "medium"}
+            changed = True
+        elif meta.get("type") not in _VALID_TYPES and inferred is not None:
+            meta["type"] = inferred
+            changed = True
+        if changed:
+            if meta.get("updated_at") != today():
+                meta["updated_at"] = today()
+            fixed[rel] = frontmatter.dump(meta, body)
+    return fixed
+
+
 def lint_structural(
     paths: BrainPaths, conn: sqlite3.Connection | None = None
 ) -> list[LintFinding]:

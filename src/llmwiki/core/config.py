@@ -30,6 +30,7 @@ _CONFIG_KEYS = (
     "agent_fix_retries",
     "onboarded",
     "providers",
+    "models",
     "whisper_model",
     "whisper_language",
     "chunk_threshold_chars",
@@ -56,6 +57,8 @@ _DEFAULTS: dict[str, object] = {
     "agent_fix_retries": 1,
     "onboarded": False,
     "providers": {},
+    # Optional per-operation model override (#279). Empty = single global model.
+    "models": {},
     "whisper_model": "small",
     "whisper_language": None,
     # Long-source multi-pass ingestion (#162). Sources longer than the
@@ -104,6 +107,10 @@ class WorkspaceConfig(BaseModel):
     onboarded: bool = False
     # Per-provider settings keyed by provider name (openai|anthropic|google).
     providers: dict[str, ProviderConfig] = {}
+    # Per-operation model override (#279). Keys: "ingest", "ask", "maintain".
+    # An absent operation falls back to ``model`` — so a strong model can drive
+    # ingestion without making ``ask`` expensive. Format "<provider>:<model>".
+    models: dict[str, str] = {}
     # Offline audio transcription (faster-whisper, optional [audio] extra).
     whisper_model: str = "small"  # tiny|base|small|medium|large-v3
     whisper_language: str | None = None  # None = autodetect
