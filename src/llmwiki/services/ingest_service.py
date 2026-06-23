@@ -572,6 +572,10 @@ def ingest(
         _audit_result(result, changes, rel)
         meta = backend.execution_meta
         execution = meta.to_dict() if meta is not None else None
+        # Close the last step so its duration lands before we persist the map,
+        # giving both the CR meta.json and the job result a complete per-step
+        # timing baseline (#276).
+        tracker.finish()
         cr = create_from_changes(
             changes,
             result.summary,
@@ -581,9 +585,8 @@ def ingest(
             source_path=rel if rel.startswith("raw/") else None,
             execution=execution,
             warnings=warnings,
+            durations_ms=tracker.durations,
         )
-        # Close the last step so its duration lands before we read the map (#273).
-        tracker.finish()
         result_payload: dict[str, object] = {
             "cr": cr.id,
             "files": cr.files_changed,

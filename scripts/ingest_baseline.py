@@ -52,7 +52,9 @@ def _long_source() -> str:
 SAMPLES = {"short_single_pass": SHORT, "long_multi_chunk": _long_source()}
 
 
-def run_one(name: str, text: str) -> dict:
+def run_one(name: str, text: str, *, runner=None, outline_runner=None) -> dict:
+    # ``runner``/``outline_runner`` are injectable so the harness is smoke-testable
+    # end-to-end without an LLM; left unset they fall through to the real pipeline.
     with tempfile.TemporaryDirectory() as tmp:
         paths = scaffold_service.init_brain(Path(tmp) / "brain", git=False)
         cfg = load_config(paths)  # inherits global MiniMax-M3 config
@@ -60,8 +62,13 @@ def run_one(name: str, text: str) -> dict:
         src.parent.mkdir(parents=True, exist_ok=True)
         src.write_text(text, encoding="utf-8")
         conn = get_connection(paths.db_path)
+        extra: dict = {}
+        if runner is not None:
+            extra["runner"] = runner
+        if outline_runner is not None:
+            extra["outline_runner"] = outline_runner
         try:
-            cr = ingest_service.ingest(src, paths, conn, cfg)
+            cr = ingest_service.ingest(src, paths, conn, cfg, **extra)
             job = dict(JobRepo(conn).list()[0])
             events = JobEventRepo(conn).since(job["id"], 0)
             result = json.loads(job["result"]) if job["result"] else {}
