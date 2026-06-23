@@ -52,13 +52,16 @@ def create_from_changes(
     source_path: str | None = None,
     execution: dict[str, object] | None = None,
     warnings: list[str] | None = None,
+    durations_ms: dict[str, int] | None = None,
 ) -> ChangeRequest:
     """Creates a CR from captured changes. Initial status: pending_review.
 
     ``execution`` carries optional agent telemetry (model, tokens, latency,
     tool calls, fallback) persisted into ``meta.json`` for later auditing.
     ``warnings`` carries structural lint findings the agent could not auto-fix
-    before the CR (#166), shown to the reviewer.
+    before the CR (#166), shown to the reviewer. ``durations_ms`` is the
+    per-step timing map (#276) — persisted alongside ``execution`` so every CR
+    carries an auditable record of where ingestion spent its time.
     """
     repo = ChangeRequestRepo(conn)
     cr_id = repo.next_id()
@@ -76,6 +79,7 @@ def create_from_changes(
         "source_path": source_path,
         "created_at": created,
         "execution": execution,
+        "durations_ms": durations_ms or {},
         "warnings": warnings or [],
         "changes": [c.model_dump() for c in changes],
     }
