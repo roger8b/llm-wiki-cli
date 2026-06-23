@@ -41,6 +41,36 @@ def _prompt(name: str) -> str:
     )
 
 
+# Providers whose chat models honour an Anthropic-style ``cache_control`` marker
+# on the (static, identical-every-pass) system prompt. MiniMax-M3 is served over
+# the Anthropic-compatible endpoint, so it rides this path too.
+_PROMPT_CACHE_PROVIDERS = {"anthropic"}
+
+
+def _supports_prompt_cache(cfg: WorkspaceConfig) -> bool:
+    return cfg.model.partition(":")[0] in _PROMPT_CACHE_PROVIDERS
+
+
+def _cached_prompt(name: str, cfg: WorkspaceConfig) -> Any:
+    """Return the system prompt, marked cacheable on compatible providers (#278).
+
+    The system prompt is static and resent on every ingestion pass. On Anthropic
+    (and the Anthropic-compatible MiniMax endpoint) we wrap it in a
+    ``cache_control`` content block so the provider caches it across passes and
+    bills the system prompt at the cheaper cache-read rate. Other providers
+    (e.g. local Ollama) get the plain string — no behavioural change. OpenAI
+    caches automatically and needs no marker.
+    """
+    text = _prompt(name)
+    if not _supports_prompt_cache(cfg):
+        return text
+    from langchain_core.messages import SystemMessage  # noqa: PLC0415
+
+    return SystemMessage(
+        content=[{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+    )
+
+
 def _build_model(cfg: WorkspaceConfig) -> Any:
     """Build the correct model object for the DeepAgent from the config.
 
@@ -437,7 +467,7 @@ def run_ingestion(
     agent = create_deep_agent(
         model=_build_model(cfg),
         tools=domain_tools(cfg.paths, cfg),
-        system_prompt=_prompt("ingestion.md"),
+        system_prompt=_cached_prompt("ingestion.md", cfg),
         backend=backend,
         middleware=_agent_middleware(backend),
         response_format=_response_format(IngestionResult),
@@ -494,7 +524,7 @@ def run_outline(
     agent = create_deep_agent(
         model=_build_model(cfg),
         tools=domain_tools(cfg.paths, cfg),
-        system_prompt=_prompt("outline.md"),
+        system_prompt=_cached_prompt("outline.md", cfg),
         backend=backend,
         middleware=_agent_middleware(backend),
         response_format=_response_format(OutlinePlan),
@@ -518,7 +548,7 @@ def run_query(
     kwargs: dict[str, Any] = {
         "model": _build_model(cfg),
         "tools": domain_tools(cfg.paths, cfg),
-        "system_prompt": _prompt("query.md"),
+        "system_prompt": _cached_prompt("query.md", cfg),
         "middleware": _agent_middleware(backend),
         "response_format": _response_format(QueryResult),
     }
@@ -540,7 +570,7 @@ def run_lint(
     agent = create_deep_agent(
         model=_build_model(cfg),
         tools=domain_tools(cfg.paths, cfg),
-        system_prompt=_prompt("lint.md"),
+        system_prompt=_cached_prompt("lint.md", cfg),
         middleware=_agent_middleware(None),
         response_format=_response_format(LintReport),
     )
@@ -569,7 +599,7 @@ def run_maintenance(
     agent = create_deep_agent(
         model=_build_model(cfg),
         tools=domain_tools(cfg.paths, cfg),
-        system_prompt=_prompt("maintenance.md"),
+        system_prompt=_cached_prompt("maintenance.md", cfg),
         backend=backend,
         middleware=_agent_middleware(backend),
         response_format=_response_format(MaintenanceResult),
