@@ -208,26 +208,79 @@ def _response_format(schema: type[BaseModel]) -> Any:
     return ToolStrategy(schema, handle_errors=True)
 
 
-def _structured[T: BaseModel](state: dict[str, Any], schema: type[T]) -> T:
-    """Extrai a resposta estruturada do estado retornado pelo agente.
+def _coerce_from_messages[T: BaseModel](
+    state: dict[str, Any], schema: type[T]
+) -> T | None:
+    """Recover a result a weak model emitted as JSON *text* instead of via the
+    structured-output tool (#291).
 
-    Se o agente não produzir structured_response (modelos fracos às vezes não
-    chamam a tool final), cai para um resultado mínimo derivado da última
-    mensagem, evitando quebrar o fluxo de change request já capturado no backend.
+    Some tool-calling-weak models (incl. MiniMax/GPT-mini under load) answer with
+    the schema's JSON in the final message rather than calling the final
+    structured-output tool. That used to count as a fallback and throw the
+    structured data away. Here we parse the last messages — including a
+    ```json ...``` fence — and validate into ``schema``. Pure parsing of the
+    state we already have: **no model re-invoke**. Returns ``None`` when nothing
+    parses cleanly, so the caller uses the minimal fallback.
+    """
+    import json  # noqa: PLC0415
+    import re  # noqa: PLC0415
+
+    for msg in reversed(state.get("messages", [])):
+        content = getattr(msg, "content", None)
+        if not isinstance(content, str) or not content.strip():
+            continue
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if not match:
+            continue
+        try:
+            data = json.loads(match.group(0))
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        try:
+            return schema.model_validate(data)
+        except Exception:  # noqa: BLE001 — not this message; keep scanning
+            continue
+    return None
+
+
+def _resolve_structured[T: BaseModel](
+    state: dict[str, Any], schema: type[T]
+) -> tuple[T, bool]:
+    """Return ``(result, used_minimal_fallback)``.
+
+    Order: structured_response → JSON-in-text coercion (#291) → minimal fallback
+    from the last message. ``used_minimal_fallback`` is True ONLY when we had to
+    synthesize a degraded result — coerced JSON does NOT count, so the fallback
+    metric reflects real data loss, not a model that merely chose text output.
     """
     resp = state.get("structured_response")
     if isinstance(resp, schema):
-        return resp
+        return resp, False
     if isinstance(resp, dict):
-        return schema.model_validate(resp)
-    # Fallback: tenta montar um resultado mínimo com o texto da última mensagem.
+        return schema.model_validate(resp), False
+    coerced = _coerce_from_messages(state, schema)
+    if coerced is not None:
+        return coerced, False
     last = ""
     for msg in reversed(state.get("messages", [])):
         content = getattr(msg, "content", None)
         if isinstance(content, str) and content.strip():
             last = content.strip()
             break
-    return _fallback(schema, last)
+    return _fallback(schema, last), True
+
+
+def _structured[T: BaseModel](state: dict[str, Any], schema: type[T]) -> T:
+    """Extrai a resposta estruturada do estado retornado pelo agente.
+
+    Se o agente não produzir structured_response (modelos fracos às vezes não
+    chamam a tool final), tenta coagir JSON da última mensagem (#291) e só então
+    cai para um resultado mínimo, evitando quebrar o fluxo de change request já
+    capturado no backend.
+    """
+    return _resolve_structured(state, schema)[0]
 
 
 def _fallback[T: BaseModel](schema: type[T], text: str) -> T:
@@ -274,6 +327,7 @@ def _invoke_with_retry(
     cfg: WorkspaceConfig,
     on_token: Callable[[str], None] | None = None,
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    max_retries: int | None = None,
 ) -> dict[str, Any]:
     """Call ``agent.invoke`` with bounded retry+backoff on transient errors.
 
@@ -301,7 +355,7 @@ def _invoke_with_retry(
     if callbacks:
         extra["config"] = {"callbacks": callbacks}
 
-    attempts = max(1, cfg.agent_max_retries)
+    attempts = max(1, max_retries if max_retries is not None else cfg.agent_max_retries)
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
@@ -337,29 +391,35 @@ def _invoke[T: BaseModel](
     backend: ChangeRequestBackend | None = None,
     on_token: Callable[[str], None] | None = None,
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    max_retries: int | None = None,
 ) -> T:
     """Run the agent, time it, log structured-output fallback, capture telemetry.
 
     Telemetry is stashed on ``backend.execution_meta`` (when a backend is
     present) so services can persist it into the change request / job result.
     ``on_token`` enables answer token streaming (#191); ``on_event`` enables
-    live tool-call progress events (#272).
+    live tool-call progress events (#272). ``max_retries`` overrides
+    ``cfg.agent_max_retries`` for this call (ingestion uses ``ingest_max_retries``
+    so it can cap retries without affecting ``ask``, #291).
     """
     start = time.perf_counter()
-    state = _invoke_with_retry(agent, message, cfg, on_token, on_event)
+    state = _invoke_with_retry(
+        agent, message, cfg, on_token, on_event, max_retries=max_retries
+    )
     latency_ms = int((time.perf_counter() - start) * 1000)
 
-    used_fallback = not _had_structured(state, schema)
+    # used_fallback is True only when even JSON-in-text coercion failed (#291) —
+    # so the metric reflects real data loss, not a model that answered as text.
+    result, used_fallback = _resolve_structured(state, schema)
     if used_fallback:
         logger.warning(
-            "agent did not return structured_response for %s; using text fallback "
-            "(model=%s, latency=%dms) — weak tool-calling model?",
+            "agent did not return a coercible structured result for %s; using text "
+            "fallback (model=%s, latency=%dms) — weak tool-calling model?",
             schema.__name__,
             cfg.model,
             latency_ms,
         )
 
-    result = _structured(state, schema)
     meta: ExecutionMeta = extract_meta(
         state, model=cfg.model, latency_ms=latency_ms, used_fallback=used_fallback
     )
@@ -503,7 +563,10 @@ def run_ingestion(
         )
     # Route the agent's tool calls through the same live-event sink the backend
     # uses for page writes (#272), so the job timeline sees both.
-    return _invoke(agent, message, IngestionResult, cfg, backend, on_event=backend.on_event)
+    return _invoke(
+        agent, message, IngestionResult, cfg, backend,
+        on_event=backend.on_event, max_retries=cfg.ingest_max_retries,
+    )
 
 
 def _outline_message(
@@ -550,7 +613,9 @@ def run_outline(
     message = _outline_message(
         cfg, source_meta=source_meta, chunk_summaries=chunk_summaries
     )
-    return _invoke(agent, message, OutlinePlan, cfg, backend)
+    return _invoke(
+        agent, message, OutlinePlan, cfg, backend, max_retries=cfg.ingest_max_retries
+    )
 
 
 def run_query(

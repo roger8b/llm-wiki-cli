@@ -27,6 +27,7 @@ _CONFIG_KEYS = (
     "temperature",
     "request_timeout",
     "agent_max_retries",
+    "ingest_max_retries",
     "agent_fix_retries",
     "onboarded",
     "providers",
@@ -54,6 +55,7 @@ _DEFAULTS: dict[str, object] = {
     "temperature": None,
     "request_timeout": 300,
     "agent_max_retries": 2,
+    "ingest_max_retries": None,
     # Self-correction passes for structural lint findings before the CR (#166).
     "agent_fix_retries": 1,
     "onboarded": False,
@@ -104,6 +106,10 @@ class WorkspaceConfig(BaseModel):
     request_timeout: int = 300  # seconds
     # Total agent.invoke attempts on transient errors (1 = no retry).
     agent_max_retries: int = 2
+    # Ingestion-only override of agent_max_retries (#291). None = inherit it.
+    # Lets ingestion cap retries (a strong model rarely needs them) without
+    # changing ``ask``'s retry budget.
+    ingest_max_retries: int | None = None
     # Max self-correction passes when staging has structural lint findings
     # before the change request is created (#166); 0 disables the loop.
     agent_fix_retries: int = 1
