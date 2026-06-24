@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 
@@ -285,6 +287,33 @@ def _merge_results(results: list[IngestionResult]) -> IngestionResult:
     )
 
 
+def _concept_key(text: str) -> str:
+    """Cheap case/slug-insensitive key for concept→chunk matching (#294)."""
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", normalized.lower()).split())
+
+
+def _concept_matches_chunk(concept: str, chunk: str) -> bool:
+    concept_key = _concept_key(concept)
+    if not concept_key:
+        return False
+    return f" {concept_key} " in f" {_concept_key(chunk)} "
+
+
+def _scoped_outlines(outline: OutlinePlan, chunks: list[str]) -> list[OutlinePlan]:
+    """Return one outline per chunk, keeping unmatched concepts global (#294)."""
+    if not chunks or not outline.concepts:
+        return [outline for _ in chunks]
+    scoped: list[list[str]] = [[] for _ in chunks]
+    for concept in outline.concepts:
+        matches = [i for i, chunk in enumerate(chunks) if _concept_matches_chunk(concept, chunk)]
+        if not matches:
+            matches = list(range(len(chunks)))
+        for i in matches:
+            scoped[i].append(concept)
+    return [outline.model_copy(update={"concepts": concepts}) for concepts in scoped]
+
+
 def _lint_staging(paths: BrainPaths, staging: dict[str, str]) -> list[str]:
     """Structural lint of the backend staging, as ``"kind: message"`` strings (#166).
 
@@ -419,6 +448,11 @@ def _run_passes(
         tracker.step("outlining")
     summaries = [c[:500] for c in chunks]
     outline = outline_runner(cfg, source_meta=source_meta, chunk_summaries=summaries)
+    outlines = (
+        _scoped_outlines(outline, chunks)
+        if cfg.ingest_scope_concepts_per_chunk
+        else [outline for _ in chunks]
+    )
 
     metas: list[ExecutionMeta] = []
     concurrency = max(1, cfg.ingest_chunk_concurrency)
@@ -437,7 +471,7 @@ def _run_passes(
                 source_path=source_path,
                 source_text=chunk,
                 source_meta=source_meta,
-                outline=outline,
+                outline=outlines[i],
                 part=(i + 1, n),
             )
             results.append(result)
@@ -484,7 +518,7 @@ def _run_passes(
             source_path=source_path,
             source_text=chunk,
             source_meta=source_meta,
-            outline=outline,
+            outline=outlines[i],
             part=(i + 1, n),
         )
         return i, result, dict(chunk_backend.staging), chunk_backend.execution_meta

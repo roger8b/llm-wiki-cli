@@ -28,6 +28,7 @@ def _config_payload() -> dict[str, Any]:
         "chunk_threshold_chars": cfg.chunk_threshold_chars,
         "chunk_size_chars": cfg.chunk_size_chars,
         "chunk_overlap_chars": cfg.chunk_overlap_chars,
+        "ingest_scope_concepts_per_chunk": cfg.ingest_scope_concepts_per_chunk,
         "whisper_model": cfg.whisper_model,
         "whisper_language": cfg.whisper_language,
     }

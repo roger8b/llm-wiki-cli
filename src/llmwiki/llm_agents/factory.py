@@ -549,6 +549,8 @@ def _chunk_context(
     outline: OutlinePlan | None,
     part: tuple[int, int] | None,
     candidates: dict[str, list[dict[str, object]]] | None = None,
+    *,
+    scoped_concepts: bool = False,
 ) -> str:
     """Render the multi-pass preamble (outline + part-i-of-n note), or ''.
 
@@ -579,7 +581,12 @@ def _chunk_context(
         if outline.summary:
             lines.append(f"RESUMO DA FONTE: {outline.summary}")
         if outline.concepts:
-            lines.append("CONCEITOS ESPERADOS (plano global): " + "; ".join(outline.concepts))
+            label = (
+                "CONCEITOS DESTE TRECHO"
+                if scoped_concepts
+                else "CONCEITOS ESPERADOS (plano global)"
+            )
+            lines.append(f"{label}: " + "; ".join(outline.concepts))
     block = _candidates_block(candidates)
     if block:
         lines.append(block)
@@ -595,6 +602,7 @@ def _ingestion_message(
     outline: OutlinePlan | None = None,
     part: tuple[int, int] | None = None,
     candidates: dict[str, list[dict[str, object]]] | None = None,
+    scoped_concepts: bool = False,
 ) -> str:
     """Assemble the user message: today's date, wiki state, source + metadata.
 
@@ -610,7 +618,7 @@ def _ingestion_message(
     return (
         f"DATA DE HOJE: {today()}\n"
         f"ESTADO DA WIKI: {wiki_stats(cfg.paths)}\n\n"
-        f"{_chunk_context(outline, part, candidates)}"
+        f"{_chunk_context(outline, part, candidates, scoped_concepts=scoped_concepts)}"
         f"FONTE: {source_path}\n"
         f"{_metadata_line(source_meta)}\n"
         f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
@@ -671,6 +679,7 @@ def run_ingestion(
             outline=outline,
             part=part,
             candidates=candidates,
+            scoped_concepts=cfg.ingest_scope_concepts_per_chunk,
         )
     # Route the agent's tool calls through the same live-event sink the backend
     # uses for page writes (#272), so the job timeline sees both.
