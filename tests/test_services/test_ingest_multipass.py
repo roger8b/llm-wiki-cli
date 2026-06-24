@@ -162,6 +162,88 @@ class TestMultiPass:
         finally:
             conn.close()
 
+    def test_scoped_concepts_change_each_chunk_but_keep_global_fallback(
+        self, brain: BrainPaths
+    ) -> None:
+        src = brain.raw / "articles" / "scoped.md"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text("Alpha only.\n\nBeta only.\n\n", encoding="utf-8")
+        seen: list[list[str]] = []
+
+        def outline_runner(cfg, *, source_meta=None, chunk_summaries=None):
+            return OutlinePlan(concepts=["Alpha", "Beta", "Global"], summary="s")
+
+        def runner(
+            cfg, backend, *, source_path, source_text, source_meta=None, outline=None, part=None
+        ):
+            concepts = list(outline.concepts)
+            seen.append(concepts)
+            for concept in concepts:
+                backend.write(
+                    f"wiki/concepts/{_slug(concept)}.md",
+                    f"---\ntitle: {concept}\ntype: concept\nconfidence: high\n---\n"
+                    f"# {concept}\n\nBody.\n",
+                )
+            return IngestionResult(summary="ok", new_pages=[])
+
+        cfg = WorkspaceConfig(
+            brain_root=brain.root,
+            chunk_threshold_chars=1,
+            chunk_size_chars=20,
+            chunk_overlap_chars=0,
+            ingest_chunk_concurrency=1,
+        )
+        conn = get_connection(brain.db_path)
+        try:
+            cr = ingest_service.ingest(
+                src, brain, conn, cfg, runner=runner, outline_runner=outline_runner
+            )
+        finally:
+            conn.close()
+        assert seen == [["Alpha", "Global"], ["Beta", "Global"]]
+        assert {c.path for c in cr.changes} == {
+            "wiki/concepts/alpha.md",
+            "wiki/concepts/beta.md",
+            "wiki/concepts/global.md",
+        }
+
+    def test_scoped_concepts_flag_false_keeps_global_outline(self, brain: BrainPaths) -> None:
+        src = brain.raw / "articles" / "global.md"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text("Alpha only.\n\nBeta only.\n\n", encoding="utf-8")
+        seen: list[list[str]] = []
+
+        def outline_runner(cfg, *, source_meta=None, chunk_summaries=None):
+            return OutlinePlan(concepts=["Alpha", "Beta"], summary="s")
+
+        def runner(
+            cfg, backend, *, source_path, source_text, source_meta=None, outline=None, part=None
+        ):
+            seen.append(list(outline.concepts))
+            concept = f"Seen {part[0]}"
+            backend.write(
+                f"wiki/concepts/seen-{part[0]}.md",
+                f"---\ntitle: {concept}\ntype: concept\nconfidence: high\n---\n# {concept}\n",
+            )
+            return IngestionResult(summary="ok", new_pages=[])
+
+        cfg = WorkspaceConfig(
+            brain_root=brain.root,
+            chunk_threshold_chars=1,
+            chunk_size_chars=20,
+            chunk_overlap_chars=0,
+            ingest_chunk_concurrency=1,
+            ingest_scope_concepts_per_chunk=False,
+        )
+        conn = get_connection(brain.db_path)
+        try:
+            ingest_service.ingest(
+                src, brain, conn, cfg, runner=runner, outline_runner=outline_runner
+            )
+        finally:
+            conn.close()
+        assert seen == [["Alpha", "Beta"], ["Alpha", "Beta"]]
+
 
 class TestShortSourceRegression:
     def test_short_source_single_invocation(self, brain: BrainPaths) -> None:

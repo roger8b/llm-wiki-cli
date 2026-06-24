@@ -39,6 +39,7 @@ _CONFIG_KEYS = (
     "chunk_overlap_chars",
     "ingest_chunk_concurrency",
     "ingest_prefetch_candidates",
+    "ingest_scope_concepts_per_chunk",
     "embedding_model",
     "ask_history_turns",
     "ask_history_max_chars",
@@ -75,6 +76,8 @@ _DEFAULTS: dict[str, object] = {
     "ingest_chunk_concurrency": 3,
     # Pre-fetch top-K existing pages per outline concept (#292). 0 disables.
     "ingest_prefetch_candidates": 3,
+    # Scope outline concepts to the chunk text that mentions them (#294).
+    "ingest_scope_concepts_per_chunk": True,
     # Local semantic search (#169). None = disabled (pure FTS). Format
     # "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     "embedding_model": None,
@@ -145,6 +148,9 @@ class WorkspaceConfig(BaseModel):
     # instead of spending sequential search_pages/related_pages tool round-trips.
     # 0 disables (legacy behaviour: the agent discovers pages via tool calls).
     ingest_prefetch_candidates: int = 3
+    # Scope outline concepts to the chunk text that mentions them (#294). False
+    # keeps the previous behaviour: every chunk receives the full outline.
+    ingest_scope_concepts_per_chunk: bool = True
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None

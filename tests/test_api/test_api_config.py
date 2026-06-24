@@ -14,6 +14,7 @@ NEW_FIELDS = {
     "chunk_threshold_chars",
     "chunk_size_chars",
     "chunk_overlap_chars",
+    "ingest_scope_concepts_per_chunk",
     "whisper_model",
     "whisper_language",
 }
@@ -32,6 +33,7 @@ def test_get_config_exposes_new_fields(client) -> None:
     assert NEW_FIELDS <= body.keys()
     # defaults from WorkspaceConfig
     assert body["chunk_threshold_chars"] == 24000
+    assert body["ingest_scope_concepts_per_chunk"] is True
     assert body["embedding_model"] is None
     assert body["whisper_model"] == "small"
 
@@ -42,6 +44,7 @@ def test_patch_round_trips_new_fields(client) -> None:
         json={
             "embedding_model": "ollama:nomic-embed-text",
             "chunk_size_chars": 9000,
+            "ingest_scope_concepts_per_chunk": False,
             "agent_fix_retries": 3,
             "whisper_language": "pt",
         },
@@ -50,6 +53,7 @@ def test_patch_round_trips_new_fields(client) -> None:
     body = r.json()
     assert body["embedding_model"] == "ollama:nomic-embed-text"
     assert body["chunk_size_chars"] == 9000
+    assert body["ingest_scope_concepts_per_chunk"] is False
     assert body["agent_fix_retries"] == 3
     assert body["whisper_language"] == "pt"
     # re-read confirms persistence

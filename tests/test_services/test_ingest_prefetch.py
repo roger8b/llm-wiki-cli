@@ -14,7 +14,7 @@ from llmwiki.core.config import WorkspaceConfig
 from llmwiki.db.connection import get_connection
 from llmwiki.llm_agents import factory
 from llmwiki.llm_agents.models import OutlinePlan
-from llmwiki.services import index_service
+from llmwiki.services import index_service, ingest_service
 
 
 def _seed_cfg(tmp_path: Path, titles: list[str]) -> WorkspaceConfig:
@@ -93,3 +93,38 @@ class TestCandidatesInMessage:
             part=(1, 2), candidates=candidates,
         )
         assert "wiki/concepts/vector-store.md" in msg
+
+    def test_chunk_context_can_label_scoped_concepts(self) -> None:
+        msg = factory._chunk_context(
+            OutlinePlan(concepts=["Vector Store"], summary="s"),
+            (1, 2),
+            scoped_concepts=True,
+        )
+        assert "CONCEITOS DESTE TRECHO: Vector Store" in msg
+        assert "plano global" not in msg
+
+
+class TestScopedConcepts:
+    def test_maps_concepts_to_matching_chunks(self) -> None:
+        outlines = ingest_service._scoped_outlines(
+            OutlinePlan(concepts=["Vector Store", "Embedding Model"], summary="s"),
+            ["intro about vector-store", "details about embedding model"],
+        )
+        assert [o.concepts for o in outlines] == [["Vector Store"], ["Embedding Model"]]
+
+    def test_unmatched_concept_falls_back_to_all_chunks(self) -> None:
+        outlines = ingest_service._scoped_outlines(
+            OutlinePlan(concepts=["Vector Store", "No Match"], summary="s"),
+            ["vector store first", "other chunk"],
+        )
+        assert [o.concepts for o in outlines] == [
+            ["Vector Store", "No Match"],
+            ["No Match"],
+        ]
+
+    def test_multi_chunk_concept_stays_in_each_matching_chunk(self) -> None:
+        outlines = ingest_service._scoped_outlines(
+            OutlinePlan(concepts=["Shared Term"], summary="s"),
+            ["shared term here", "shared-term again"],
+        )
+        assert [o.concepts for o in outlines] == [["Shared Term"], ["Shared Term"]]
