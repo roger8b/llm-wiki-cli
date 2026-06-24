@@ -162,3 +162,37 @@ class TestBaselineHarness:
         report = harness.render(runs)
         assert "Ingestion baseline" in report
         assert "smoke" in report
+
+    def test_seed_pages_populates_brain_and_records_size(self) -> None:
+        # #295: seeding the throwaway brain makes wiki_stats/search/dedup see a
+        # real corpus. Index FTS-only (no global embedding model) for speed.
+        harness = self._load_harness()
+        harness.load_config = lambda paths: WorkspaceConfig(brain_root=paths.root)
+        run = harness.run_one(
+            "smoke", _long_text(),
+            runner=_chunk_runner, outline_runner=_outline_runner, seed_pages=12,
+        )
+        assert run["label"] == "populated"
+        assert run["pages_in_brain"] == 12  # the synthetic corpus was indexed
+        assert run["files_changed"] >= 1
+
+    def test_render_shows_empty_vs_populated_delta(self) -> None:
+        harness = self._load_harness()
+        runs = [
+            {
+                "name": "long", "label": "empty", "pages_in_brain": 0, "chars": 1000,
+                "model": "m", "durations_ms": {"outlining": 10000, "chunk 1/1": 20000},
+                "execution": {}, "files_changed": 2, "event_counts": {},
+                "tool_calls_by_name": {}, "explore_calls": 1,
+            },
+            {
+                "name": "long", "label": "populated", "pages_in_brain": 200, "chars": 1000,
+                "model": "m", "durations_ms": {"outlining": 15000, "chunk 1/1": 40000},
+                "execution": {}, "files_changed": 2, "event_counts": {},
+                "tool_calls_by_name": {"search_pages": 9}, "explore_calls": 9,
+            },
+        ]
+        report = harness.render(runs)
+        assert "Empty vs populated" in report
+        assert "200-page brain" in report
+        assert "+20.0s" in report  # chunk delta surfaced
