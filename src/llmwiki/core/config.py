@@ -37,6 +37,7 @@ _CONFIG_KEYS = (
     "chunk_size_chars",
     "chunk_overlap_chars",
     "ingest_chunk_concurrency",
+    "ingest_prefetch_candidates",
     "embedding_model",
     "ask_history_turns",
     "ask_history_max_chars",
@@ -70,6 +71,8 @@ _DEFAULTS: dict[str, object] = {
     # Parallel chunk passes for long-source ingestion (#277). 1 = serial (the
     # legacy shared-backend behaviour); >1 runs chunk passes concurrently.
     "ingest_chunk_concurrency": 3,
+    # Pre-fetch top-K existing pages per outline concept (#292). 0 disables.
+    "ingest_prefetch_candidates": 3,
     # Local semantic search (#169). None = disabled (pure FTS). Format
     # "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     "embedding_model": None,
@@ -130,6 +133,12 @@ class WorkspaceConfig(BaseModel):
     # isolated backends, merged deterministically (lowest chunk index wins a path
     # collision) — for long multi-chunk sources this is the main latency win.
     ingest_chunk_concurrency: int = 3
+    # Pre-fetch existing pages per outline concept before the chunk passes (#292).
+    # The outline already lists the source's concepts; running one hybrid search
+    # per concept IN CODE lets each chunk decide edit-vs-create from the message
+    # instead of spending sequential search_pages/related_pages tool round-trips.
+    # 0 disables (legacy behaviour: the agent discovers pages via tool calls).
+    ingest_prefetch_candidates: int = 3
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None

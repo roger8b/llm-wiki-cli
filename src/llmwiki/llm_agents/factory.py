@@ -391,8 +391,92 @@ def _metadata_line(source_meta: dict[str, str | None] | None) -> str:
     return f"METADADOS: {', '.join(parts)}\n" if parts else ""
 
 
+# Pre-fetched outline candidates, memoized by DB file signature within a run
+# (#292). The committed DB doesn't change mid-run (staged pages live in the CR
+# overlay), so each concept's hybrid search runs once even across chunk passes;
+# the signature key auto-invalidates the moment a CR is applied + reindexed.
+_prefetch_cache: dict[str, tuple[tuple[int, int], list[dict[str, object]]]] = {}
+
+
+def reset_prefetch_cache() -> None:
+    """Drop the memoized prefetch entries (used by tests for isolation)."""
+    _prefetch_cache.clear()
+
+
+def prefetch_candidates(
+    cfg: WorkspaceConfig, concepts: list[str], *, limit: int
+) -> dict[str, list[dict[str, object]]]:
+    """Map each outline concept → its top existing wiki pages (#292).
+
+    Runs one hybrid search per concept IN CODE — no LLM, no agent tool call — so
+    the chunk passes can decide edit-vs-create straight from the message instead
+    of spending sequential ``search_pages``/``related_pages`` round-trips. Reuses
+    a single connection + semantic backend for the whole batch and memoizes by DB
+    signature, so repeated chunks in a run don't re-search. Returns ``{}`` when
+    disabled (``limit <= 0``), there are no concepts, or there's no DB yet (empty
+    wiki — nothing to find).
+    """
+    if limit <= 0 or not concepts:
+        return {}
+    paths = cfg.paths
+    try:
+        st = paths.db_path.stat()
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return {}  # no DB file yet — empty wiki
+
+    import sqlite3  # noqa: PLC0415
+
+    from ..db.connection import get_connection  # noqa: PLC0415
+    from ..search.factory import build_semantic_backend  # noqa: PLC0415
+    from ..search.service import hybrid_search  # noqa: PLC0415
+
+    out: dict[str, list[dict[str, object]]] = {}
+    conn = get_connection(paths.db_path)
+    try:
+        assert isinstance(conn, sqlite3.Connection)
+        embedder, store = build_semantic_backend(cfg, conn)
+        for concept in concepts:
+            key = f"{paths.db_path}|{limit}|{concept}"
+            cached = _prefetch_cache.get(key)
+            if cached is not None and cached[0] == sig:
+                out[concept] = cached[1]
+                continue
+            hits = hybrid_search(conn, concept, limit=limit, embedder=embedder, store=store)
+            cands: list[dict[str, object]] = [
+                {"path": h.path, "title": h.title, "score": round(h.score, 3)}
+                for h in hits
+            ]
+            _prefetch_cache[key] = (sig, cands)
+            out[concept] = cands
+    finally:
+        conn.close()
+    return out
+
+
+def _candidates_block(candidates: dict[str, list[dict[str, object]]] | None) -> str:
+    """Render the pre-fetched related-pages block for the chunk message (#292)."""
+    if not candidates:
+        return ""
+    lines = [
+        "PÁGINAS EXISTENTES RELACIONADAS (pré-buscadas — PREFIRA edit_file numa "
+        "delas a criar duplicata; só crie nova se for um conceito realmente "
+        "distinto):"
+    ]
+    for concept, cands in candidates.items():
+        if not cands:
+            continue
+        rendered = "; ".join(f"{c['path']} — {c['title']}" for c in cands)
+        lines.append(f"- {concept}: {rendered}")
+    if len(lines) == 1:  # every concept had zero hits — no block at all
+        return ""
+    return "\n".join(lines)
+
+
 def _chunk_context(
-    outline: OutlinePlan | None, part: tuple[int, int] | None
+    outline: OutlinePlan | None,
+    part: tuple[int, int] | None,
+    candidates: dict[str, list[dict[str, object]]] | None = None,
 ) -> str:
     """Render the multi-pass preamble (outline + part-i-of-n note), or ''.
 
@@ -424,6 +508,9 @@ def _chunk_context(
             lines.append(f"RESUMO DA FONTE: {outline.summary}")
         if outline.concepts:
             lines.append("CONCEITOS ESPERADOS (plano global): " + "; ".join(outline.concepts))
+    block = _candidates_block(candidates)
+    if block:
+        lines.append(block)
     return "\n".join(lines) + "\n\n"
 
 
@@ -435,6 +522,7 @@ def _ingestion_message(
     source_meta: dict[str, str | None] | None = None,
     outline: OutlinePlan | None = None,
     part: tuple[int, int] | None = None,
+    candidates: dict[str, list[dict[str, object]]] | None = None,
 ) -> str:
     """Assemble the user message: today's date, wiki state, source + metadata.
 
@@ -442,14 +530,15 @@ def _ingestion_message(
     prompt) so the agent always sees the correct ``updated_at`` date, knows how
     big the wiki already is (#164), and gets the source's provenance (#163).
     For long sources the message also carries the global outline and a
-    "part i of n" note so chunk passes stay consistent (#162).
+    "part i of n" note so chunk passes stay consistent (#162), plus the
+    pre-fetched related pages per concept (#292).
     """
     from ..core.misc import today
 
     return (
         f"DATA DE HOJE: {today()}\n"
         f"ESTADO DA WIKI: {wiki_stats(cfg.paths)}\n\n"
-        f"{_chunk_context(outline, part)}"
+        f"{_chunk_context(outline, part, candidates)}"
         f"FONTE: {source_path}\n"
         f"{_metadata_line(source_meta)}\n"
         f"--- TEXTO DA FONTE ---\n{source_text}\n--- FIM ---\n\n"
@@ -493,6 +582,15 @@ def run_ingestion(
     if fix_findings:
         message = _fix_message(fix_findings)
     else:
+        # Pre-fetch existing pages for the outline's concepts (#292) so the agent
+        # decides edit-vs-create from the message instead of via tool round-trips.
+        candidates = (
+            prefetch_candidates(
+                cfg, outline.concepts, limit=cfg.ingest_prefetch_candidates
+            )
+            if outline is not None and cfg.ingest_prefetch_candidates > 0
+            else None
+        )
         message = _ingestion_message(
             cfg,
             source_path=source_path,
@@ -500,6 +598,7 @@ def run_ingestion(
             source_meta=source_meta,
             outline=outline,
             part=part,
+            candidates=candidates,
         )
     # Route the agent's tool calls through the same live-event sink the backend
     # uses for page writes (#272), so the job timeline sees both.
