@@ -103,6 +103,71 @@ class TestHadStructured:
         assert not factory._had_structured({"messages": []}, IngestionResult)
 
 
+class TestResolveStructured:
+    """#291: recover JSON-in-text without a re-invoke; flag real fallbacks only."""
+
+    def test_coerces_json_in_text_no_fallback(self) -> None:
+        state = {
+            "messages": [
+                SimpleNamespace(
+                    content='Done:\n{"summary": "ok", "new_pages": ["wiki/a.md"]}'
+                )
+            ]
+        }
+        result, used_fallback = factory._resolve_structured(state, IngestionResult)
+        assert isinstance(result, IngestionResult)
+        assert result.summary == "ok"
+        assert used_fallback is False  # recovered, not a fallback
+
+    def test_coerces_fenced_json(self) -> None:
+        state = {"messages": [SimpleNamespace(content='```json\n{"summary": "fenced"}\n```')]}
+        result, used_fallback = factory._resolve_structured(state, IngestionResult)
+        assert result.summary == "fenced"
+        assert used_fallback is False
+
+    def test_plain_text_marks_fallback(self) -> None:
+        state = {"messages": [SimpleNamespace(content="no json here")]}
+        result, used_fallback = factory._resolve_structured(state, IngestionResult)
+        assert used_fallback is True
+        assert result.summary  # minimal fallback still produced
+
+    def test_structured_response_is_not_fallback(self) -> None:
+        state = {"structured_response": {"summary": "s"}}
+        _, used_fallback = factory._resolve_structured(state, IngestionResult)
+        assert used_fallback is False
+
+
+class TestInvokeRetryBudget:
+    """#291: ingestion can cap retries independently of ``ask``."""
+
+    @staticmethod
+    def _counting_agent(calls: dict) -> object:
+        class _Agent:
+            def invoke(self, *_a: object, **_k: object) -> dict:
+                calls["n"] += 1
+                raise ValueError("boom")
+
+        return _Agent()
+
+    def test_ingest_max_retries_caps_attempts(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(factory.time, "sleep", lambda *_a: None)
+        calls = {"n": 0}
+        cfg = _cfg(tmp_path)  # agent_max_retries defaults to 2
+        with pytest.raises(ValueError):
+            factory._invoke_with_retry(
+                self._counting_agent(calls), "m", cfg, None, None, max_retries=1
+            )
+        assert calls["n"] == 1  # override → no retry
+
+    def test_defaults_to_agent_max_retries(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(factory.time, "sleep", lambda *_a: None)
+        calls = {"n": 0}
+        cfg = WorkspaceConfig(brain_root=tmp_path, agent_max_retries=3)
+        with pytest.raises(ValueError):
+            factory._invoke_with_retry(self._counting_agent(calls), "m", cfg, None, None)
+        assert calls["n"] == 3
+
+
 class TestBuildModel:
     def test_ollama_returns_chat_object_not_string(self, tmp_path: Path) -> None:
         model = factory._build_model(_cfg(tmp_path, "ollama:llama3.1"))
