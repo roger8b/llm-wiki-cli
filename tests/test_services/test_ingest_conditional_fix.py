@@ -40,6 +40,20 @@ class TestModelOverride:
         for op in ("ingest", "ask", "maintain"):
             assert resolve_model(cfg, op) == "ollama:llama3.1"
 
+    def test_outline_falls_back_to_ingest_then_global(self) -> None:
+        # #293: outline is lighter work — its own override wins, else the ingest
+        # override, else the global model.
+        base = WorkspaceConfig(brain_root=Path("/tmp/x"), model="ollama:llama3.1")
+        assert resolve_model(base, "outline") == "ollama:llama3.1"  # nothing pinned
+
+        ingest_only = base.model_copy(update={"models": {"ingest": "anthropic:MiniMax-M3"}})
+        assert resolve_model(ingest_only, "outline") == "anthropic:MiniMax-M3"  # inherits ingest
+
+        explicit = base.model_copy(
+            update={"models": {"ingest": "anthropic:MiniMax-M3", "outline": "ollama:llama3.1"}}
+        )
+        assert resolve_model(explicit, "outline") == "ollama:llama3.1"  # own override wins
+
 
 class TestAutofixContents:
     def test_synthesizes_missing_frontmatter_from_directory(self) -> None:
