@@ -71,17 +71,29 @@ def _cached_prompt(name: str, cfg: WorkspaceConfig) -> Any:
     )
 
 
-def resolve_model(cfg: WorkspaceConfig, operation: str | None = None) -> str:
-    """Effective model string for an operation (#279).
+# Fallback chains for per-operation model resolution (#279, #293). An operation
+# resolves to the first override present in its chain, else the global model.
+# "outline" only plans concepts (lighter work), so it can run a cheaper model
+# than the ingest writer — falling back to the ingest override, then the global.
+_MODEL_CHAINS: dict[str, tuple[str, ...]] = {
+    "outline": ("outline", "ingest"),
+}
 
-    ``operation`` is one of ``"ingest"``, ``"ask"``, ``"maintain"``. When
-    ``cfg.models`` has an override for it, that wins; otherwise the global
-    ``cfg.model`` is used. ``None`` always resolves to ``cfg.model``.
+
+def resolve_model(cfg: WorkspaceConfig, operation: str | None = None) -> str:
+    """Effective model string for an operation (#279, #293).
+
+    ``operation`` is one of ``"ingest"``, ``"ask"``, ``"maintain"``, ``"outline"``.
+    When ``cfg.models`` has an override for it, that wins; ``"outline"`` falls
+    back to the ``"ingest"`` override before the global ``cfg.model`` so a strong
+    ingest model still covers the outline unless a lighter one is pinned. ``None``
+    always resolves to ``cfg.model``.
     """
     if operation:
-        override = cfg.models.get(operation)
-        if override:
-            return override
+        for key in _MODEL_CHAINS.get(operation, (operation,)):
+            override = cfg.models.get(key)
+            if override:
+                return override
     return cfg.model
 
 
@@ -540,7 +552,7 @@ def run_outline(
 
     backend = ChangeRequestBackend(cfg.brain_root, read_only=True)
     agent = create_deep_agent(
-        model=_build_model(cfg, "ingest"),
+        model=_build_model(cfg, "outline"),
         tools=domain_tools(cfg.paths, cfg),
         system_prompt=_cached_prompt("outline.md", cfg),
         backend=backend,

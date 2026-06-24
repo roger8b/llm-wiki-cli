@@ -20,6 +20,22 @@ models:
 override for `ingest` / `ask` / `maintain` if present, else `cfg.model`. An
 empty `models` map is the previous single-model behaviour, byte for byte.
 
+### `outline` — a lighter model for planning (#293)
+
+The outline pass only lists a long source's concepts and a summary — lighter
+work than writing the pages. It resolves through a fallback chain
+**`outline` → `ingest` → `model`**, so a strong ingest model still covers the
+outline unless you pin a cheaper one just for planning:
+
+```yaml
+models:
+  ingest: anthropic:MiniMax-M3   # writes the pages
+  outline: ollama:llama3.1       # only plans concepts — cheaper/faster
+```
+
+The outline is a serial gate before the parallel chunk passes (#277), so making
+it cheaper/faster shrinks the window where nothing else runs.
+
 ### Cost / $ tradeoff
 
 - **Ingestion** runs the agent with tools, multi-pass, and structured output —
