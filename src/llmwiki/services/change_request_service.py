@@ -14,6 +14,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from ..core.config import WorkspaceConfig, load_config
 from ..core.diff import make_diff
 from ..core.misc import now_iso, today
 from ..core.models import ChangeRequest, FileChange
@@ -207,6 +208,7 @@ def apply(
     *,
     git_commit: bool = False,
     paths_filter: list[str] | None = None,
+    cfg: WorkspaceConfig | None = None,
 ) -> ChangeRequest:
     """Writes changes to disk, reindexes, records to log, and marks the CR applied.
 
@@ -259,7 +261,7 @@ def apply(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(change.new_content or "", encoding="utf-8")
 
-    index_service.reindex(paths, conn)
+    index_service.reindex(paths, conn, cfg or load_config(paths))
     index_service.rebuild_index_md(paths, conn)
     _append_log(paths, cr_id, applied)
 

@@ -52,13 +52,15 @@ def search(q: str = Query(...), limit: int = Query(20)) -> list[dict[str, Any]]:
 @router.get("/graph")
 def graph() -> dict[str, Any]:
     """Get the wiki graph (nodes + edges)."""
+    from ....core.config import load_config
     from ....db.repo import LinkRepo, PageRepo
     from ....services import index_service
 
     paths = _ctx()
+    cfg = load_config(paths)
     conn = open_conn(paths)
     try:
-        index_service.reindex(paths, conn)
+        index_service.reindex(paths, conn, cfg)
         pages = PageRepo(conn).list()
         links = LinkRepo(conn).all()
     finally:

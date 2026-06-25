@@ -38,9 +38,10 @@ def _brain() -> BrainPaths:
 def index() -> None:
     """Rebuild metadata and regenerate wiki/index.md."""
     paths = _brain()
+    cfg = load_config(paths)
     conn = get_connection(paths.db_path)
     try:
-        report = index_service.reindex(paths, conn)
+        report = index_service.reindex(paths, conn, cfg)
         index_service.rebuild_index_md(paths, conn)
     finally:
         conn.close()
