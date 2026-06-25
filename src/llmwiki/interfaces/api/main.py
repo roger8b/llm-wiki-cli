@@ -72,11 +72,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def _on_startup() -> None:
-    """Recover orphan jobs from a prior crash and write the server lockfile (#203)."""
+    """Recover orphan jobs from a prior crash and write the server lockfile (#203).
+
+    Also runs the cheap drift check (#308): two COUNTs, no reindex. When the
+    brain is out of sync the helper either enqueues a background ``index``
+    job (``index_autorebuild_on_drift=True``, the default) or just records
+    the stale flag for the UI/CLI.
+    """
     from ...core.config import load_config
     from ...core.paths import load_active_brain
     from ...db.connection import get_connection
     from ...services import index_service
+    from ...services.drift import detect_and_handle_drift
     from ...workers.lifecycle import recover_interrupted_jobs, write_lock
 
     try:
@@ -99,6 +106,8 @@ def _on_startup() -> None:
             ).fetchone():
                 index_service.reindex(paths, conn, cfg)
                 index_service.rebuild_index_md(paths, conn)
+            # Drift check + optional auto-rebuild (#308). Cheap; never reindexes inline.
+            detect_and_handle_drift(paths, conn, cfg)
         finally:
             conn.close()
     except Exception:

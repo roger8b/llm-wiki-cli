@@ -169,6 +169,10 @@ class WorkspaceConfig(BaseModel):
     # works manually. curation_semantic toggles the (costly) semantic lint pass.
     curation_interval_hours: int | None = None
     curation_semantic: bool = True
+    # Auto-enqueue a background reindex when the startup drift check detects
+    # db×disk divergence (#308). True = self-heal; False = record the drift
+    # to meta kv and let the UI/CLI surface a manual reindex button.
+    index_autorebuild_on_drift: bool = True
 
     @property
     def paths(self) -> BrainPaths:
