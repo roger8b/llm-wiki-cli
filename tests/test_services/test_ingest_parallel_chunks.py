@@ -46,6 +46,32 @@ class _CollidingRunner:
         return IngestionResult(summary=f"part {idx}", new_pages=["wiki/concepts/shared.md"])
 
 
+# Slug variants of ONE concept, cycled across chunks. Same page, different
+# casing/spacing — exactly what parallel chunks produced for the Voyager paper
+# (#301): "exploreUntil primitive" / "exploreUntil-primitive" / "exploreuntil-primitive".
+_SLUG_VARIANTS = [
+    "exploreUntil primitive",
+    "exploreUntil-primitive",
+    "exploreuntil-primitive",
+]
+
+
+class _VariantSlugRunner:
+    """Every chunk stages the same concept under a different slug variant."""
+
+    def __call__(self, cfg, backend, *, source_path, source_text, source_meta=None,
+                 outline=None, part=None, **kw):
+        idx = part[0] if part else 1
+        stem = _SLUG_VARIANTS[idx % len(_SLUG_VARIANTS)]
+        path = f"wiki/concepts/{stem}.md"
+        backend.write(
+            path,
+            f"---\ntitle: exploreUntil primitive\ntype: concept\n---\n"
+            f"# exploreUntil primitive\nfrom chunk {idx}\n",
+        )
+        return IngestionResult(summary=f"part {idx}", new_pages=[path])
+
+
 def _ingest(brain: BrainPaths, cfg: WorkspaceConfig, runner, **kw):
     conn = get_connection(brain.db_path)
     try:
@@ -76,6 +102,17 @@ class TestParallelMerge:
         brain2 = scaffold_service.init_brain(tmp_path / "brain2", git=False)
         cr2 = _ingest(brain2, _cfg(brain2, 3), _CollidingRunner())
         assert cr.changes[0].new_content == cr2.changes[0].new_content
+
+    def test_slug_variants_collapse_to_one_canonical_page(self, brain: BrainPaths) -> None:
+        # Chunks named the same concept "exploreUntil primitive" /
+        # "exploreUntil-primitive" / "exploreuntil-primitive". Path-string dedup
+        # missed them; slug-canonical dedup (#301) collapses to one clean page.
+        cr = _ingest(brain, _cfg(brain, 3), _VariantSlugRunner())
+        assert [c.path for c in cr.changes] == ["wiki/concepts/exploreuntil-primitive.md"]
+        # No space/uppercase variant leaked into the CR.
+        for change in cr.changes:
+            assert change.path == change.path.lower()
+            assert " " not in change.path
 
     def test_parallel_matches_serial(self, brain: BrainPaths, tmp_path) -> None:
         serial = _ingest(brain, _cfg(brain, 1), _CollidingRunner())
@@ -108,3 +145,28 @@ class TestParallelCancellation:
 def test_config_field_default_is_three() -> None:
     cfg = WorkspaceConfig(brain_root=BrainPaths(root="/tmp/x").root)
     assert cfg.ingest_chunk_concurrency == 3
+
+
+class TestCanonicalStagingPath:
+    def test_case_space_and_hyphen_variants_share_one_key(self) -> None:
+        from llmwiki.services.ingest_service import _canonical_staging_path
+
+        canonical = "wiki/concepts/exploreuntil-primitive.md"
+        for variant in (
+            "wiki/concepts/exploreUntil primitive.md",
+            "wiki/concepts/exploreUntil-primitive.md",
+            "wiki/concepts/exploreuntil-primitive.md",
+        ):
+            assert _canonical_staging_path(variant) == canonical
+
+    def test_directory_prevents_cross_type_merge(self) -> None:
+        from llmwiki.services.ingest_service import _canonical_staging_path
+
+        assert _canonical_staging_path("wiki/concepts/voyager.md") != _canonical_staging_path(
+            "wiki/research/voyager.md"
+        )
+
+    def test_empty_slug_falls_back_to_original(self) -> None:
+        from llmwiki.services.ingest_service import _canonical_staging_path
+
+        assert _canonical_staging_path("wiki/concepts/---.md") == "wiki/concepts/---.md"
