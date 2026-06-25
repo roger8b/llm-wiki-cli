@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from ....core.config import WorkspaceConfig
-from ..deps import get_config, get_paths, open_conn
+from ..deps import get_paths, open_conn
 
 router = APIRouter()
 
@@ -51,12 +50,14 @@ def search(q: str = Query(...), limit: int = Query(20)) -> list[dict[str, Any]]:
 
 
 @router.get("/graph")
-def graph(cfg: Annotated[WorkspaceConfig, Depends(get_config)]) -> dict[str, Any]:
+def graph() -> dict[str, Any]:
     """Get the wiki graph (nodes + edges)."""
+    from ....core.config import load_config
     from ....db.repo import LinkRepo, PageRepo
     from ....services import index_service
 
     paths = _ctx()
+    cfg = load_config(paths)
     conn = open_conn(paths)
     try:
         index_service.reindex(paths, conn, cfg)

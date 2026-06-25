@@ -36,6 +36,7 @@ class IndexReport(BaseModel):
     embeddings_indexed: int = 0
     embeddings_skipped: int = 0
     embeddings_failed: int = 0
+    embeddings_deleted: int = 0
     skipped: list[str] = []
 
 
@@ -118,6 +119,7 @@ def reindex(
     report.embeddings_indexed = embeddings.indexed
     report.embeddings_skipped = embeddings.skipped
     report.embeddings_failed = embeddings.failed
+    report.embeddings_deleted = embeddings.deleted
     return report
 
 
@@ -178,7 +180,12 @@ def _reindex_embeddings(
             vectors = [embedder.embed(c) for c in chunks]
         except Exception as exc:  # noqa: BLE001
             stats.failed += 1
-            logger.warning("embedding failed for %s, skipping semantic index: %s", path, exc)
+            # The hash already proved the content changed; drop the now-stale
+            # vectors so search can't return them for the new body.
+            store.delete_page(path)
+            logger.warning(
+                "embedding failed for %s; removed stale semantic index: %s", path, exc
+            )
             continue
         store.replace_page(path, vectors, content_hash)
         stats.indexed += 1

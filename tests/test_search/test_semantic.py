@@ -213,21 +213,60 @@ class TestReindexConfig:
 
         assert emb.calls == 2
 
-    def test_graph_endpoint_reindexes_with_injected_config(
+    def test_graph_endpoint_reindexes_with_global_config(
         self,
         brain: BrainPaths,
+        isolated_wiki_home: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from llmwiki.interfaces.api.routers import search as search_router
 
         _seed_pages(brain)
+        _write_embedding_config(isolated_wiki_home)
         emb = _patch_fake_semantic(monkeypatch)
         monkeypatch.setattr(search_router, "_ctx", lambda: brain)
 
-        out = search_router.graph(_cfg(brain, "ollama:fake"))
+        out = search_router.graph()
 
         assert emb.calls == 2
         assert len(out["nodes"]) == 2
+
+    def test_failed_reembed_deletes_stale_vectors(
+        self,
+        brain: BrainPaths,
+        isolated_wiki_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _seed_pages(brain)
+        _write_embedding_config(isolated_wiki_home)
+        _patch_fake_semantic(monkeypatch)
+        conn = get_connection(brain.db_path)
+        try:
+            index_service.reindex(brain, conn)
+            assert FakeStore(conn).indexed_paths() == {
+                "wiki/concepts/rag.md",
+                "wiki/concepts/wiki.md",
+            }
+            # rag.md changes but the embedder now fails: stale vectors must go.
+            (brain.wiki / "concepts" / "rag.md").write_text(
+                "---\ntitle: RAG\ntype: concept\n---\n# RAG\nchanged body.\n",
+                encoding="utf-8",
+            )
+
+            class Boom:
+                def embed(self, text: str) -> list[float]:
+                    raise RuntimeError("provider offline")
+
+            def build_backend(cfg: WorkspaceConfig, conn: sqlite3.Connection):
+                return (Boom(), FakeStore(conn)) if cfg.embedding_model else (None, None)
+
+            monkeypatch.setattr(search_factory, "build_semantic_backend", build_backend)
+            report = index_service.reindex(brain, conn)
+            assert report.embeddings_failed == 1
+            # wiki.md unchanged (kept); rag.md's stale vectors evicted.
+            assert FakeStore(conn).indexed_paths() == {"wiki/concepts/wiki.md"}
+        finally:
+            conn.close()
 
 
 class TestDegradation:

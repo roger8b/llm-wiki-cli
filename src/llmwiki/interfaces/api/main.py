@@ -198,10 +198,9 @@ def maintain(semantic: bool = False) -> dict[str, Any]:
 @api.get("/graph")
 def graph() -> dict[str, Any]:
     """Wiki graph (nodes + edges)."""
-    from .deps import get_config
     from .routers.search import graph as _graph_impl
 
-    return _graph_impl(get_config())
+    return _graph_impl()
 
 
 # ───────────────────────────── health / lifecycle
