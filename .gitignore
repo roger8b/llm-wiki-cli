@@ -17,5 +17,9 @@ graphify-out/.ast_pid
 graphify-out/.graphify_python
 graphify-out/.graphify_root
 
+# graphify output and rules (built at the wiki level, not per project)
+graphify-out/
+.agents/
+
 # Local eval run artifacts (curated snapshot lives in evals/BASELINE.md)
 evals/results/
