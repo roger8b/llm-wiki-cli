@@ -170,3 +170,18 @@ class TestCanonicalStagingPath:
         from llmwiki.services.ingest_service import _canonical_staging_path
 
         assert _canonical_staging_path("wiki/concepts/---.md") == "wiki/concepts/---.md"
+
+
+def test_merge_results_canonicalizes_declared_paths() -> None:
+    # Declared paths (new_pages/affected_pages) must fold onto the canonical slug
+    # so the audit compares like-for-like with the canonical staged paths (#301).
+    from llmwiki.llm_agents.models import IngestionResult
+    from llmwiki.services.ingest_service import _merge_results
+
+    merged = _merge_results(
+        [
+            IngestionResult(summary="a", new_pages=["wiki/concepts/exploreUntil primitive.md"]),
+            IngestionResult(summary="b", new_pages=["wiki/concepts/exploreUntil-primitive.md"]),
+        ]
+    )
+    assert merged.new_pages == ["wiki/concepts/exploreuntil-primitive.md"]

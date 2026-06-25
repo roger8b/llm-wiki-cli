@@ -268,7 +268,10 @@ def _merge_results(results: list[IngestionResult]) -> IngestionResult:
     """Fold per-pass ingestion results into one aggregate (#162).
 
     Unions declared pages (so ``_audit_result`` checks the whole source) and
-    joins the per-pass summaries.
+    joins the per-pass summaries. Declared paths are folded onto their canonical
+    slug (#301) so they match the canonical paths the merge actually stages —
+    otherwise the same concept declared as a case/space variant in one chunk
+    shows up as both a phantom "missing" and an "extra" in the audit.
     """
     if len(results) == 1:
         return results[0]
@@ -276,8 +279,8 @@ def _merge_results(results: list[IngestionResult]) -> IngestionResult:
     affected: list[str] = []
     summaries: list[str] = []
     for r in results:
-        new_pages.extend(r.new_pages)
-        affected.extend(r.affected_pages)
+        new_pages.extend(_canonical_staging_path(p) for p in r.new_pages)
+        affected.extend(_canonical_staging_path(p) for p in r.affected_pages)
         if r.summary:
             summaries.append(r.summary)
     return IngestionResult(
