@@ -5,6 +5,7 @@ from .brains import router as brains_router
 from .changes import router as changes_router
 from .cli import router as cli_router
 from .config import router as config_router
+from .index import router as index_router
 from .jobs import router as jobs_router
 from .onboarding import router as onboarding_router
 from .providers import router as providers_router
@@ -20,6 +21,7 @@ __all__ = [
     "changes_router",
     "cli_router",
     "config_router",
+    "index_router",
     "jobs_router",
     "onboarding_router",
     "providers_router",

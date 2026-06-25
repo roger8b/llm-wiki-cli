@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +13,10 @@ from ..core.config import load_config
 from ..core.errors import JobCancelledError, SourceAlreadyProcessedError
 from ..core.paths import BrainPaths, load_active_brain, resolve_input
 from ..db.connection import get_connection, retry_on_locked
-from ..db.repo import AskHistoryRepo, JobRepo
+from ..db.repo import AskHistoryRepo, JobRepo, MetaRepo
 from ..services import (
     curator_service,
+    index_service,
     ingest_service,
     lint_service,
     maintenance_service,
@@ -27,7 +29,7 @@ logger = logging.getLogger("llmwiki.workers")
 # (read/write split, ADR 001) these run serialized — never two at once — while
 # read-mostly jobs (ask/lint) run concurrently, so a question answers during a
 # long ingestion instead of waiting behind it.
-_WRITE_TYPES = {"ingest", "maintain", "curate"}
+_WRITE_TYPES = {"ingest", "maintain", "curate", "index"}
 
 
 class JobWorker(threading.Thread):
@@ -180,6 +182,30 @@ class JobWorker(threading.Thread):
                 )
                 JobRepo(conn).complete(
                     job_id, result=json.dumps(report.model_dump(mode="json"))
+                )
+
+            elif job_type == "index":
+                # Rebuild wiki_pages / links / FTS / embeddings from disk (#305).
+                # When ``payload.embeddings`` is False, run with an embedding-
+                # disabled cfg copy so the embeddings pass is a no-op without
+                # mutating the shared config.
+                want_embeddings = payload.get("embeddings", True)
+                run_cfg = cfg if want_embeddings else cfg.model_copy(
+                    update={"embedding_model": None}
+                )
+                JobRepo(conn).set_progress(job_id, "rebuilding")
+                index_report = index_service.reindex(paths, conn, run_cfg)
+                index_service.rebuild_index_md(paths, conn)
+                MetaRepo(conn).set("last_reindex_at", datetime.now(UTC).isoformat())
+                result_data = {
+                    "pages_indexed": index_report.pages_indexed,
+                    "links_indexed": index_report.links_indexed,
+                    "skipped": index_report.skipped,
+                    "embeddings_indexed": index_report.embeddings_indexed,
+                    "embeddings_deleted": index_report.embeddings_deleted,
+                }
+                JobRepo(conn).complete(
+                    job_id, result=json.dumps(result_data)
                 )
 
             else:
