@@ -14,7 +14,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ..core.config import WorkspaceConfig
 from ..core.errors import SourceAlreadyProcessedError
@@ -268,7 +268,10 @@ def _merge_results(results: list[IngestionResult]) -> IngestionResult:
     """Fold per-pass ingestion results into one aggregate (#162).
 
     Unions declared pages (so ``_audit_result`` checks the whole source) and
-    joins the per-pass summaries.
+    joins the per-pass summaries. Declared paths are folded onto their canonical
+    slug (#301) so they match the canonical paths the merge actually stages —
+    otherwise the same concept declared as a case/space variant in one chunk
+    shows up as both a phantom "missing" and an "extra" in the audit.
     """
     if len(results) == 1:
         return results[0]
@@ -276,8 +279,8 @@ def _merge_results(results: list[IngestionResult]) -> IngestionResult:
     affected: list[str] = []
     summaries: list[str] = []
     for r in results:
-        new_pages.extend(r.new_pages)
-        affected.extend(r.affected_pages)
+        new_pages.extend(_canonical_staging_path(p) for p in r.new_pages)
+        affected.extend(_canonical_staging_path(p) for p in r.affected_pages)
         if r.summary:
             summaries.append(r.summary)
     return IngestionResult(
@@ -298,6 +301,28 @@ def _concept_matches_chunk(concept: str, chunk: str) -> bool:
     if not concept_key:
         return False
     return f" {concept_key} " in f" {_concept_key(chunk)} "
+
+
+def _canonical_staging_path(path: str) -> str:
+    """Canonical key+path for a staged page, slug-normalized (#301).
+
+    Parallel chunks (#277) name their concept pages independently, so the same
+    concept can surface as ``concepts/exploreUntil primitive.md`` in one chunk
+    and ``concepts/exploreuntil-primitive.md`` in another. Path-string equality
+    misses that, leaving near-duplicate pages in the CR. Folding the stem through
+    :func:`markdown.slugify` (lowercase + kebab-case) collapses the variants onto
+    one path while keeping the directory so pages of different types never merge.
+    """
+    from ..core import markdown
+
+    posix = PurePosixPath(path)
+    stem = posix.name[:-3] if posix.name.endswith(".md") else posix.name
+    slug = markdown.slugify(stem)
+    if not slug:
+        return path
+    parent = posix.parent
+    canonical = f"{slug}.md"
+    return canonical if str(parent) == "." else f"{parent}/{canonical}"
 
 
 def _scoped_outlines(outline: OutlinePlan, chunks: list[str]) -> list[OutlinePlan]:
@@ -524,7 +549,10 @@ def _run_passes(
         return i, result, dict(chunk_backend.staging), chunk_backend.execution_meta
 
     indexed: list[tuple[int, IngestionResult]] = []
-    staged_from: dict[str, int] = {}  # path -> winning chunk index
+    # Key by slug-canonical path (#301) so chunks that name the same concept with
+    # different casing/spacing ("exploreUntil primitive" vs "exploreuntil-primitive")
+    # collapse onto one page instead of leaking near-duplicates into the CR.
+    staged_from: dict[str, int] = {}  # canonical key -> winning chunk index
     collisions = 0
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [pool.submit(_run_chunk, i, c) for i, c in enumerate(chunks)]
@@ -532,21 +560,23 @@ def _run_passes(
             for fut in as_completed(futures):
                 i, result, staging, meta = fut.result()  # re-raises cancellation
                 indexed.append((i, result))
-                # Merge into the shared backend. New paths are added; on a
+                # Merge into the shared backend. New canonical pages are added; on a
                 # collision the higher chunk index wins (matches serial overwrite
-                # order). The staged count only ever grows, so the live
-                # ``pages_staged`` telemetry stays monotonic regardless of which
-                # pass finished first.
+                # order). The winner is written under the canonical path so the CR
+                # never carries space/case variants of the same slug. The staged
+                # count only ever grows, so the live ``pages_staged`` telemetry stays
+                # monotonic regardless of which pass finished first.
                 for path, content in staging.items():
-                    prev = staged_from.get(path)
+                    key = _canonical_staging_path(path)
+                    prev = staged_from.get(key)
                     if prev is None:
-                        backend.staging[path] = content
-                        staged_from[path] = i
+                        backend.staging[key] = content
+                        staged_from[key] = i
                     else:
                         collisions += 1
                         if i > prev:
-                            backend.staging[path] = content
-                            staged_from[path] = i
+                            backend.staging[key] = content
+                            staged_from[key] = i
                 if meta is not None:
                     metas.append(meta)
                 if tracker is not None:
