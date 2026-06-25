@@ -33,7 +33,17 @@ _EMBED_WHOLE_THRESHOLD = 8000
 class IndexReport(BaseModel):
     pages_indexed: int = 0
     links_indexed: int = 0
+    embeddings_indexed: int = 0
+    embeddings_skipped: int = 0
+    embeddings_failed: int = 0
     skipped: list[str] = []
+
+
+class EmbeddingReport(BaseModel):
+    indexed: int = 0
+    skipped: int = 0
+    failed: int = 0
+    deleted: int = 0
 
 
 def _iter_wiki_files(wiki_dir: Path) -> list[Path]:
@@ -104,7 +114,10 @@ def reindex(
             link_repo.add(rel, target)
             report.links_indexed += 1
 
-    _reindex_embeddings(paths, conn, cfg, bodies)
+    embeddings = _reindex_embeddings(paths, conn, cfg, bodies)
+    report.embeddings_indexed = embeddings.indexed
+    report.embeddings_skipped = embeddings.skipped
+    report.embeddings_failed = embeddings.failed
     return report
 
 
@@ -130,38 +143,53 @@ def _reindex_embeddings(
     conn: sqlite3.Connection,
     cfg: WorkspaceConfig | None,
     bodies: dict[str, str],
-) -> None:
+) -> EmbeddingReport:
     """Refresh semantic embeddings for changed/removed pages, if configured."""
+    stats = EmbeddingReport()
     if cfg is None:
         from ..core.config import load_config
 
         cfg = load_config(paths)
     if not cfg.embedding_model:
-        return
+        return stats
 
     from ..search.factory import build_semantic_backend
 
     embedder, store = build_semantic_backend(cfg, conn)
     if embedder is None or store is None:
-        return
+        logger.info("semantic embeddings: built=0 skipped=0 failed=0 deleted=0")
+        return stats
 
     for path in store.indexed_paths() - bodies.keys():
         store.delete_page(path)  # page removed from disk
+        stats.deleted += 1
 
     for path, body in bodies.items():
         content_hash = sha256(body.encode("utf-8"))
         if store.page_hash(path) == content_hash:
+            stats.skipped += 1
             continue  # unchanged — skip re-embedding
         chunks = _chunk_for_embedding(body)
         if not chunks:
             store.delete_page(path)
+            stats.skipped += 1
             continue
         try:
             vectors = [embedder.embed(c) for c in chunks]
         except Exception as exc:  # noqa: BLE001
+            stats.failed += 1
             logger.warning("embedding failed for %s, skipping semantic index: %s", path, exc)
             continue
         store.replace_page(path, vectors, content_hash)
+        stats.indexed += 1
+    logger.info(
+        "semantic embeddings: built=%d skipped=%d failed=%d deleted=%d",
+        stats.indexed,
+        stats.skipped,
+        stats.failed,
+        stats.deleted,
+    )
+    return stats
 
 
 def rebuild_index_md(paths: BrainPaths, conn: sqlite3.Connection) -> None:

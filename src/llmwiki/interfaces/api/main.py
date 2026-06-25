@@ -72,8 +72,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def _on_startup() -> None:
     """Recover orphan jobs from a prior crash and write the server lockfile (#203)."""
+    from ...core.config import load_config
     from ...core.paths import load_active_brain
     from ...db.connection import get_connection
+    from ...services import index_service
     from ...workers.lifecycle import recover_interrupted_jobs, write_lock
 
     try:
@@ -90,6 +92,12 @@ def _on_startup() -> None:
                 logging.getLogger("llmwiki.workers").info(
                     "Recovered %d orphan running job(s) as interrupted.", n
                 )
+            cfg = load_config(paths)
+            if cfg.embedding_model and not conn.execute(
+                "SELECT 1 FROM page_embeddings LIMIT 1"
+            ).fetchone():
+                index_service.reindex(paths, conn, cfg)
+                index_service.rebuild_index_md(paths, conn)
         finally:
             conn.close()
     except Exception:
@@ -190,8 +198,10 @@ def maintain(semantic: bool = False) -> dict[str, Any]:
 @api.get("/graph")
 def graph() -> dict[str, Any]:
     """Wiki graph (nodes + edges)."""
+    from .deps import get_config
     from .routers.search import graph as _graph_impl
-    return _graph_impl()
+
+    return _graph_impl(get_config())
 
 
 # ───────────────────────────── health / lifecycle
