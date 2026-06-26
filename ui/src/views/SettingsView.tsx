@@ -25,6 +25,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { BrainSettings } from "@/components/settings/BrainSettings"
 import { DesktopSettings } from "@/components/settings/DesktopSettings"
+import { IndexHealthCard } from "@/components/shared/IndexHealthCard"
+import { useIndexHealthStore } from "@/stores/indexHealth"
 
 type Provider = "ollama" | ProviderName
 
@@ -156,6 +158,15 @@ export function SettingsView() {
   // ── cli ──
   const [cli, setCli] = useState<CliStatus | null>(null)
   const [cliBusy, setCliBusy] = useState(false)
+
+  // ── index health (#306) ──
+  const indexStatus = useIndexHealthStore((s) => s.status)
+  const indexBusy = useIndexHealthStore((s) => s.busy)
+  const refreshIndex = useIndexHealthStore((s) => s.refresh)
+  const reindex = useIndexHealthStore((s) => s.reindex)
+  useEffect(() => {
+    refreshIndex()
+  }, [refreshIndex])
 
   // ── skills ──
   const [skills, setSkills] = useState<SkillsStatus | null>(null)
@@ -485,6 +496,15 @@ export function SettingsView() {
               {section === "general" && (
                 <>
                   <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">General</div>
+                  {/* Index health (#306): surfaces drift and lets the user
+                      trigger a reindex without leaving Settings. */}
+                  <div className="mb-4">
+                    <IndexHealthCard
+                      status={indexStatus}
+                      busy={indexBusy}
+                      onReindex={() => reindex()}
+                    />
+                  </div>
                   <BrainSettings />
                   <DesktopSettings />
                 </>
