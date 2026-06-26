@@ -14,7 +14,6 @@ HTTP request — same pattern as ``maintain`` and ``curate`` (ADR 001).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException
@@ -29,20 +28,6 @@ def _ctx() -> Any:
         return get_paths()
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-def _count_disk_files(wiki_dir: Path) -> int:
-    """Count ``.md`` files under ``wiki/`` that the indexer would scan.
-
-    Mirrors ``index_service._iter_wiki_files`` (excludes ``index.md`` /
-    ``log.md``); kept inline so the status endpoint doesn't drag in the full
-    indexer stack just to count files.
-    """
-    if not wiki_dir.is_dir():
-        return 0
-    return sum(
-        1 for p in wiki_dir.rglob("*.md") if p.name not in ("index.md", "log.md")
-    )
 
 
 @router.post("/reindex")
@@ -77,13 +62,17 @@ def index_status() -> dict[str, Any]:
     """
     from ....core.config import load_config
     from ....db.repo import MetaRepo, PageRepo
+    from ....services import index_service
 
     paths = _ctx()
     cfg = load_config(paths)
     conn = open_conn(paths)
     try:
         db_pages = len(PageRepo(conn).list())
-        disk_files = _count_disk_files(paths.wiki)
+        disk_files = index_service.count_indexable_files(paths.wiki)
+        # Files the last reindex skipped (invalid frontmatter) are on disk but
+        # legitimately not in wiki_pages — don't count them as drift (#317).
+        skipped = int(MetaRepo(conn).get(index_service.META_SKIPPED) or 0)
         embeddings_enabled = bool(cfg.embedding_model)
         emb_count_row = conn.execute(
             "SELECT COUNT(DISTINCT path) AS n FROM page_embeddings"
@@ -93,10 +82,11 @@ def index_status() -> dict[str, Any]:
     finally:
         conn.close()
 
-    drift = disk_files - db_pages
+    drift = disk_files - db_pages - skipped
     return {
         "db_pages": db_pages,
         "disk_files": disk_files,
+        "skipped": skipped,
         "drift": drift,
         "stale": drift != 0,
         "embeddings": {

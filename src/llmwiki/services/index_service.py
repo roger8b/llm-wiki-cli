@@ -19,12 +19,17 @@ from ..core.errors import InvalidFrontmatterError
 from ..core.misc import sha256
 from ..core.models import Page, PageType
 from ..core.paths import BrainPaths
-from ..db.repo import LinkRepo, PageFtsRepo, PageRepo, TagRepo
+from ..db.repo import LinkRepo, MetaRepo, PageFtsRepo, PageRepo, TagRepo
 
 logger = logging.getLogger("llmwiki.services.index")
 
 # Special pages that are not indexed as content.
 _SPECIAL = {"index.md", "log.md"}
+
+# meta kv key: number of disk files the last reindex skipped (invalid
+# frontmatter). Drift = disk_files − db_pages − skipped, so a permanently
+# malformed page doesn't read as eternal drift (#317).
+META_SKIPPED = "index_skipped"
 
 # Pages shorter than this (chars) embed whole; longer ones split by H2 heading.
 _EMBED_WHOLE_THRESHOLD = 8000
@@ -51,6 +56,16 @@ def _iter_wiki_files(wiki_dir: Path) -> list[Path]:
     if not wiki_dir.is_dir():
         return []
     return sorted(p for p in wiki_dir.rglob("*.md") if p.name not in _SPECIAL)
+
+
+def count_indexable_files(wiki_dir: Path) -> int:
+    """How many ``.md`` files a reindex would scan (excludes index.md/log.md).
+
+    Single source of truth for the disk side of the drift check — drift.py and
+    the /index/status router both call this so their count can't diverge from
+    what ``reindex`` actually iterates (#317).
+    """
+    return len(_iter_wiki_files(wiki_dir))
 
 
 def reindex(
@@ -120,6 +135,10 @@ def reindex(
     report.embeddings_skipped = embeddings.skipped
     report.embeddings_failed = embeddings.failed
     report.embeddings_deleted = embeddings.deleted
+
+    # Persist how many files were skipped (invalid frontmatter) so the drift
+    # check can subtract them and not loop forever on a malformed page (#317).
+    MetaRepo(conn).set(META_SKIPPED, str(len(report.skipped)))
     return report
 
 
