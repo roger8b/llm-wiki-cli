@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom"
 import { Activity, AlertCircle, BarChart3, Loader2, RefreshCw } from "lucide-react"
 import { api } from "@/lib/api"
 import { useCrStore } from "@/stores/crs"
+import { useIndexHealthStore } from "@/stores/indexHealth"
+import { IndexHealthCard } from "@/components/shared/IndexHealthCard"
 import type { Job, ModelStats } from "@/types"
 import { Button } from "@/components/ui/button"
 import {
@@ -131,6 +133,16 @@ export function InsightsView() {
     load()
   }, [load])
 
+  // Index health (#306): refresh alongside the other insights data so the
+  // card never lags more than one Refresh click behind.
+  const indexStatus = useIndexHealthStore((s) => s.status)
+  const indexBusy = useIndexHealthStore((s) => s.busy)
+  const refreshIndex = useIndexHealthStore((s) => s.refresh)
+  const reindex = useIndexHealthStore((s) => s.reindex)
+  useEffect(() => {
+    refreshIndex()
+  }, [refreshIndex])
+
   const totals = useMemo(() => summarize(stats), [stats])
 
   const recent = jobs.slice(0, 20)
@@ -182,6 +194,17 @@ export function InsightsView() {
             <span>Could not load stats: {error}</span>
           </div>
         )}
+
+        {/* Index health (#306): the drift/reindex control lives at the top of
+            Insights so it sits next to the recent-activity feed that surfaces
+            index jobs. */}
+        <div className="mb-6">
+          <IndexHealthCard
+            status={indexStatus}
+            busy={indexBusy}
+            onReindex={() => reindex()}
+          />
+        </div>
 
         {loading && stats.length === 0 ? (
           <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed py-16 text-muted-foreground">

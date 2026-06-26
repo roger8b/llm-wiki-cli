@@ -350,6 +350,26 @@ export interface IngestEvent {
   }
 }
 
+/** Health snapshot from `GET /index/status` (#305/#306).
+ *  Used by the front-end to surface drift and let the user trigger a reindex. */
+export interface IndexStatusEmbeddings {
+  count: number
+  expected: number
+  enabled: boolean
+}
+
+export interface IndexStatus {
+  db_pages: number
+  disk_files: number
+  /** disk_files − db_pages. Negative means the DB has rows with no file on disk. */
+  drift: number
+  /** True when db_pages !== disk_files; the front-end shows a "Reindex" CTA. */
+  stale: boolean
+  embeddings: IndexStatusEmbeddings
+  /** ISO timestamp of the last successful reindex, or null if never run. */
+  last_reindex_at: string | null
+}
+
 /** Per-model agent telemetry from GET /jobs/stats (#176, dashboard #151). */
 export interface ModelStats {
   model: string

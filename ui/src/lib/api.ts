@@ -7,6 +7,7 @@ import type {
   ChangeRequest,
   CliStatus,
   Graph,
+  IndexStatus,
   LintFinding,
   ModelTestResult,
   OllamaStatus,
@@ -209,6 +210,15 @@ export const api = {
     ),
   listTemplates: () =>
     request<{ type: string; body: string }[]>("/wiki/templates"),
+
+  // ── index health (#306) ──
+  indexStatus: () => request<IndexStatus>("/index/status"),
+  /** Enqueue an `index` job that rebuilds wiki_pages / FTS / links / embeddings. */
+  reindex: (embeddings = true) =>
+    request<{ job_id: number }>("/index/reindex", {
+      method: "POST",
+      body: JSON.stringify({ embeddings }),
+    }),
 
   // ── query ──
   ask: (question: string, saveAsPage = false, conversationId?: string | null) =>
