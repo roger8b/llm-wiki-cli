@@ -116,5 +116,6 @@ describe("IndexHealthCard render (#306)", () => {
     expect(html).toContain("Reindex")
     // The button itself must NOT be disabled when no job is running.
     expect(html).toMatch(/<button[^>]*data-testid="reindex-button"[^>]*>/)
+    expect(html).not.toMatch(/<button[^>]*data-testid="reindex-button"[^>]*disabled/)
   })
 })

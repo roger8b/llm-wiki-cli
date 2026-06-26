@@ -72,8 +72,8 @@ export function AppShell() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <TopBar onOpenSearch={() => setCmdkOpen(true)} />
-      {/* Index drift banner (#306): always present in the tree so the
-          transition between stale/healthy doesn't shift the layout. */}
+      {/* Index drift banner (#306): shown only when stale so the row is
+          hidden in the common case. */}
       <DriftBanner
         stale={!!indexStatus?.stale}
         drift={indexStatus?.drift ?? 0}

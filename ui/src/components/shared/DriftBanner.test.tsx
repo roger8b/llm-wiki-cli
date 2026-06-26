@@ -20,4 +20,11 @@ describe("DriftBanner (#306)", () => {
     expect(html).toContain("178")
     expect(html).toContain("Reindex")
   })
+
+  it("renders the orphaned-row copy when drift is negative", () => {
+    const html = render(true, -3)
+    expect(html).toContain("Index is out of date")
+    expect(html).toContain("orphaned")
+    expect(html).toContain("3")
+  })
 })
