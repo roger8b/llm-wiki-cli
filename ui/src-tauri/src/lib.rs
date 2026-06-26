@@ -39,6 +39,10 @@ struct AppSession {
     jobs_item: Mutex<Option<MenuItem<Wry>>>,
     /// Last seen `{job_id: status}` snapshot for transition detection (#205).
     prev_jobs: Mutex<HashMap<i64, String>>,
+    /// Whether the current drift episode has already fired a notification this
+    /// session (#307). Reset to false when the index returns to in-sync so the
+    /// user is pinged again on the next drift.
+    drift_notified: Mutex<bool>,
     /// Route to navigate to when the window is next opened (set when a
     /// notification fires; consumed by `open_main_window`). (#205)
     pending_route: Mutex<Option<String>>,
@@ -51,6 +55,18 @@ struct JobNote {
     title: String,
     body: String,
     /// SPA route to open on click (e.g. "/review", "/jobs").
+    route: String,
+}
+
+/// A native notification to fire when the index is stale (#307). Click opens
+/// the front's index health card (#306) so the user can reindex without
+/// digging through the API.
+#[derive(Debug, PartialEq)]
+struct DriftNote {
+    title: String,
+    body: String,
+    /// SPA route to open on click; mirrors the Insights tab that hosts the
+    /// IndexHealthCard + DriftBanner.
     route: String,
 }
 
@@ -116,6 +132,26 @@ fn http_get_body(port: u16, path: &str, token: &str) -> Option<String> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let req = format!(
         "GET {path} HTTP/1.1\r\nHost: {addr}\r\nX-Wiki-Token: {token}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let idx = raw.find("\r\n\r\n")?;
+    Some(raw[idx + 4..].to_string())
+}
+
+/// Minimal authenticated `POST` with a JSON body, returning the response body.
+/// Used by the tray "Reindex wiki" handler (#307) to enqueue an `index` job
+/// without pulling in a full HTTP client for a single one-shot call.
+fn http_post_json(port: u16, path: &str, token: &str, body: &str) -> Option<String> {
+    let addr = format!("127.0.0.1:{port}");
+    let sock = addr.parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&sock, Duration::from_millis(500)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\nX-Wiki-Token: {token}\r\n\
+         Content-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
+        len = body.len(),
     );
     stream.write_all(req.as_bytes()).ok()?;
     let mut raw = String::new();
@@ -265,6 +301,92 @@ fn tray_jobs_label(body: &str) -> String {
         Some(step) => format!("Ingesting: {step}"),
         None => format!("Jobs running: {n}"),
     }
+}
+
+/// Parsed `GET /index/status` body (#305). Pure; used by the tray poll to
+/// decide whether to notify about drift (#307).
+#[derive(Debug, PartialEq)]
+struct IndexStatus {
+    db_pages: i64,
+    disk_files: i64,
+    drift: i64,
+    stale: bool,
+}
+
+/// Parse a `GET /index/status` body. Returns None on any malformed input —
+/// the tray poll treats parse failures the same as backend-down (silent).
+fn parse_index_status(body: &str) -> Option<IndexStatus> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    Some(IndexStatus {
+        db_pages: v.get("db_pages")?.as_i64()?,
+        disk_files: v.get("disk_files")?.as_i64()?,
+        drift: v.get("drift")?.as_i64()?,
+        stale: v.get("stale")?.as_bool()?,
+    })
+}
+
+/// Parse a `POST /index/reindex` body (`{"job_id": N}`) and return the id.
+/// Returns None on any malformed input — the tray handler then bails out
+/// without setting `pending_route`.
+fn parse_reindex_job_id(body: &str) -> Option<i64> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get("job_id")?
+        .as_i64()
+}
+
+/// SPA route to open after a tray-triggered reindex (#307). Plain `/jobs` —
+/// the SPA picks up the most recent running `index` job from `/api/jobs`
+/// (same selection the `JobsView` uses). Kept as a function so a future
+/// "jump to the new job by id" UX only changes one place.
+fn reindex_route_for_job(_job_id: i64) -> String {
+    "/jobs".to_string()
+}
+
+/// Decide whether to fire a native notification for an index-drift poll (#307).
+/// Mirrors `detect_notifications`: pure, idempotent per drift episode, opens
+/// the front's index health card (#306) on click.
+///
+/// `already_notified`: true when the *current* drift episode has already fired
+/// a notification. Reset by `detect_drift_notification_with_reset` when the
+/// index returns to in-sync, so the user is pinged again on the next drift.
+fn detect_drift_notification(already_notified: bool, body: &str) -> Option<DriftNote> {
+    let s = parse_index_status(body)?;
+    if !s.stale || already_notified {
+        return None;
+    }
+    Some(DriftNote {
+        title: "Index is stale".into(),
+        body: format!(
+            "{} page{} out of sync — reindex to refresh.",
+            s.drift.abs(),
+            if s.drift.abs() == 1 { "" } else { "s" }
+        ),
+        route: "/observability".into(),
+    })
+}
+
+/// Same as `detect_drift_notification` but also returns the new
+/// `already_notified` flag: cleared to `false` whenever the index is back in
+/// sync, kept at `true` while it stays stale. The caller threads the returned
+/// value through `AppSession.drift_notified` so the next poll reuses it.
+///
+/// Returns `None` when no notification fires this poll (whether because the
+/// index is fresh, or because it was already notified and is still stale) —
+/// callers should read `AppSession.drift_notified` after the call to update
+/// their bookkeeping.
+fn detect_drift_notification_with_reset(already_notified: bool, body: &str) -> Option<bool> {
+    let Some(s) = parse_index_status(body) else {
+        return None;
+    };
+    if !s.stale {
+        // Drift resolved → re-arm so the next stale episode notifies again.
+        return Some(false);
+    }
+    if already_notified {
+        return Some(true);
+    }
+    Some(true) // caller will fire the notification and store this value
 }
 
 /// Notifications for jobs that have just *started* (queued/none -> running),
@@ -471,6 +593,36 @@ fn navigate_pending(handle: &AppHandle, win: &tauri::WebviewWindow) {
     }
 }
 
+/// Tray "Reindex wiki" handler (#307): POST `/api/index/reindex`, queue the
+/// resulting job for the SPA to surface, and refocus the main window so the
+/// user lands on `/jobs`. Backend down → silent (no notification, no route —
+/// the tray click is fire-and-forget by design).
+fn trigger_reindex_from_tray(handle: &AppHandle) {
+    let session = handle.state::<AppSession>();
+    let body = match http_post_json(
+        session.port,
+        "/api/index/reindex",
+        &session.token,
+        r#"{"embeddings": true}"#,
+    ) {
+        Some(b) => b,
+        None => {
+            eprintln!("[llm-wiki] reindex: backend unreachable from tray");
+            return;
+        }
+    };
+    let Some(job_id) = parse_reindex_job_id(&body) else {
+        eprintln!("[llm-wiki] reindex: malformed response: {body}");
+        return;
+    };
+    // New job → fresh drift episode (the worker will rebuild from disk).
+    *session.drift_notified.lock().unwrap() = false;
+    *session.pending_route.lock().unwrap() = Some(reindex_route_for_job(job_id));
+    eprintln!("[llm-wiki] reindex: enqueued job_id={job_id}");
+    drop(session);
+    open_main_window(handle);
+}
+
 /// Read the clipboard text, capped so a huge clipboard doesn't bloat the window
 /// init script. Empty on failure (quick-capture then opens blank).
 fn read_clipboard_text(handle: &AppHandle) -> String {
@@ -586,9 +738,11 @@ fn gen_token() -> String {
 }
 
 /// Background thread: every 15s poll `GET /api/jobs` to (a) refresh the tray's
-/// "Jobs running: N" item and (b) fire native notifications on terminal job
-/// transitions (#205). Backend down → silent (no regression). Notifications are
-/// suppressed when a window is focused, and honor the `notify_on_jobs` toggle.
+/// "Jobs running: N" item, (b) fire native notifications on terminal job
+/// transitions (#205), and (c) fire a single drift notification per session
+/// when the index is stale (#307). Backend down → silent (no regression).
+/// Notifications are suppressed when a window is focused, and honor the
+/// `notify_on_jobs` toggle.
 fn spawn_job_poll(handle: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(15));
@@ -636,6 +790,45 @@ fn spawn_job_poll(handle: AppHandle) {
             }
         }
         *session.prev_jobs.lock().unwrap() = jobs_status_map(&body);
+
+        // Index-drift poll (#307). Separate request so a slow /api/jobs or a
+        // transient parse error on the status endpoint never blocks the tray
+        // job line. Honors `notify_on_jobs` (same gate as job notifications) so
+        // a user with notifications off sees nothing in either surface.
+        if read_desktop_bool(&session.brain, "notify_on_jobs", true) {
+            if let Some(status_body) =
+                http_get_body(session.port, "/api/index/status", &session.token)
+            {
+                let already = *session.drift_notified.lock().unwrap();
+                let new_flag = detect_drift_notification_with_reset(already, &status_body);
+                // Detect-and-arm: only when the wrapper returned Some(true) did
+                // we transition from "not yet notified, still stale" → notify.
+                if !already && new_flag == Some(true) {
+                    let focused = handle
+                        .get_webview_window("main")
+                        .and_then(|w| w.is_focused().ok())
+                        .unwrap_or(false);
+                    if !focused {
+                        if let Some(note) =
+                            detect_drift_notification(already, &status_body)
+                        {
+                            *session.pending_route.lock().unwrap() = Some(note.route.clone());
+                            let _ = handle
+                                .notification()
+                                .builder()
+                                .title(&note.title)
+                                .body(&note.body)
+                                .show();
+                        }
+                    }
+                }
+                // Persist whatever the wrapper decided (true while stale,
+                // false once it resolves — re-arms the next drift episode).
+                if let Some(flag) = new_flag {
+                    *session.drift_notified.lock().unwrap() = flag;
+                }
+            }
+        }
     });
 }
 
@@ -687,17 +880,23 @@ pub fn run() {
                 run_in_background: AtomicBool::new(run_bg),
                 jobs_item: Mutex::new(None),
                 prev_jobs: Mutex::new(HashMap::new()),
+                drift_notified: Mutex::new(false),
                 pending_route: Mutex::new(None),
             });
 
-            // Tray icon + menu (Open / Jobs status / Quit). All tray logic lives
-            // on the Rust side; the SPA stays unaware (#204 decision).
+            // Tray icon + menu (Open / Jobs status / Reindex wiki / Quit). All
+            // tray logic lives on the Rust side; the SPA stays unaware (#204).
             let open_i = MenuItem::with_id(app, "open", "Open llm-wiki", true, None::<&str>)?;
             let jobs_i = MenuItem::with_id(app, "jobs", "No jobs running", false, None::<&str>)?;
+            let reindex_i = MenuItem::with_id(app, "reindex", "Reindex wiki", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&open_i, &sep1, &jobs_i, &sep2, &quit_i])?;
+            let sep3 = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(
+                app,
+                &[&open_i, &sep1, &jobs_i, &sep2, &reindex_i, &sep3, &quit_i],
+            )?;
             app.state::<AppSession>()
                 .jobs_item
                 .lock()
@@ -709,6 +908,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => open_main_window(app),
+                    "reindex" => trigger_reindex_from_tray(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -830,8 +1030,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        count_running_jobs, detect_notifications, detect_start_notifications,
-        ingest_progress_label, jobs_status_map, tray_jobs_label,
+        count_running_jobs, detect_drift_notification, detect_drift_notification_with_reset,
+        detect_notifications, detect_start_notifications, ingest_progress_label, jobs_status_map,
+        parse_index_status, parse_reindex_job_id, reindex_route_for_job, tray_jobs_label,
     };
     use std::collections::HashMap;
 
@@ -957,5 +1158,107 @@ mod tests {
         assert_eq!(notes[0].title, "Ingestion finished — no pages written");
         assert_eq!(notes[0].route, "/jobs");
         let _ = empty;
+    }
+
+    // --- #307: tray reindex + drift notification ----------------------
+    //
+    // `detect_drift_notification` mirrors `detect_notifications`: pure, takes
+    // the previous `already_notified` flag (idempotent within a session) and
+    // the current `GET /index/status` body, returns at most one DriftNote that
+    // opens the front's index health card (#306) on click. The wrapper logic
+    // (HTTP poll, focused-window suppression, notify_on_jobs gate) lives in
+    // `spawn_drift_poll`; the test below covers only the pure decision.
+
+    #[test]
+    fn drift_notification_fires_once_when_stale_first_seen() {
+        let body = r#"{"stale": true, "drift": 3, "db_pages": 5, "disk_files": 8}"#;
+        let note = detect_drift_notification(false, body).expect("should notify on stale");
+        assert_eq!(note.title, "Index is stale");
+        assert!(note.body.contains("3"));
+        assert_eq!(note.route, "/observability");
+    }
+
+    #[test]
+    fn drift_notification_idempotent_within_session() {
+        let body = r#"{"stale": true, "drift": 3, "db_pages": 5, "disk_files": 8}"#;
+        // First call sees stale=false → notify and remember.
+        assert!(detect_drift_notification(false, body).is_some());
+        // Same poll, already_notified=true → silent.
+        assert!(detect_drift_notification(true, body).is_none());
+    }
+
+    #[test]
+    fn drift_notification_silent_when_not_stale() {
+        let body = r#"{"stale": false, "drift": 0, "db_pages": 8, "disk_files": 8}"#;
+        assert!(detect_drift_notification(false, body).is_none());
+        assert!(detect_drift_notification(true, body).is_none());
+    }
+
+    #[test]
+    fn drift_notification_re_arms_after_drift_resolves() {
+        // stale=true → notify once (already_notified becomes true).
+        let stale = r#"{"stale": true, "drift": 2, "db_pages": 5, "disk_files": 7}"#;
+        assert!(detect_drift_notification(false, stale).is_some());
+        // stale=false → silent, but already_notified resets so the user can be
+        // pinged again on the next drift (#307: idempotent per drift episode,
+        // not per session lifetime).
+        let fresh = r#"{"stale": false, "drift": 0, "db_pages": 7, "disk_files": 7}"#;
+        // Resolver returns the new already_notified value: false again.
+        assert_eq!(detect_drift_notification_with_reset(true, fresh), Some(false));
+        // New stale episode → notify again.
+        assert!(detect_drift_notification(false, stale).is_some());
+    }
+
+    #[test]
+    fn drift_notification_handles_garbage_body() {
+        // Malformed body or non-JSON → no notification, no panic.
+        assert!(detect_drift_notification(false, "not json").is_none());
+        assert!(detect_drift_notification(false, "").is_none());
+        assert!(detect_drift_notification(false, "{}").is_none());
+        assert!(detect_drift_notification(false, r#"{"stale": "yes"}"#).is_none());
+    }
+
+    #[test]
+    fn parse_index_status_reads_drift_fields() {
+        let body = r#"{
+            "db_pages": 5, "disk_files": 8, "drift": 3, "stale": true,
+            "embeddings": {"count": 5, "expected": 5, "enabled": true},
+            "last_reindex_at": "2026-06-26T01:00:00Z"
+        }"#;
+        let s = parse_index_status(body).expect("should parse");
+        assert_eq!(s.db_pages, 5);
+        assert_eq!(s.disk_files, 8);
+        assert_eq!(s.drift, 3);
+        assert!(s.stale);
+    }
+
+    #[test]
+    fn parse_index_status_returns_none_on_garbage() {
+        assert!(parse_index_status("not json").is_none());
+        assert!(parse_index_status("").is_none());
+        assert!(parse_index_status(r#"{"stale": "yes"}"#).is_none());
+    }
+
+    #[test]
+    fn parse_reindex_job_id_extracts_int() {
+        let body = r#"{"job_id": 42}"#;
+        assert_eq!(parse_reindex_job_id(body), Some(42));
+        assert_eq!(parse_reindex_job_id(r#"{"job_id": 1}"#), Some(1));
+    }
+
+    #[test]
+    fn parse_reindex_job_id_handles_garbage() {
+        assert_eq!(parse_reindex_job_id("not json"), None);
+        assert_eq!(parse_reindex_job_id(r#"{"other": 1}"#), None);
+        assert_eq!(parse_reindex_job_id(r#"{"job_id": "x"}"#), None);
+    }
+
+    #[test]
+    fn reindex_route_for_job_opens_jobs_view() {
+        // After a tray-triggered reindex, the window navigates to /jobs so the
+        // user can watch the job (#307 AC1). The route is plain; the SPA picks
+        // the focused job from /api/jobs.
+        assert_eq!(reindex_route_for_job(42), "/jobs");
+        assert_eq!(reindex_route_for_job(1), "/jobs");
     }
 }
