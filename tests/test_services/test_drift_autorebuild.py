@@ -302,3 +302,125 @@ class TestBootLatency:
         finally:
             conn.close()
         assert called["n"] == 0, "drift helper must never invoke reindex inline"
+
+def _seed_malformed(brain: BrainPaths, name: str) -> None:
+    """A .md whose frontmatter is a YAML list, not a mapping → reindex skips it
+    (InvalidFrontmatterError) so it lands on disk but never in wiki_pages."""
+    p = brain.wiki / "concepts" / f"{name}.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("---\n- not\n- a mapping\n---\nbody\n", encoding="utf-8")
+
+
+class TestSkippedPagesDoNotLoop:
+    """#317: a malformed page must not read as eternal drift → reindex loop."""
+
+    def test_skipped_pages_excluded_from_drift_after_reindex(
+        self, brain: BrainPaths
+    ) -> None:
+        from llmwiki.services import index_service
+        from llmwiki.services.drift import detect_and_handle_drift
+
+        _seed_wiki_pages(brain, ["rag", "vectors"])  # 2 valid
+        _seed_malformed(brain, "broken")  # 1 skipped
+        cfg = WorkspaceConfig(brain_root=brain.root, index_autorebuild_on_drift=True)
+
+        conn = get_connection(brain.db_path)
+        try:
+            report = index_service.reindex(brain, conn, cfg)
+            assert report.pages_indexed == 2
+            assert len(report.skipped) == 1
+            # disk=3, db=2, skipped=1 → drift must be 0 (not 1).
+            drift = detect_and_handle_drift(brain, conn, cfg)
+            n_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            stale = MetaRepo(conn).get("index_drift_stale")
+        finally:
+            conn.close()
+
+        assert drift == 0
+        assert stale == "false"
+        assert n_jobs == 0, "malformed page must not enqueue an endless reindex"
+
+    def test_real_wipe_still_detected_with_skipped_baseline(
+        self, brain: BrainPaths
+    ) -> None:
+        """Regression guard: skipped accounting must not mask a real wipe."""
+        from llmwiki.services import index_service
+        from llmwiki.services.drift import detect_and_handle_drift
+
+        _seed_wiki_pages(brain, ["a", "b"])
+        _seed_malformed(brain, "broken")
+        cfg = WorkspaceConfig(brain_root=brain.root, index_autorebuild_on_drift=False)
+        conn = get_connection(brain.db_path)
+        try:
+            index_service.reindex(brain, conn, cfg)  # persists skipped=1
+            # Simulate an external wipe of wiki_pages (the desktop-brain bug).
+            conn.execute("DELETE FROM wiki_pages")
+            conn.commit()
+            drift = detect_and_handle_drift(brain, conn, cfg)
+            stale = MetaRepo(conn).get("index_drift_stale")
+        finally:
+            conn.close()
+        # disk=3, db=0, skipped=1 → drift=2 (the 2 valid pages), still stale.
+        assert drift == 2
+        assert stale == "true"
+
+
+class TestStartupNeverReindexesInline:
+    """#316: _on_startup enqueues a job for missing embeddings, never inline."""
+
+    def _write_embedding_config(self, wiki_home, model: str = "ollama:fake") -> None:
+        (wiki_home / "config.yaml").write_text(
+            f"embedding_model: {model}\n", encoding="utf-8"
+        )
+
+    def test_empty_embeddings_enqueues_job_without_inline_reindex(
+        self, brain: BrainPaths, isolated_wiki_home, monkeypatch
+    ) -> None:
+        import llmwiki.core.paths as paths_mod
+        import llmwiki.workers.lifecycle as lifecycle
+        from llmwiki.interfaces.api import main as api_main
+        from llmwiki.services import index_service
+
+        self._write_embedding_config(isolated_wiki_home)
+        called = {"n": 0}
+        monkeypatch.setattr(
+            index_service,
+            "reindex",
+            lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+        )
+        monkeypatch.setattr(paths_mod, "load_active_brain", lambda: brain)
+        monkeypatch.setattr(lifecycle, "write_lock", lambda *a, **k: None)
+
+        api_main._on_startup()
+
+        conn = get_connection(brain.db_path)
+        try:
+            rows = JobRepo(conn).list(limit=5)
+        finally:
+            conn.close()
+        assert called["n"] == 0, "_on_startup must never reindex inline (#316)"
+        assert len(rows) == 1
+        assert rows[0]["type"] == "index"
+
+    def test_drift_does_not_double_enqueue_backfill(
+        self, brain: BrainPaths, isolated_wiki_home, monkeypatch
+    ) -> None:
+        """Drift!=0 already enqueues a job (rebuilds embeddings too) → the
+        embeddings backfill branch must not add a second one."""
+        import llmwiki.core.paths as paths_mod
+        import llmwiki.workers.lifecycle as lifecycle
+        from llmwiki.interfaces.api import main as api_main
+
+        self._write_embedding_config(isolated_wiki_home)
+        _seed_wiki_pages(brain, ["one", "two", "three"])  # disk=3, db=0 → drift
+        monkeypatch.setattr(paths_mod, "load_active_brain", lambda: brain)
+        monkeypatch.setattr(lifecycle, "write_lock", lambda *a, **k: None)
+
+        api_main._on_startup()
+
+        conn = get_connection(brain.db_path)
+        try:
+            rows = JobRepo(conn).list(limit=5)
+        finally:
+            conn.close()
+        assert len(rows) == 1, "drift + empty embeddings must enqueue exactly one job"

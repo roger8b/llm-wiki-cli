@@ -361,9 +361,11 @@ export interface IndexStatusEmbeddings {
 export interface IndexStatus {
   db_pages: number
   disk_files: number
-  /** disk_files − db_pages. Negative means the DB has rows with no file on disk. */
+  /** Files the last reindex skipped (invalid frontmatter); excluded from drift (#317). */
+  skipped?: number
+  /** disk_files − db_pages − skipped. Negative means the DB has rows with no file on disk. */
   drift: number
-  /** True when db_pages !== disk_files; the front-end shows a "Reindex" CTA. */
+  /** True when drift !== 0; the front-end shows a "Reindex" CTA. */
   stale: boolean
   embeddings: IndexStatusEmbeddings
   /** ISO timestamp of the last successful reindex, or null if never run. */

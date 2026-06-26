@@ -228,3 +228,32 @@ class TestReindexJobRunsAndPersists:
         assert "event: status" in r.text
         assert "event: result" in r.text
         assert "event: end" in r.text
+
+
+class TestStatusSkipped:
+    """#317: GET /index/status excludes skipped (malformed) pages from drift."""
+
+    def test_malformed_page_not_counted_as_drift(
+        self, client, brain: BrainPaths
+    ) -> None:
+        from llmwiki.core.config import load_config
+        from llmwiki.services import index_service
+
+        _seed_pages(brain, ["rag", "vectors"])  # 2 valid
+        (brain.wiki / "concepts" / "broken.md").write_text(
+            "---\n- not\n- a mapping\n---\nbody\n", encoding="utf-8"
+        )
+        conn = get_connection(brain.db_path)
+        try:
+            report = index_service.reindex(brain, conn, load_config(brain))
+            index_service.rebuild_index_md(brain, conn)
+        finally:
+            conn.close()
+        assert len(report.skipped) == 1
+
+        body = client.get("/api/index/status").json()
+        assert body["disk_files"] == 3
+        assert body["db_pages"] == 2
+        assert body["skipped"] == 1
+        assert body["drift"] == 0
+        assert body["stale"] is False

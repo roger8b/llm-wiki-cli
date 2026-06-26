@@ -43,16 +43,23 @@ export const useIndexHealthStore = create<IndexHealthState>((set, get) => ({
   reindex: async (embeddings = true) => {
     if (get().busy) return
     set({ busy: true })
+    // streamJob resolves on any terminal event — including a failed/cancelled
+    // job — so capture those instead of always reporting success (#316).
+    let failure: string | null = null
     try {
       const { job_id } = await api.reindex(embeddings)
       // Follow the SSE stream so the busy flag clears at the right moment.
       await api.streamJob(job_id, {
-        onResult: () => {
-          // no-op: we refresh on the unconditional path below.
+        onError: (m) => {
+          failure = m
+        },
+        onCancelled: () => {
+          failure = "cancelled"
         },
       })
       await get().refresh()
-      toast.success("Index rebuilt")
+      if (failure) toast.error(`Reindex failed: ${failure}`)
+      else toast.success("Index rebuilt")
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(`Reindex failed: ${msg}`)

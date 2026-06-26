@@ -13,7 +13,7 @@ export function DriftBanner({
   onReindex,
 }: {
   stale: boolean
-  /** db_pages − disk_files (negative = rows missing files; positive = files missing rows). */
+  /** disk_files − db_pages (positive = files not indexed; negative = rows missing files). */
   drift: number
   busy?: boolean
   onReindex: () => void

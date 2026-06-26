@@ -22,30 +22,18 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from pathlib import Path
 
 from ..core.config import WorkspaceConfig
 from ..core.paths import BrainPaths
 from ..db.repo import JobRepo, MetaRepo
+from . import index_service
 
 logger = logging.getLogger("llmwiki.services.drift")
-
-# Kept in sync with index_service._SPECIAL so the disk count matches what a
-# real reindex would see (index.md / log.md are special, not content pages).
-_DISK_EXCLUDE = frozenset({"index.md", "log.md"})
 
 # meta kv keys (UI/CLI can read these without going through the status router)
 META_STALE = "index_drift_stale"
 META_DISK = "index_drift_disk"
 META_DB = "index_drift_db"
-
-
-def _count_disk_files(wiki_dir: Path) -> int:
-    if not wiki_dir.is_dir():
-        return 0
-    return sum(
-        1 for p in wiki_dir.rglob("*.md") if p.name not in _DISK_EXCLUDE
-    )
 
 
 def detect_and_handle_drift(
@@ -61,8 +49,11 @@ def detect_and_handle_drift(
       and the job id is logged.
     """
     db_pages = int(conn.execute("SELECT COUNT(*) AS n FROM wiki_pages").fetchone()["n"])
-    disk_files = _count_disk_files(paths.wiki)
-    drift = disk_files - db_pages
+    disk_files = index_service.count_indexable_files(paths.wiki)
+    # Subtract files the last reindex legitimately skipped (invalid frontmatter)
+    # so a malformed page doesn't read as eternal drift → endless reindex (#317).
+    skipped = int(MetaRepo(conn).get(index_service.META_SKIPPED) or 0)
+    drift = disk_files - db_pages - skipped
 
     if drift == 0:
         # Clear stale flag so a freshly-synced brain stops showing the badge.

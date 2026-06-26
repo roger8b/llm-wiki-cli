@@ -77,12 +77,16 @@ def _on_startup() -> None:
     Also runs the cheap drift check (#308): two COUNTs, no reindex. When the
     brain is out of sync the helper either enqueues a background ``index``
     job (``index_autorebuild_on_drift=True``, the default) or just records
-    the stale flag for the UI/CLI.
+    the stale flag for the UI/CLI. The reindex itself NEVER runs inline here —
+    a large brain would block the lifespan (#316).
     """
+    import json
+    import logging
+
     from ...core.config import load_config
     from ...core.paths import load_active_brain
     from ...db.connection import get_connection
-    from ...services import index_service
+    from ...db.repo import JobRepo
     from ...services.drift import detect_and_handle_drift
     from ...workers.lifecycle import recover_interrupted_jobs, write_lock
 
@@ -95,24 +99,33 @@ def _on_startup() -> None:
         try:
             n = recover_interrupted_jobs(conn)
             if n:
-                import logging
-
                 logging.getLogger("llmwiki.workers").info(
                     "Recovered %d orphan running job(s) as interrupted.", n
                 )
             cfg = load_config(paths)
-            if cfg.embedding_model and not conn.execute(
-                "SELECT 1 FROM page_embeddings LIMIT 1"
-            ).fetchone():
-                index_service.reindex(paths, conn, cfg)
-                index_service.rebuild_index_md(paths, conn)
-            # Drift check + optional auto-rebuild (#308). Cheap; never reindexes inline.
-            detect_and_handle_drift(paths, conn, cfg)
+            # Drift check + optional auto-rebuild (#308). Cheap; never reindexes
+            # inline — enqueues an ``index`` job when stale.
+            drift = detect_and_handle_drift(paths, conn, cfg)
+            # Embeddings backfill (#304): a brain configured for embeddings but
+            # with none built needs a reindex too — but as a JOB, never inline,
+            # or boot blocks on a full Ollama pass for a large brain (#316).
+            # Skip when drift already enqueued one (it rebuilds embeddings too).
+            if (
+                drift == 0
+                and cfg.embedding_model
+                and not conn.execute(
+                    "SELECT 1 FROM page_embeddings LIMIT 1"
+                ).fetchone()
+            ):
+                job_id = JobRepo(conn).create(
+                    "index", json.dumps({"embeddings": True}), status="queued"
+                )
+                logging.getLogger("llmwiki.workers").info(
+                    "embeddings missing → enqueued reindex job #%d", job_id
+                )
         finally:
             conn.close()
     except Exception:
-        import logging
-
         logging.getLogger("llmwiki.workers").exception("Orphan-job recovery failed")
     port_env = os.getenv("LLMWIKI_SERVER_PORT")
     write_lock(paths, port=int(port_env) if port_env and port_env.isdigit() else None)
