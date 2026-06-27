@@ -246,14 +246,17 @@ class TestStartupLog:
 class TestBootLatency:
     """AC5: the drift check is two COUNTs — boot must not regress meaningfully."""
 
-    def test_helper_completes_in_under_100ms_for_1000_files(
+    def test_helper_completes_well_under_a_reindex_for_1000_files(
         self, brain: BrainPaths
     ) -> None:
-        """1k markdown files on disk + populated wiki_pages — one call under 100ms.
+        """1k markdown files on disk + populated wiki_pages — one fast call.
 
-        The bound is generous on purpose (CI variance) — the AC is that the
-        helper is bounded by a few SQL COUNTs, not a reindex.  A 100ms ceiling
-        for 1k files is well within "two cheap COUNTs".
+        The AC is that the helper is bounded by a few SQL COUNTs + a disk file
+        count, NOT a reindex (which would be O(seconds) for 1k files). A 100ms
+        ceiling proved too tight on shared CI disks (#324) where walking 1k
+        files dominates; 0.5s still catches an accidental reindex by an order of
+        magnitude while not flaking on I/O. The behavioural guard against an
+        actual reindex lives in ``test_helper_does_not_call_reindex``.
         """
         # Seed 1000 .md files.
         (brain.wiki / "concepts").mkdir(parents=True, exist_ok=True)
@@ -272,7 +275,7 @@ class TestBootLatency:
             elapsed = time.monotonic() - t0
         finally:
             conn.close()
-        assert elapsed < 0.1, f"helper took {elapsed:.3f}s for 1k files — too slow"
+        assert elapsed < 0.5, f"helper took {elapsed:.3f}s for 1k files — reindex regression?"
 
     def test_helper_does_not_call_reindex(
         self, brain: BrainPaths, monkeypatch
