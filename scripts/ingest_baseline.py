@@ -223,6 +223,21 @@ def render(runs: list[dict]) -> str:
             f"tool calls: {ex.get('tool_calls', '?')} · "
             f"fallback: {ex.get('used_fallback', '?')}",
             "",
+        ]
+        by_source = ex.get("tokens_by_source") or {}
+        if by_source:
+            tot = sum(by_source.values()) or 1
+            ranked = sorted(by_source.items(), key=lambda kv: kv[1], reverse=True)
+            top = ranked[0][0]
+            lines += [
+                f"Input by source (re-send accounted, dominant: **{top}**):",
+                "",
+                "| Source | Input tokens | % |",
+                "| --- | ---: | ---: |",
+                *[f"| {src} | {n:,} | {n / tot * 100:.0f}% |" for src, n in ranked],
+                "",
+            ]
+        lines += [
             f"Wiki size during run: **{pages} pages** · explore tool calls "
             f"(search/related/read): **{explore}**" + (f" · {by_name}" if by_name else ""),
             "",
