@@ -123,16 +123,30 @@ jobs:
         run: npm run build
 
       # Step 2: compile Python sidecar binary (PyInstaller)
+      #
+      # The sidecar's sqlite3 must load extensions (sqlite-vec) or semantic
+      # search is dead in the shipped app (#319). actions/setup-python ships a
+      # python-build-standalone whose sqlite3 lacks enable_load_extension, so we
+      # build from a venv created off Homebrew's python (which has it) instead.
+      - name: Select vec-capable Python (Homebrew)
+        id: vecpy
+        run: |
+          PY="$(brew --prefix python)/bin/python3"
+          "$PY" -c "import sqlite3,sys; sys.exit(0 if hasattr(sqlite3.connect(':memory:'),'enable_load_extension') else 1)"
+          "$PY" -m venv .vecvenv
+          echo "py=$PWD/.vecvenv/bin/python" >> "$GITHUB_OUTPUT"
+
       - name: Install Python dependencies
         # Full feature set bundled into the frozen sidecar (semantic search,
         # audio transcription, all providers, document extractors). The build
         # script re-pins the same extras, so this just primes the pip cache.
         run: |
-          pip install -e ".[agent,ollama,anthropic,openai,google,api,mcp,pdf,html,semantic,audio]"
-          pip install pyinstaller
+          "${{ steps.vecpy.outputs.py }}" -m pip install --upgrade pip
+          "${{ steps.vecpy.outputs.py }}" -m pip install -e ".[agent,ollama,anthropic,openai,google,api,mcp,pdf,html,semantic,audio]"
+          "${{ steps.vecpy.outputs.py }}" -m pip install pyinstaller
 
       - name: Build PyInstaller sidecar
-        run: PYTHON="$(which python)" ./scripts/build_sidecar.sh
+        run: PYTHON="${{ steps.vecpy.outputs.py }}" ./scripts/build_sidecar.sh
 
       # Step 3: build Tauri macOS app
       - name: Clean stale DMG mounts

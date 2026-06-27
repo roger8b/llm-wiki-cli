@@ -94,8 +94,23 @@ class TestStatusEndpoint:
         assert body["disk_files"] == 0
         assert body["drift"] == 0
         assert body["stale"] is False
-        assert body["embeddings"] == {"count": 0, "expected": 0, "enabled": False}
+        assert body["embeddings"]["count"] == 0
+        assert body["embeddings"]["expected"] == 0
+        assert body["embeddings"]["enabled"] is False
+        # #319: surface the semantic backend health so a 0 count isn't silent.
+        assert isinstance(body["embeddings"]["backend_loadable"], bool)
         assert body["last_reindex_at"] is None
+
+    def test_status_reports_backend_loadable(self, client) -> None:
+        """#319: status mirrors load_vec_extension so the UI can show
+        'semantic backend unavailable' instead of an unexplained 0."""
+        import sqlite3
+
+        from llmwiki.db.connection import load_vec_extension
+
+        expected = load_vec_extension(sqlite3.connect(":memory:"))
+        body = client.get("/api/index/status").json()
+        assert body["embeddings"]["backend_loadable"] is expected
 
     def test_status_after_reindex_is_in_sync(
         self, client, brain: BrainPaths, monkeypatch

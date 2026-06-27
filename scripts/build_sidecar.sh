@@ -14,6 +14,24 @@ PY="${PYTHON:-python3}"
 BIN_DIR="$ROOT/ui/src-tauri/binaries"
 ENTRY="$ROOT/scripts/sidecar_entry.py"
 
+# --- sqlite-vec loadability guard (#319) --------------------------------
+# PyInstaller bundles $PY's own sqlite3. If that build lacks
+# enable_load_extension (uv python-build-standalone, system python on macOS),
+# the frozen sidecar can NEVER load sqlite-vec and semantic embeddings stay 0
+# at runtime — silently degrading to FTS-only. Fail the build loudly here
+# instead of shipping a sidecar that can't do hybrid search.
+# Override with SKIP_VEC_CHECK=1 only if you knowingly want an FTS-only bundle.
+if [ "${SKIP_VEC_CHECK:-0}" != "1" ]; then
+  if ! "$PY" -c "import sqlite3,sys; sys.exit(0 if hasattr(sqlite3.connect(':memory:'),'enable_load_extension') else 1)"; then
+    echo "ERROR: $PY's sqlite3 has no enable_load_extension — sqlite-vec can't load." >&2
+    echo "       The sidecar would ship with semantic search dead (page_embeddings=0)." >&2
+    echo "       Use a Python whose sqlite3 supports loadable extensions, e.g.:" >&2
+    echo "         PYTHON=\$(brew --prefix python)/bin/python3 ./scripts/build_sidecar.sh" >&2
+    echo "       Or set SKIP_VEC_CHECK=1 to build an FTS-only sidecar on purpose." >&2
+    exit 1
+  fi
+fi
+
 # --- target triple (Tauri convention) ----------------------------------
 TRIPLE="$("$PY" - <<'PYEOF'
 import platform
