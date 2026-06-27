@@ -119,8 +119,21 @@ Install a specific version with `VERSION=v2.1.0`, or skip auto-launch with
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[agent,ollama,api,mcp,dev]"
+pip install -e ".[agent,ollama,api,mcp,dev,semantic]"
 ```
+
+> **Semantic search needs a vec-capable Python.** `sqlite-vec` is loaded as a
+> sqlite extension, so the interpreter's `sqlite3` must support
+> `enable_load_extension`. uv's python-build-standalone and macOS system
+> `python3` do **not** — use e.g. Homebrew's
+> (`brew install python`). Check with:
+> ```bash
+> python -c "import sqlite3; print(hasattr(sqlite3.connect(':memory:'),'enable_load_extension'))"
+> ```
+> If it prints `False`, semantic embeddings silently degrade to FTS-only
+> (`GET /api/index/status` → `embeddings.backend_loadable: false`). The desktop
+> sidecar build (`build_desktop.sh`) bundles this venv's Python and aborts if it
+> can't load extensions (#319) — override with `PYTHON=<vec-capable python>`.
 
 ---
 

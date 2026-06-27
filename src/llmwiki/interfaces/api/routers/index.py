@@ -61,6 +61,7 @@ def index_status() -> dict[str, Any]:
     that to offer a "Reindex" button without polling the worker.
     """
     from ....core.config import load_config
+    from ....db.connection import load_vec_extension
     from ....db.repo import MetaRepo, PageRepo
     from ....services import index_service
 
@@ -78,6 +79,11 @@ def index_status() -> dict[str, Any]:
             "SELECT COUNT(DISTINCT path) AS n FROM page_embeddings"
         ).fetchone()
         embeddings_count = int(emb_count_row["n"]) if emb_count_row else 0
+        # #319: whether the sqlite-vec extension actually loads on this runtime.
+        # When the bundled sqlite3 lacks enable_load_extension the semantic
+        # backend silently degrades to FTS-only and embeddings stay 0 — surface
+        # that here so a 0 count isn't unexplained.
+        backend_loadable = load_vec_extension(conn)
         last_reindex_at = MetaRepo(conn).get("last_reindex_at")
     finally:
         conn.close()
@@ -93,6 +99,7 @@ def index_status() -> dict[str, Any]:
             "count": embeddings_count,
             "expected": db_pages,
             "enabled": embeddings_enabled,
+            "backend_loadable": backend_loadable,
         },
         "last_reindex_at": last_reindex_at,
     }

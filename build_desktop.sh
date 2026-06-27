@@ -18,7 +18,11 @@ npm run build
 cd "$ROOT"
 
 echo "==> 2. Compiling Python sidecar backend binary..."
-PYTHON=.venv/bin/python ./scripts/build_sidecar.sh
+# The sidecar's Python must have a sqlite3 that loads extensions (sqlite-vec),
+# otherwise semantic embeddings are dead in the shipped app (#319). The venv
+# must therefore be created from a vec-capable interpreter — see CONTRIBUTING.
+# build_sidecar.sh guards this and aborts if the chosen Python can't load it.
+PYTHON="${PYTHON:-.venv/bin/python}" ./scripts/build_sidecar.sh
 
 echo "==> 3. Building Tauri macOS application..."
 # bundle_dmg.sh fails if a volume named "llm-wiki" from a previous DMG is still
