@@ -114,6 +114,64 @@ export function countByStatus(items: Source[]): {
   return { total, pending: total - processed, processed }
 }
 
+/** Chip filter selector (#338). The UI exposes 5 chips — one per concrete
+ *  status plus an 'all' reset — so a user can drill into a specific bucket
+ *  (e.g. "Error" only). Distinct from `countByStatus().pending`, which is the
+ *  aggregate "still needs action" view used by the group header breakdown. */
+export type StatusFilter = Source["status"] | "all"
+
+export const STATUS_FILTERS: StatusFilter[] = [
+  "all",
+  "pending",
+  "processing",
+  "processed",
+  "error",
+]
+
+export const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+  all: "All",
+  pending: "Pending",
+  processing: "Processing",
+  processed: "Ingested",
+  error: "Error",
+}
+
+/** Parse a deep-link `?status=…` param into a `StatusFilter`. Unknown values
+ *  (including `null`/`undefined` when the param is missing) fall back to
+ *  `'all'` so a malformed link never locks the user out of the list (#338
+ *  AC3: default = current behavior). */
+export function parseStatusFilter(raw: string | null | undefined): StatusFilter {
+  if (raw && (STATUS_FILTERS as string[]).includes(raw)) {
+    return raw as StatusFilter
+  }
+  return "all"
+}
+
+/** Apply the chip predicate. `'all'` is a no-op and returns the same array
+ *  reference (no extra allocation) so `useMemo` can short-circuit. */
+export function filterByStatus(
+  items: Source[],
+  filter: StatusFilter,
+): Source[] {
+  if (filter === "all") return items
+  return items.filter((s) => s.status === filter)
+}
+
+/** Per-status counts for the chip row (#338 AC: stable when filter changes).
+ *  Counts derive from the unfiltered list so chips don't dance as the user
+ *  toggles filters. */
+export function chipCounts(items: Source[]): Record<StatusFilter, number> {
+  const counts: Record<StatusFilter, number> = {
+    all: items.length,
+    pending: 0,
+    processing: 0,
+    processed: 0,
+    error: 0,
+  }
+  for (const s of items) counts[s.status]++
+  return counts
+}
+
 function AddSourceDialog({
   open,
   onOpenChange,
@@ -360,6 +418,7 @@ export function SourcesView() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [filter, setFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [selected, setSelected] = useState<string | null>(null)
   const [content, setContent] = useState<SourceContent | null>(null)
   const [contentLoading, setContentLoading] = useState(false)
@@ -393,6 +452,17 @@ export function SourcesView() {
     setDialogOpen(true)
     const next = new URLSearchParams(params)
     next.delete("add")
+    setParams(next, { replace: true })
+  }, [params, setParams])
+
+  // Deep-link: ?status=pending (or any StatusFilter) pre-selects the chip on
+  // load. Aligned with the `?add=` and `?path=` deep-links above (#338).
+  useEffect(() => {
+    const raw = params.get("status")
+    if (raw === null) return
+    setStatusFilter(parseStatusFilter(raw))
+    const next = new URLSearchParams(params)
+    next.delete("status")
     setParams(next, { replace: true })
   }, [params, setParams])
 
@@ -454,16 +524,19 @@ export function SourcesView() {
   )
 
   const filtered = useMemo(
-    () =>
-      filter
-        ? sources.filter(
-            (s) =>
-              s.path.toLowerCase().includes(filter.toLowerCase()) ||
-              (s.title ?? "").toLowerCase().includes(filter.toLowerCase()),
-          )
-        : sources,
-    [sources, filter],
+    () => {
+      const byStatus = filterByStatus(sources, statusFilter)
+      if (!filter) return byStatus
+      const q = filter.toLowerCase()
+      return byStatus.filter(
+        (s) =>
+          s.path.toLowerCase().includes(q) ||
+          (s.title ?? "").toLowerCase().includes(q),
+      )
+    },
+    [sources, filter, statusFilter],
   )
+  const counts = useMemo(() => chipCounts(sources), [sources])
   const groups = useMemo(() => groupBySourceDir(filtered), [filtered])
   const current = sources.find((s) => s.path === selected) ?? null
 
@@ -479,6 +552,26 @@ export function SourcesView() {
           >
             <Plus className="size-4" /> Add source
           </Button>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by status">
+            {STATUS_FILTERS.map((sf) => {
+              const active = statusFilter === sf
+              return (
+                <button
+                  key={sf}
+                  onClick={() => setStatusFilter(sf)}
+                  aria-pressed={active}
+                  className={cn(
+                    "h-6 rounded border px-1.5 text-[11px] transition-colors",
+                    active
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  {STATUS_FILTER_LABELS[sf]} ({counts[sf]})
+                </button>
+              )
+            })}
+          </div>
           <div className="relative">
             <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -528,6 +621,20 @@ export function SourcesView() {
           {!loading && sources.length === 0 && (
             <div className="px-3 py-3 text-[12px] text-muted-foreground">
               No sources yet. Add one to get started.
+            </div>
+          )}
+          {!loading && sources.length > 0 && filtered.length === 0 && (
+            <div className="px-3 py-3 text-[12px] text-muted-foreground">
+              No sources match the current filter.{" "}
+              <button
+                onClick={() => {
+                  setStatusFilter("all")
+                  setFilter("")
+                }}
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                Reset filters
+              </button>
             </div>
           )}
         </div>

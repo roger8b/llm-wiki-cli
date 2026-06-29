@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { Source } from "@/types"
 import {
+  chipCounts,
   countByStatus,
+  filterByStatus,
   groupBySourceDir,
+  parseStatusFilter,
   statusDotClass,
   statusDotLabel,
 } from "./SourcesView"
@@ -102,5 +105,96 @@ describe("countByStatus (#337)", () => {
       src("raw/articles/b.md", "processed"),
     ]
     expect(countByStatus(items)).toEqual({ total: 2, pending: 0, processed: 2 })
+  })
+})
+
+describe("parseStatusFilter (#338 deep-link)", () => {
+  it("parses each known status to itself", () => {
+    for (const s of ["pending", "processing", "processed", "error"] as const) {
+      expect(parseStatusFilter(s)).toBe(s)
+    }
+  })
+
+  it("parses 'all' to 'all'", () => {
+    expect(parseStatusFilter("all")).toBe("all")
+  })
+
+  it("falls back to 'all' for unknown values", () => {
+    expect(parseStatusFilter("foo")).toBe("all")
+    expect(parseStatusFilter("")).toBe("all")
+  })
+
+  it("falls back to 'all' for null/undefined", () => {
+    expect(parseStatusFilter(null)).toBe("all")
+    expect(parseStatusFilter(undefined)).toBe("all")
+  })
+})
+
+describe("filterByStatus (#338 predicate)", () => {
+  const items = [
+    src("raw/articles/a.md", "pending"),
+    src("raw/articles/b.md", "processed"),
+    src("raw/articles/c.md", "processing"),
+    src("raw/articles/d.md", "error"),
+    src("raw/articles/e.md", "pending"),
+  ]
+
+  it("'all' returns the same array reference (no-op)", () => {
+    expect(filterByStatus(items, "all")).toBe(items)
+  })
+
+  it("filters by exact status (pending keeps only pending)", () => {
+    const out = filterByStatus(items, "pending")
+    expect(out.every((s) => s.status === "pending")).toBe(true)
+    expect(out).toHaveLength(2)
+  })
+
+  it("filters by processed → only ingested items", () => {
+    const out = filterByStatus(items, "processed")
+    expect(out.every((s) => s.status === "processed")).toBe(true)
+    expect(out).toHaveLength(1)
+  })
+
+  it("filters by error → only failed items", () => {
+    const out = filterByStatus(items, "error")
+    expect(out.every((s) => s.status === "error")).toBe(true)
+    expect(out).toHaveLength(1)
+  })
+
+  it("returns empty array when no items match", () => {
+    const onlyProcessed = [
+      src("raw/a.md", "processed"),
+      src("raw/b.md", "processed"),
+    ]
+    expect(filterByStatus(onlyProcessed, "pending")).toEqual([])
+  })
+})
+
+describe("chipCounts (#338)", () => {
+  it("returns per-status counts plus total — independent of any current filter", () => {
+    const items = [
+      src("raw/a.md", "pending"),
+      src("raw/b.md", "pending"),
+      src("raw/c.md", "processed"),
+      src("raw/d.md", "processing"),
+      src("raw/e.md", "error"),
+    ]
+    expect(chipCounts(items)).toEqual({
+      all: 5,
+      pending: 2,
+      processing: 1,
+      processed: 1,
+      error: 1,
+    })
+  })
+
+  it("returns zeros for an empty list", () => {
+    expect(chipCounts([])).toEqual({
+      all: 0,
+      pending: 0,
+      processing: 0,
+      processed: 0,
+      error: 0,
+    })
   })
 })
