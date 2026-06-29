@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Source } from "@/types"
-import { groupBySourceDir } from "./SourcesView"
+import { groupBySourceDir, statusDotClass, statusDotLabel } from "./SourcesView"
 
 function src(path: string): Source {
   return {
@@ -27,5 +27,42 @@ describe("groupBySourceDir", () => {
   it("puts top-level raw files under 'raw'", () => {
     const groups = groupBySourceDir([src("raw/x.md")])
     expect(groups.raw).toHaveLength(1)
+  })
+})
+
+describe("statusDotClass (#336)", () => {
+  it("uses bg-apply for processed (matches statusBadge palette)", () => {
+    expect(statusDotClass("processed")).toContain("bg-apply")
+  })
+
+  it("uses bg-pending for pending", () => {
+    expect(statusDotClass("pending")).toContain("bg-pending")
+  })
+
+  it("uses bg-primary and animate-pulse for processing (live signal)", () => {
+    const cls = statusDotClass("processing")
+    expect(cls).toContain("bg-primary")
+    expect(cls).toContain("animate-pulse")
+  })
+
+  it("uses bg-rejected for error", () => {
+    expect(statusDotClass("error")).toContain("bg-rejected")
+  })
+
+  it("always renders a circular 6px dot regardless of status", () => {
+    for (const s of ["processed", "pending", "processing", "error"] as const) {
+      const cls = statusDotClass(s)
+      expect(cls).toContain("rounded-full")
+      expect(cls).toContain("size-1.5")
+    }
+  })
+})
+
+describe("statusDotLabel (#336)", () => {
+  it("returns a human-readable label per status for tooltip + aria-label", () => {
+    expect(statusDotLabel("processed")).toBe("Ingested")
+    expect(statusDotLabel("pending")).toBe("Pending ingest")
+    expect(statusDotLabel("processing")).toMatch(/processing/i)
+    expect(statusDotLabel("error")).toMatch(/fail/i)
   })
 })
