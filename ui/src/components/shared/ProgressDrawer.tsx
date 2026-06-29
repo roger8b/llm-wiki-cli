@@ -5,6 +5,9 @@ import { IndeterminateBar } from "@/components/shared/IndeterminateBar"
 import { IngestionProgress } from "@/components/shared/IngestionProgress"
 import { useIngestStore } from "@/stores/ingest"
 import { cn } from "@/lib/utils"
+import { truncateBatchItems } from "@/lib/batchItems"
+
+const BATCH_VISIBLE_LIMIT = 20
 
 export function ProgressDrawer() {
   const navigate = useNavigate()
@@ -49,34 +52,61 @@ export function ProgressDrawer() {
         {hasLiveTimeline ? (
           <IngestionProgress events={events} pagesStaged={pagesStaged} running={running} />
         ) : isBatch
-          ? items.map((it) => (
-              <div key={it.name} className="flex items-center gap-2">
-                {it.status === "done" ? (
-                  <Check className="size-3.5 shrink-0 text-apply" />
-                ) : it.status === "error" ? (
-                  <X className="size-3.5 shrink-0 text-rejected" />
-                ) : it.status === "cancelled" ? (
-                  <Ban className="size-3.5 shrink-0 text-muted-foreground" />
-                ) : it.status === "running" ? (
-                  <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
-                ) : (
-                  <Loader2 className="size-3.5 shrink-0 text-muted-foreground" />
-                )}
-                <span
-                  className={cn(
-                    "truncate",
-                    it.status === "error"
-                      ? "text-rejected"
-                      : it.status === "done"
-                        ? "text-foreground"
-                        : "text-muted-foreground",
+          ? (() => {
+              // Collapse long batch lists so a 50-source bulk ingest doesn't
+              // turn the drawer into a wall of rows (#339). Errors are kept
+              // visible past the limit — AC4 promises per-file errors stay
+              // visible in the drawer, not only in /jobs.
+              const errors = items.filter((it) => it.status === "error")
+              const rest = items.filter((it) => it.status !== "error")
+              const { visible: visibleRest, hiddenCount } = truncateBatchItems(
+                rest,
+                Math.max(0, BATCH_VISIBLE_LIMIT - errors.length),
+              )
+              return (
+                <>
+                  {[...visibleRest, ...errors].map((it) => (
+                    <div key={it.name} className="flex items-center gap-2">
+                      {it.status === "done" ? (
+                        <Check className="size-3.5 shrink-0 text-apply" />
+                      ) : it.status === "error" ? (
+                        <X className="size-3.5 shrink-0 text-rejected" />
+                      ) : it.status === "cancelled" ? (
+                        <Ban className="size-3.5 shrink-0 text-muted-foreground" />
+                      ) : it.status === "running" ? (
+                        <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+                      ) : (
+                        <Loader2 className="size-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span
+                        className={cn(
+                          "truncate",
+                          it.status === "error"
+                            ? "text-rejected"
+                            : it.status === "done"
+                              ? "text-foreground"
+                              : "text-muted-foreground",
+                        )}
+                      >
+                        {it.name}
+                        {it.detail ? ` — ${it.detail}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                  {hiddenCount > 0 && (
+                    <button
+                      onClick={() => {
+                        clear()
+                        navigate("/jobs")
+                      }}
+                      className="w-full pt-1 text-left text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      …and {hiddenCount} more. See Jobs for the full list.
+                    </button>
                   )}
-                >
-                  {it.name}
-                  {it.detail ? ` — ${it.detail}` : ""}
-                </span>
-              </div>
-            ))
+                </>
+              )
+            })()
           : steps.map((s, i) => {
           const last = i === steps.length - 1
           const settled = !running || !last
