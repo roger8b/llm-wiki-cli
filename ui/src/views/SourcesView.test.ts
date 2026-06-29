@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest"
 import type { Source } from "@/types"
-import { groupBySourceDir, statusDotClass, statusDotLabel } from "./SourcesView"
+import {
+  countByStatus,
+  groupBySourceDir,
+  statusDotClass,
+  statusDotLabel,
+} from "./SourcesView"
 
-function src(path: string): Source {
+function src(path: string, status: Source["status"] = "pending"): Source {
   return {
     path,
     type: "md",
     hash: "abcdef0123",
     added_at: "2026-06-07T00:00:00Z",
-    status: "pending",
+    status,
   }
 }
 
@@ -64,5 +69,38 @@ describe("statusDotLabel (#336)", () => {
     expect(statusDotLabel("pending")).toBe("Pending ingest")
     expect(statusDotLabel("processing")).toMatch(/processing/i)
     expect(statusDotLabel("error")).toMatch(/fail/i)
+  })
+})
+
+describe("countByStatus (#337)", () => {
+  it("returns zeros for an empty list", () => {
+    expect(countByStatus([])).toEqual({ total: 0, pending: 0, processed: 0 })
+  })
+
+  it("splits a mix of processed and pending correctly", () => {
+    const items = [
+      src("raw/articles/a.md", "processed"),
+      src("raw/articles/b.md", "pending"),
+      src("raw/articles/c.md", "pending"),
+    ]
+    expect(countByStatus(items)).toEqual({ total: 3, pending: 2, processed: 1 })
+  })
+
+  it("counts processing and error as pending (AC5 edge case)", () => {
+    const items = [
+      src("raw/articles/a.md", "processing"),
+      src("raw/articles/b.md", "error"),
+      src("raw/articles/c.md", "error"),
+    ]
+    // All 3 are non-processed → all 3 counted as pending
+    expect(countByStatus(items)).toEqual({ total: 3, pending: 3, processed: 0 })
+  })
+
+  it("returns pending=0 when every item is processed", () => {
+    const items = [
+      src("raw/articles/a.md", "processed"),
+      src("raw/articles/b.md", "processed"),
+    ]
+    expect(countByStatus(items)).toEqual({ total: 2, pending: 0, processed: 2 })
   })
 })

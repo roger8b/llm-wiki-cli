@@ -97,6 +97,23 @@ export function groupBySourceDir(sources: Source[]): Record<string, Source[]> {
   return groups
 }
 
+/** Per-group source counts for the sidebar header breakdown (#337).
+ *
+ *  `pending` covers every non-processed status (pending / processing / error)
+ *  so the header suffix honestly flags "this folder still needs action"
+ *  regardless of why — including failed ingests. `processed` is exposed for
+ *  future use (e.g. "5 ingested · 2 pending") but not rendered today. */
+export function countByStatus(items: Source[]): {
+  total: number
+  pending: number
+  processed: number
+} {
+  let processed = 0
+  for (const s of items) if (s.status === "processed") processed++
+  const total = items.length
+  return { total, pending: total - processed, processed }
+}
+
 function AddSourceDialog({
   open,
   onOpenChange,
@@ -473,11 +490,19 @@ export function SourcesView() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto py-1">
-          {Object.entries(groups).map(([dir, items]) => (
-            <div key={dir}>
-              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {dir} ({items.length})
-              </div>
+          {Object.entries(groups).map(([dir, items]) => {
+            const { total, pending } = countByStatus(items)
+            return (
+              <div key={dir}>
+                <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {dir} ({total}
+                  {pending > 0 && (
+                    <span className="text-pending font-normal normal-case">
+                      {" "}· {pending} pending
+                    </span>
+                  )}
+                  )
+                </div>
               {items.map((s) => (
                 <button
                   key={s.path}
@@ -498,7 +523,8 @@ export function SourcesView() {
                 </button>
               ))}
             </div>
-          ))}
+            )
+          })}
           {!loading && sources.length === 0 && (
             <div className="px-3 py-3 text-[12px] text-muted-foreground">
               No sources yet. Add one to get started.
