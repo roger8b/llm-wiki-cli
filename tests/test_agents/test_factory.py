@@ -224,3 +224,55 @@ class TestChunkContext:
         from llmwiki.llm_agents.factory import _chunk_context
 
         assert _chunk_context(None, None) == ""
+
+
+class TestIngestionToolExclusion:
+    """#334 — ingestion hides unused built-ins, gated by config (safe fallback)."""
+
+    @staticmethod
+    def _exclude_set(middleware: list) -> frozenset[str]:
+        from llmwiki.llm_agents.middleware import ExcludeToolsMiddleware
+
+        excl = [m for m in middleware if isinstance(m, ExcludeToolsMiddleware)]
+        assert len(excl) == 1
+        return excl[0]._excluded
+
+    def test_agent_middleware_default_excludes_only_execute(self) -> None:
+        from llmwiki.llm_agents.middleware import EXCLUDED_TOOLS
+
+        assert self._exclude_set(factory._agent_middleware(None)) == EXCLUDED_TOOLS
+
+    def test_agent_middleware_accepts_wider_set(self) -> None:
+        from llmwiki.llm_agents.middleware import INGEST_EXCLUDED_TOOLS
+
+        mw = factory._agent_middleware(None, exclude=INGEST_EXCLUDED_TOOLS)
+        assert self._exclude_set(mw) == INGEST_EXCLUDED_TOOLS
+
+    def test_run_ingestion_exclusion_follows_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from llmwiki.llm_agents.middleware import (
+            EXCLUDED_TOOLS,
+            INGEST_EXCLUDED_TOOLS,
+        )
+
+        captured: dict[str, list] = {}
+
+        def fake_create(**kwargs):
+            captured["middleware"] = kwargs["middleware"]
+            return object()
+
+        monkeypatch.setattr("deepagents.create_deep_agent", fake_create)
+        monkeypatch.setattr(factory, "_invoke", lambda *a, **k: None)
+        monkeypatch.setattr(factory, "_build_model", lambda cfg, op=None: "m")
+        monkeypatch.setattr(factory, "domain_tools", lambda paths, cfg: [])
+        monkeypatch.setattr(factory, "_cached_prompt", lambda name, cfg: "p")
+        monkeypatch.setattr(factory, "_response_format", lambda schema: None)
+        backend = SimpleNamespace(cancel_check=None, on_event=lambda *a, **k: None)
+
+        for flag, expected in [(True, INGEST_EXCLUDED_TOOLS), (False, EXCLUDED_TOOLS)]:
+            cfg = WorkspaceConfig(brain_root=tmp_path, ingest_exclude_builtin_tools=flag)
+            factory.run_ingestion(
+                cfg, backend, source_path="a.md", source_text="hello"
+            )
+            assert self._exclude_set(captured["middleware"]) == expected

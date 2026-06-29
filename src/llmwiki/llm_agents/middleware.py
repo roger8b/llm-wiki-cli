@@ -22,6 +22,15 @@ from ..core.errors import JobCancelledError
 # Built-in tools that make no sense for this app's read/stage-only backend.
 EXCLUDED_TOOLS = frozenset({"execute"})
 
+# Wider exclusion for the ingestion agent (#334): on top of ``execute``, hide the
+# DeepAgents built-ins ingestion never calls (``write_todos``, ``task``, ``glob``,
+# ``grep``, ``ls``). Their schemas were re-sent every turn, inflating
+# ``system_framework``. ``read_file``/``write_file``/``edit_file`` stay — the agent
+# writes pages through them.
+INGEST_EXCLUDED_TOOLS = EXCLUDED_TOOLS | frozenset(
+    {"write_todos", "task", "glob", "grep", "ls"}
+)
+
 
 def _name(tool: Any) -> str | None:
     if isinstance(tool, dict):
