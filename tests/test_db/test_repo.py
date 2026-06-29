@@ -53,6 +53,22 @@ class TestSourceRepo:
         repo.mark_processed("raw/a.md")
         assert repo.get_by_path("raw/a.md").status == SourceStatus.processed
 
+    def test_delete_removes_row(self, conn) -> None:
+        """#310: delete(path) removes the source row by relative path."""
+        repo = SourceRepo(conn)
+        repo.upsert(
+            Source(path="raw/a.md", type="md", hash="h", added_at=datetime.now(UTC))
+        )
+        assert repo.get_by_path("raw/a.md") is not None
+        repo.delete("raw/a.md")
+        assert repo.get_by_path("raw/a.md") is None
+
+    def test_delete_unknown_path_is_noop(self, conn) -> None:
+        """#310: deleting a path that doesn't exist is idempotent — the API
+        layer raises 404 for that case, but the repo itself doesn't care."""
+        repo = SourceRepo(conn)
+        repo.delete("raw/never-existed.md")  # must not raise
+
 
 class TestPageRepo:
     def test_upsert_list_clear(self, conn) -> None:

@@ -15,7 +15,8 @@ from ....core.errors import WikiError
 from ....core.paths import BrainPaths, load_active_brain
 from ....db.connection import get_connection
 from ....db.repo import SourceRepo
-from ....sources.manager import add_source, add_url
+from ....sources.manager import add_source, add_url, remove_source
+from .._errors import handle_errors
 
 source_app = typer.Typer(
     help="Manage raw sources in raw/.",
@@ -87,3 +88,23 @@ def source_list() -> None:
     for s in sources:
         table.add_row(esc(s.path), s.type, s.status.value, esc(s.title or ""))
     Console(file=sys.stdout).print(table)
+
+@source_app.command("rm")
+@handle_errors
+def source_rm(
+    path: str = typer.Argument(..., help="Relative path of the source to delete."),
+) -> None:
+    """Delete a non-ingested source from raw/ (#310).
+
+    The same guards the API endpoint applies: ``processed`` sources are
+    refused (409-shaped error → CLI exit 4) and traversal paths are
+    rejected as bad usage (exit 2). No effect on the agent or wiki content.
+    """
+    paths = _brain()
+    conn = get_connection(paths.db_path)
+    try:
+        repo = SourceRepo(conn)
+        remove_source(path, paths, repo)
+    finally:
+        conn.close()
+    typer.echo(f"[green]Deleted:[/green] {path}")

@@ -72,6 +72,13 @@ class SourceRepo:
         )
         self.conn.commit()
 
+    def delete(self, path: str) -> None:
+        """Remove a source row by relative path (#310). Idempotent: deleting
+        a path that doesn't exist is a no-op (the caller decides whether to
+        raise — the repo's job is just to attempt the delete)."""
+        self.conn.execute("DELETE FROM sources WHERE path = ?", (path,))
+        self.conn.commit()
+
 
 class PageRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
