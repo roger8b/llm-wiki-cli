@@ -50,6 +50,42 @@ function statusBadge(status: Source["status"]) {
   )
 }
 
+/** Color tokens for the per-row status dot. Single source of truth — the badge
+ *  palette above is the source; the dot uses the base color (`bg-apply`,
+ *  `bg-pending`, `bg-primary`, `bg-rejected`) without the `/10` opacity so the
+ *  dot stays opaque against any background. Re-exported for unit testing
+ *  (#336). */
+const STATUS_DOT_BG: Record<Source["status"], string> = {
+  processed: "bg-apply",
+  pending: "bg-pending",
+  processing: "bg-primary",
+  error: "bg-rejected",
+}
+
+/** Tailwind class for the per-row status dot. Processing pulses to signal a
+ *  live ingest in another tab (#336 AC5). */
+export function statusDotClass(status: Source["status"]): string {
+  const base = "size-1.5 rounded-full shrink-0"
+  const bg = STATUS_DOT_BG[status]
+  const pulse = status === "processing" ? " animate-pulse" : ""
+  return `${base} ${bg}${pulse}`
+}
+
+/** Human-readable label for the dot's native `title=` and ARIA `aria-label`.
+ *  Kept short so the tooltip doesn't truncate (#336). */
+export function statusDotLabel(status: Source["status"]): string {
+  switch (status) {
+    case "processed":
+      return "Ingested"
+    case "pending":
+      return "Pending ingest"
+    case "processing":
+      return "Processing…"
+    case "error":
+      return "Last ingest failed"
+  }
+}
+
 export function groupBySourceDir(sources: Source[]): Record<string, Source[]> {
   const groups: Record<string, Source[]> = {}
   for (const s of sources) {
@@ -450,7 +486,13 @@ export function SourcesView() {
                     "flex w-full items-center gap-1.5 px-2 py-1 pl-3 text-left text-[12.5px] transition-colors hover:bg-accent",
                     selected === s.path && "bg-accent font-medium text-primary",
                   )}
+                  title={statusDotLabel(s.status)}
+                  aria-label={`${s.path.split("/").pop()} — ${statusDotLabel(s.status)}`}
                 >
+                  <span
+                    className={statusDotClass(s.status)}
+                    aria-hidden="true"
+                  />
                   <span className="shrink-0">{sourceIcon(s.type)}</span>
                   <span className="truncate">{s.path.split("/").pop()}</span>
                 </button>
