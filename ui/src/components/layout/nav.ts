@@ -15,14 +15,15 @@ export interface NavItem {
   to: string
   label: string
   icon: LucideIcon
-  /** "pending" pulls the live pending-CR count; "jobs" pulls active jobs. */
-  badge?: "pending" | "jobs"
+  /** "pending" pulls the live pending-CR count; "pending-source" pulls the
+   *  pending-source count (#340); "jobs" pulls active jobs. */
+  badge?: "pending" | "pending-source" | "jobs"
 }
 
 export const PRIMARY_NAV: NavItem[] = [
   { to: "/review", label: "Review", icon: ClipboardCheck, badge: "pending" },
   { to: "/wiki", label: "Wiki", icon: FileText },
-  { to: "/sources", label: "Sources", icon: FolderOpen },
+  { to: "/sources", label: "Sources", icon: FolderOpen, badge: "pending-source" },
   { to: "/ask", label: "Ask", icon: Sparkles },
   { to: "/graph", label: "Graph", icon: Network },
   { to: "/lint", label: "Lint", icon: ShieldCheck },

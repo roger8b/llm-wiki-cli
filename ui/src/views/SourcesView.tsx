@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 import type { Source, SourceContent, UrlPreview } from "@/types"
 import { useIngestStore } from "@/stores/ingest"
 import { useCrStore } from "@/stores/crs"
+import { useAppStore } from "@/stores/app"
 import { MarkdownReader } from "@/components/shared/MarkdownReader"
 import { Button } from "@/components/ui/button"
 import {
@@ -493,6 +494,12 @@ export function SourcesView() {
       try {
         const list = await api.listSources()
         setSources(list)
+        // Push the pending-source count to the app store so the global sidebar
+        // badge (the Sources nav item) reflects the same number the user sees
+        // in the page header (#340). Same predicate as `pendingCount()` below.
+        useAppStore.getState().setPendingSourceCount(
+          list.reduce((n, s) => (s.status !== "processed" ? n + 1 : n), 0),
+        )
         // Deep-link: ?path=raw/... opens that source directly (#192 citations).
         const wanted = params.get("path")
         if (wanted && list.some((s) => s.path === wanted)) openSource(wanted)

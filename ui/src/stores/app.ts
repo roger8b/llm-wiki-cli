@@ -5,6 +5,8 @@ import type { BrainConfig, RegisteredBrain } from "@/types"
 interface AppState {
   /** Live count of pending change requests (drives the Review badge). */
   pendingCount: number
+  /** Live count of pending sources (drives the Sources badge, #340). */
+  pendingSourceCount: number
   /** Active background jobs (drives the Jobs badge). */
   activeJobs: number
   /** Currently selected brain name (from registered brains). */
@@ -20,6 +22,7 @@ interface AppState {
   /** ID of the active brain. */
   activeBrainId: string | null
   setPendingCount: (n: number) => void
+  setPendingSourceCount: (n: number) => void
   setActiveJobs: (n: number) => void
   setBrainName: (name: string) => void
   setCmdkOpen: (open: boolean) => void
@@ -38,6 +41,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>()((set) => ({
   pendingCount: 0,
+      pendingSourceCount: 0,
       activeJobs: 0,
       brainName: "",
       cmdkOpen: false,
@@ -46,6 +50,7 @@ export const useAppStore = create<AppState>()((set) => ({
       brains: [],
       activeBrainId: null,
       setPendingCount: (n) => set({ pendingCount: n }),
+      setPendingSourceCount: (n) => set({ pendingSourceCount: n }),
       setActiveJobs: (n) => set({ activeJobs: n }),
       setBrainName: (name) => set({ brainName: name }),
       setCmdkOpen: (open) => set({ cmdkOpen: open }),

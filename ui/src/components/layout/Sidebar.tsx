@@ -5,14 +5,21 @@ import { PRIMARY_NAV, SECONDARY_NAV, type NavItem } from "./nav"
 
 function NavRow({ item }: { item: NavItem }) {
   const pendingCount = useAppStore((s) => s.pendingCount)
+  const pendingSourceCount = useAppStore((s) => s.pendingSourceCount)
   const activeJobs = useAppStore((s) => s.activeJobs)
 
+  // Each badge kind maps to its own counter. Splitting "pending" (Review's CR
+  // count) and "pending-source" (Sources' source count) lets two nav items
+  // each carry their own live badge without sharing state (#340).
   const count =
     item.badge === "pending"
       ? pendingCount
-      : item.badge === "jobs"
-        ? activeJobs
-        : undefined
+      : item.badge === "pending-source"
+        ? pendingSourceCount
+        : item.badge === "jobs"
+          ? activeJobs
+          : undefined
+  const isPendingBadge = item.badge === "pending" || item.badge === "pending-source"
 
   return (
     <NavLink
@@ -29,7 +36,7 @@ function NavRow({ item }: { item: NavItem }) {
     >
       <item.icon className="size-4 shrink-0" strokeWidth={2} />
       <span className="flex-1">{item.label}</span>
-      {item.badge === "pending" && count !== undefined && count > 0 && (
+      {isPendingBadge && count !== undefined && count > 0 && (
         <span className="rounded-[10px] bg-pending px-1.5 py-px font-mono text-[10px] font-semibold text-white">
           {count}
         </span>
