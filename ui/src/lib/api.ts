@@ -142,6 +142,11 @@ export const api = {
       "/sources/ingest",
       { method: "POST", body: JSON.stringify({ paths, force }) },
     ),
+  deleteSource: (path: string) =>
+    request<{ deleted: string }>("/sources", {
+      method: "DELETE",
+      body: JSON.stringify({ path }),
+    }),
   uploadSource: async (file: File): Promise<Source> => {
     const form = new FormData()
     form.append("file", file)

@@ -8,7 +8,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..core import frontmatter
-from ..core.errors import EmptyExtractionError, FetchError
+from ..core.errors import (
+    EmptyExtractionError,
+    FetchError,
+    SourceAlreadyIngestedError,
+)
 from ..core.markdown import extract_title, slugify
 from ..core.misc import sha256
 from ..core.models import Source, SourceStatus
@@ -187,6 +191,54 @@ def add_url(
     )
     source = repo.upsert(source)
     return AddResult(source, copied=True, already_present=False)
+
+
+def remove_source(path: str, paths: BrainPaths, repo: SourceRepo) -> None:
+    """Delete a non-ingested source from disk and DB (#310).
+
+    The guard runs in this order:
+
+    1. ``resolve_input`` rejects paths that escape the brain (path traversal).
+       Runs **first** so a path that resolves outside the brain is rejected
+       even when the DB has no row for it — the API turns that into 400.
+    2. The row is fetched by path — a missing row is a 404, surfaced by the
+       API layer; the manager itself only raises typed domain errors.
+    3. ``SourceAlreadyIngestedError`` if the row is in any non-pending state
+       (we block delete for processed/error/processing to avoid orphaning
+       pages, CRs, links, and FTS rows — that cascade is a follow-up).
+
+    The file is removed via ``unlink(missing_ok=True)`` so a stale disk state
+    (e.g. file already gone) doesn't block the DB delete. The next
+    ``sync_sources`` pass sees the same state either way.
+    """
+    from ..core.paths import resolve_input  # local import — top-level pulls Path
+
+    # 1. Validate the path resolves inside the brain (rejects `../` etc).
+    try:
+        target = resolve_input(path, paths.root)
+    except Exception as exc:
+        # Re-raise as PathOutsideBrainError so the API maps to 400 cleanly.
+        from ..core.errors import PathOutsideBrainError
+
+        raise PathOutsideBrainError(str(exc)) from exc
+
+    # 2. Look up the row.
+    source = repo.get_by_path(path)
+    if source is None:
+        # No DB row — nothing to delete. The API layer turns this into 404.
+        from ..core.errors import NotFoundError
+
+        raise NotFoundError(f"Source not found: {path}")
+
+    # 3. Refuse to delete a source that has produced content.
+    if source.status != SourceStatus.pending:
+        raise SourceAlreadyIngestedError(
+            f"Source {path!r} is in status {source.status.value!r}; "
+            "delete is only allowed for pending sources."
+        )
+
+    target.unlink(missing_ok=True)
+    repo.delete(path)
 
 
 def sync_sources(paths: BrainPaths, repo: SourceRepo) -> int:

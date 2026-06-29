@@ -8,6 +8,7 @@ import {
   Plus,
   Search,
   RotateCw,
+  Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
@@ -551,6 +552,35 @@ export function SourcesView() {
     [runBatch, load, refetchCrs],
   )
 
+  // Delete a non-ingested source from disk + DB (#310). Backend refuses
+  // already-processed sources with 409, so we keep the same guard on the
+  // UI side: the trash button is only rendered when `status === 'pending'`.
+  // For `processing` / `error` we hide it too — the same source still has
+  // residual state worth investigating rather than wiping.
+  const deleteSource = useCallback(
+    async (source: Source) => {
+      if (
+        !window.confirm(
+          `Delete ${source.path}? The file will be removed from raw/ and the row dropped from the DB. This cannot be undone.`,
+        )
+      ) {
+        return
+      }
+      try {
+        await api.deleteSource(source.path)
+        // Remove from local list immediately so the row disappears without
+        // waiting for the next load(). load() refreshes anyway so the count
+        // is accurate post-pending-source re-fetch.
+        setSources((prev) => prev.filter((s) => s.path !== source.path))
+        toast.success(`Deleted ${source.path.split("/").pop()}`)
+        await load()
+      } catch (e) {
+        toast.error(`Delete failed: ${(e as Error).message}`)
+      }
+    },
+    [load],
+  )
+
   const filtered = useMemo(
     () => {
       const byStatus = filterByStatus(sources, statusFilter)
@@ -658,7 +688,7 @@ export function SourcesView() {
                   key={s.path}
                   onClick={() => openSource(s.path)}
                   className={cn(
-                    "flex w-full items-center gap-1.5 px-2 py-1 pl-3 text-left text-[12.5px] transition-colors hover:bg-accent",
+                    "group flex w-full items-center gap-1.5 px-2 py-1 pl-3 text-left text-[12.5px] transition-colors hover:bg-accent",
                     selected === s.path && "bg-accent font-medium text-primary",
                   )}
                   title={statusDotLabel(s.status)}
@@ -670,6 +700,19 @@ export function SourcesView() {
                   />
                   <span className="shrink-0">{sourceIcon(s.type)}</span>
                   <span className="truncate">{s.path.split("/").pop()}</span>
+                  {s.status === "pending" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void deleteSource(s)
+                      }}
+                      className="ml-auto shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-rejected/10 hover:text-rejected group-hover:opacity-100 focus:opacity-100"
+                      aria-label={`Delete ${s.path.split("/").pop()}`}
+                      title="Delete (only allowed for pending sources)"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
                 </button>
               ))}
             </div>
@@ -710,17 +753,30 @@ export function SourcesView() {
                   {statusBadge(current.status)}
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                onClick={() =>
-                  current.status === "processed" ? reIngest(current) : ingest(current)
-                }
-              >
-                <RotateCw className="size-3.5" />
-                {current.status === "processed" ? "Re-ingest" : "Ingest"}
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                {current.status === "pending" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-muted-foreground hover:text-rejected"
+                    onClick={() => deleteSource(current)}
+                    title="Delete this pending source from raw/"
+                  >
+                    <Trash2 className="size-3.5" /> Delete
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  onClick={() =>
+                    current.status === "processed" ? reIngest(current) : ingest(current)
+                  }
+                >
+                  <RotateCw className="size-3.5" />
+                  {current.status === "processed" ? "Re-ingest" : "Ingest"}
+                </Button>
+              </div>
             </div>
 
             {contentLoading ? (

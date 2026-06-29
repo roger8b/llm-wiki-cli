@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from llmwiki.core.config import load_config
 from llmwiki.core.misc import now_iso, sha256, today
 from llmwiki.core.paths import BrainPaths
@@ -64,3 +66,83 @@ class TestConfig:
         cfg_path.write_text("model: anthropic:foo\n", encoding="utf-8")
         cfg = load_config(brain)
         assert cfg.model == "anthropic:foo"
+
+
+class TestRemoveSource:
+    """#310 — delete a non-ingested source from disk and DB."""
+
+    def test_removes_file_and_db_row(self, brain: BrainPaths, tmp_path: Path) -> None:
+        from llmwiki.sources.manager import remove_source
+
+        src = tmp_path / "excluir.md"
+        src.write_text("conteudo descartavel", encoding="utf-8")
+        conn = get_connection(brain.db_path)
+        try:
+            repo = SourceRepo(conn)
+            add_source(src, brain, repo)
+            assert (brain.raw / "articles" / "excluir.md").exists()
+            assert repo.get_by_path("raw/articles/excluir.md") is not None
+
+            remove_source("raw/articles/excluir.md", brain, repo)
+        finally:
+            conn.close()
+
+        # File gone from raw/, row gone from DB.
+        assert not (brain.raw / "articles" / "excluir.md").exists()
+        conn2 = get_connection(brain.db_path)
+        try:
+            assert SourceRepo(conn2).get_by_path("raw/articles/excluir.md") is None
+        finally:
+            conn2.close()
+
+    def test_rejects_processed_source(self, brain: BrainPaths, tmp_path: Path) -> None:
+        """#310 AC3: backend must refuse deletion of an already-ingested source.
+        The manager raises a typed error; the API layer maps it to 409.
+        """
+        from llmwiki.core.errors import SourceAlreadyIngestedError
+        from llmwiki.sources.manager import remove_source
+
+        src = tmp_path / "done.md"
+        src.write_text("ja foi ingerido", encoding="utf-8")
+        conn = get_connection(brain.db_path)
+        try:
+            repo = SourceRepo(conn)
+            add_source(src, brain, repo)
+            repo.mark_processed("raw/articles/done.md")
+
+            with pytest.raises(SourceAlreadyIngestedError):
+                remove_source("raw/articles/done.md", brain, repo)
+        finally:
+            conn.close()
+        # File must still exist — the guard fires before unlink.
+        assert (brain.raw / "articles" / "done.md").exists()
+
+    def test_missing_row_raises_not_found(self, brain: BrainPaths) -> None:
+        """#310: deleting a non-existent source is a 404, not a silent no-op.
+        The manager raises NotFoundError; the API maps it to 404.
+        """
+        from llmwiki.core.errors import NotFoundError
+        from llmwiki.sources.manager import remove_source
+
+        conn = get_connection(brain.db_path)
+        try:
+            repo = SourceRepo(conn)
+            with pytest.raises(NotFoundError):
+                remove_source("raw/never-existed.md", brain, repo)
+        finally:
+            conn.close()
+
+    def test_rejects_path_traversal(self, brain: BrainPaths, tmp_path: Path) -> None:
+        """#310 AC5: a path that escapes the brain must be rejected.
+        resolve_input raises — the manager surfaces that as a typed error.
+        """
+        from llmwiki.core.errors import PathOutsideBrainError
+        from llmwiki.sources.manager import remove_source
+
+        conn = get_connection(brain.db_path)
+        try:
+            repo = SourceRepo(conn)
+            with pytest.raises(PathOutsideBrainError):
+                remove_source("../escape/secrets.md", brain, repo)
+        finally:
+            conn.close()

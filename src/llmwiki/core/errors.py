@@ -36,6 +36,16 @@ class SourceAlreadyProcessedError(WikiError):
     """
 
 
+class SourceAlreadyIngestedError(WikiError):
+    """Deletion refused because the source was already ingested (#310).
+
+    Deleting an already-ingested source would orphan pages, change requests,
+    links and FTS rows — that's a larger cascade and lives in a follow-up.
+    This error tells the API layer to return ``409 Conflict`` so the front-end
+    can surface a 'this source has content, you can't just delete it' message.
+    """
+
+
 class NotFoundError(WikiError):
     """A referenced entity (change request, page, source) does not exist."""
 

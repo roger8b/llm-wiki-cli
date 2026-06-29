@@ -35,6 +35,46 @@ def list_sources() -> list[dict[str, Any]]:
         conn.close()
 
 
+@router.delete("")
+def delete_source(path: str = Body(..., embed=True)) -> dict[str, Any]:
+    """Delete a non-ingested source by relative path (#310).
+
+    Status codes:
+      * 200 — file removed from ``raw/`` and the row dropped from the DB.
+      * 400 — no path supplied, or the path escapes the brain.
+      * 404 — no source row with that path (nothing to delete).
+      * 409 — the source is already processed / error / processing. Deletion
+        of an ingested source would orphan pages, CRs, links, and FTS rows —
+        that cascade is a follow-up story, intentionally out of scope here.
+    """
+    from ....core.errors import (
+        NotFoundError,
+        PathOutsideBrainError,
+        SourceAlreadyIngestedError,
+    )
+    from ....db.repo import SourceRepo
+    from ....sources.manager import remove_source
+
+    if not path:
+        raise HTTPException(status_code=400, detail="path is required")
+
+    paths = _ctx()
+    conn = open_conn(paths)
+    try:
+        repo = SourceRepo(conn)
+        try:
+            remove_source(path, paths, repo)
+        except PathOutsideBrainError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except SourceAlreadyIngestedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        conn.close()
+    return {"deleted": path}
+
+
 @router.get("/content")
 def get_source_content(path: str) -> dict[str, Any]:
     """Return the textual content of a raw source for in-app reading.

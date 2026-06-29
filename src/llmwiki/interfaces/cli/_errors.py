@@ -34,7 +34,9 @@ from ...core.errors import (
     JobCancelledError,
     NotFoundError,
     PageExistsError,
+    PathOutsideBrainError,
     ProviderError,
+    SourceAlreadyIngestedError,
     SourceAlreadyProcessedError,
     WikiError,
 )
@@ -50,11 +52,13 @@ EXIT_CANCELLED = 130
 
 # Most specific first. (exception type) -> (exit code, stable slug).
 _MAP: list[tuple[type[BaseException], tuple[int, str]]] = [
+    (SourceAlreadyIngestedError, (EXIT_CONFLICT, "source_already_ingested")),
     (SourceAlreadyProcessedError, (EXIT_CONFLICT, "source_already_processed")),
     (PageExistsError, (EXIT_CONFLICT, "page_exists")),
     (BrainExistsError, (EXIT_CONFLICT, "brain_exists")),
     (BrainNotFoundError, (EXIT_NOT_FOUND, "brain_not_found")),
     (NotFoundError, (EXIT_NOT_FOUND, "not_found")),
+    (PathOutsideBrainError, (EXIT_USAGE, "path_outside_brain")),
     (ExtractorUnavailableError, (EXIT_EXTRACTION, "extractor_unavailable")),
     (EmptyExtractionError, (EXIT_EXTRACTION, "empty_extraction")),
     (ProviderError, (EXIT_PROVIDER, "provider_error")),
