@@ -6,6 +6,8 @@ import {
   filterByStatus,
   groupBySourceDir,
   parseStatusFilter,
+  pendingCount,
+  pendingSources,
   statusDotClass,
   statusDotLabel,
 } from "./SourcesView"
@@ -196,5 +198,46 @@ describe("chipCounts (#338)", () => {
       processed: 0,
       error: 0,
     })
+  })
+})
+
+describe("pendingSources / pendingCount (#339)", () => {
+  it("pendingSources returns every non-processed item (pending+processing+error)", () => {
+    const items = [
+      src("raw/a.md", "pending"),
+      src("raw/b.md", "processed"),
+      src("raw/c.md", "processing"),
+      src("raw/d.md", "error"),
+      src("raw/e.md", "pending"),
+    ]
+    const out = pendingSources(items)
+    expect(out.map((s) => s.path)).toEqual([
+      "raw/a.md",
+      "raw/c.md",
+      "raw/d.md",
+      "raw/e.md",
+    ])
+  })
+
+  it("pendingSources returns empty array when every item is processed", () => {
+    const items = [
+      src("raw/a.md", "processed"),
+      src("raw/b.md", "processed"),
+    ]
+    expect(pendingSources(items)).toEqual([])
+  })
+
+  it("pendingCount matches pendingSources.length", () => {
+    const items = [
+      src("raw/a.md", "pending"),
+      src("raw/b.md", "processed"),
+      src("raw/c.md", "error"),
+    ]
+    expect(pendingCount(items)).toBe(pendingSources(items).length)
+    expect(pendingCount(items)).toBe(2)
+  })
+
+  it("pendingCount is 0 for an empty list", () => {
+    expect(pendingCount([])).toBe(0)
   })
 })

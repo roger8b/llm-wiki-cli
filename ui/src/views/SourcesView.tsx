@@ -172,6 +172,22 @@ export function chipCounts(items: Source[]): Record<StatusFilter, number> {
   return counts
 }
 
+/** Sources that still need an ingest action (#339 CTA). Same predicate as
+ *  `countByStatus().pending`: every non-processed status counts as work to do
+ *  (pending / processing / error). Exported for testing and for the bulk-ingest
+ *  button in the sidebar header. */
+export function pendingSources(items: Source[]): Source[] {
+  return items.filter((s) => s.status !== "processed")
+}
+
+/** Same predicate as `pendingSources().length` — kept as a separate helper
+ *  because call sites only need the count and the array allocation is wasted. */
+export function pendingCount(items: Source[]): number {
+  let n = 0
+  for (const s of items) if (s.status !== "processed") n++
+  return n
+}
+
 function AddSourceDialog({
   open,
   onOpenChange,
@@ -425,6 +441,11 @@ export function SourcesView() {
   const [contentError, setContentError] = useState<string | null>(null)
   const runIngest = useIngestStore((s) => s.run)
   const runBatch = useIngestStore((s) => s.runBatch)
+  // Live ingest state for the bulk-CTA button (#339): disable while running
+  // and show the done/total counter so the user sees progress without staring
+  // at the drawer. `items` belongs to the most recent batch (cleared on close).
+  const ingestStatus = useIngestStore((s) => s.status)
+  const ingestItems = useIngestStore((s) => s.items)
   const refetchCrs = useCrStore((s) => s.fetch)
 
   const openSource = useCallback(async (path: string) => {
@@ -537,7 +558,17 @@ export function SourcesView() {
     [sources, filter, statusFilter],
   )
   const counts = useMemo(() => chipCounts(sources), [sources])
+  const pendingItems = useMemo(() => pendingSources(sources), [sources])
   const groups = useMemo(() => groupBySourceDir(filtered), [filtered])
+
+  // Live batch progress for the bulk-CTA button (#339). Done count comes from
+  // the current batch items (set to queued at runBatch start); falls back to
+  // 0 if no batch is active.
+  const batchDone = useMemo(
+    () => ingestItems.filter((i) => i.status === "done").length,
+    [ingestItems],
+  )
+  const isIngesting = ingestStatus === "running"
   const current = sources.find((s) => s.path === selected) ?? null
 
   return (
@@ -552,6 +583,25 @@ export function SourcesView() {
           >
             <Plus className="size-4" /> Add source
           </Button>
+          {pendingItems.length > 0 && (
+            <Button
+              onClick={() => ingestMany(pendingItems)}
+              disabled={isIngesting}
+              size="sm"
+              variant="outline"
+              className="w-full gap-1.5"
+              title={
+                isIngesting
+                  ? `Running ${batchDone}/${pendingItems.length}…`
+                  : `Ingest ${pendingItems.length} pending source${pendingItems.length === 1 ? "" : "s"}`
+              }
+            >
+              <RotateCw className={cn("size-4", isIngesting && "animate-spin")} />
+              {isIngesting
+                ? `Running ${batchDone}/${pendingItems.length}…`
+                : `Ingest ${pendingItems.length} pending →`}
+            </Button>
+          )}
           <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by status">
             {STATUS_FILTERS.map((sf) => {
               const active = statusFilter === sf
