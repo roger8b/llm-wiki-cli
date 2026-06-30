@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from llmwiki.llm_agents.middleware import EXCLUDED_TOOLS, ExcludeToolsMiddleware
+from llmwiki.llm_agents.middleware import (
+    EXCLUDED_TOOLS,
+    INGEST_EXCLUDED_TOOLS,
+    ExcludeToolsMiddleware,
+)
 
 
 class _Req:
@@ -61,3 +65,31 @@ def test_empty_exclusion_is_noop() -> None:
 
     mw.wrap_model_call(req, handler)
     assert captured["n"] == 1
+
+
+# --- Ingestion-wide exclusion (#334) -------------------------------------
+
+
+def test_ingest_exclusion_covers_unused_builtins() -> None:
+    # Built-ins DeepAgents injects but ingestion never uses (#334).
+    assert {"execute", "write_todos", "task", "glob", "grep", "ls"} <= INGEST_EXCLUDED_TOOLS
+    # The filesystem tools ingestion DOES use must stay.
+    assert not ({"read_file", "write_file", "edit_file"} & INGEST_EXCLUDED_TOOLS)
+    # Superset of the default (execute-only) exclusion.
+    assert EXCLUDED_TOOLS <= INGEST_EXCLUDED_TOOLS
+
+
+def test_ingest_exclusion_filters_builtins_keeps_fs() -> None:
+    mw = ExcludeToolsMiddleware(excluded=INGEST_EXCLUDED_TOOLS)
+    seen: dict[str, list[str]] = {}
+
+    def handler(req: _Req) -> None:
+        seen["tools"] = [t.name for t in req.tools]
+
+    req = _Req([
+        _tool("write_todos"), _tool("task"), _tool("glob"), _tool("grep"),
+        _tool("ls"), _tool("execute"),
+        _tool("read_file"), _tool("write_file"), _tool("edit_file"),
+    ])
+    mw.wrap_model_call(req, handler)
+    assert seen["tools"] == ["read_file", "write_file", "edit_file"]

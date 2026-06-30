@@ -323,11 +323,26 @@ def _had_structured(state: dict[str, Any], schema: type[BaseModel]) -> bool:
     return isinstance(resp, schema | dict)
 
 
-def _agent_middleware(backend: ChangeRequestBackend | None) -> list[Any]:
-    """Middleware stack: always hide ``execute``; add cancellation if requested."""
-    from .middleware import CancellationMiddleware, ExcludeToolsMiddleware
+def _agent_middleware(
+    backend: ChangeRequestBackend | None,
+    *,
+    exclude: frozenset[str] | None = None,
+) -> list[Any]:
+    """Middleware stack: hide ``exclude`` tools; add cancellation if requested.
 
-    mw: list[Any] = [ExcludeToolsMiddleware()]
+    ``exclude`` defaults to ``EXCLUDED_TOOLS`` (only ``execute``). The ingestion
+    agent passes the wider ``INGEST_EXCLUDED_TOOLS`` (#334); other agents keep the
+    default.
+    """
+    from .middleware import (
+        EXCLUDED_TOOLS,
+        CancellationMiddleware,
+        ExcludeToolsMiddleware,
+    )
+
+    mw: list[Any] = [
+        ExcludeToolsMiddleware(EXCLUDED_TOOLS if exclude is None else exclude)
+    ]
     if backend is not None and backend.cancel_check is not None:
         mw.append(CancellationMiddleware(backend.cancel_check))
     return mw
@@ -651,12 +666,22 @@ def run_ingestion(
 ) -> IngestionResult:
     from deepagents import create_deep_agent
 
+    from .middleware import EXCLUDED_TOOLS, INGEST_EXCLUDED_TOOLS
+
+    # Hide the DeepAgents built-ins ingestion never uses (#334). Config-gated:
+    # False reproduces the legacy behaviour (only ``execute`` excluded). Applies
+    # to the main pass and every fix pass (same agent build).
+    exclude = (
+        INGEST_EXCLUDED_TOOLS
+        if cfg.ingest_exclude_builtin_tools
+        else EXCLUDED_TOOLS
+    )
     agent = create_deep_agent(
         model=_build_model(cfg, "ingest"),
         tools=domain_tools(cfg.paths, cfg),
         system_prompt=_cached_prompt("ingestion.md", cfg),
         backend=backend,
-        middleware=_agent_middleware(backend),
+        middleware=_agent_middleware(backend, exclude=exclude),
         response_format=_response_format(IngestionResult),
     )
     if fix_findings:
