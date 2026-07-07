@@ -1,0 +1,203 @@
+# Golden set de retrieval (#349, épico #348).
+#
+# Gerado a partir do brain `desktop` (cópia read-only, ~178 páginas — mesma
+# seed de scripts/ingest_baseline.py). Classes:
+#   exact      — a consulta usa o termo exato do título da página
+#   paraphrase — mesma intenção, SEM os termos do título (mede semântica)
+#   multiword  — conceito composto / interseção de páginas
+#   vague      — pergunta aberta de usuário
+#   negative   — não tem resposta na wiki (mede falso-positivo)
+#
+# `expected` usa paths relativos ao root do brain. Um caso conta acerto se
+# qualquer página esperada aparecer no top-k.
+
+search:
+  # --- exact -----------------------------------------------------------
+  - id: exact-event-sourcing
+    class: exact
+    query: event sourcing
+    expected: [wiki/concepts/event-sourcing.md]
+  - id: exact-cqrs
+    class: exact
+    query: CQRS
+    expected: [wiki/concepts/cqrs.md]
+  - id: exact-crawl4ai
+    class: exact
+    query: Crawl4AI
+    expected: [wiki/concepts/crawl4ai.md]
+  - id: exact-kv-cache-quant
+    class: exact
+    query: kv cache quantization
+    expected: [wiki/concepts/kv-cache-quantization.md]
+  - id: exact-distillation
+    class: exact
+    query: distillation
+    expected: [wiki/concepts/distillation.md]
+  - id: exact-headroom
+    class: exact
+    query: headroom
+    expected: [wiki/entities/headroom.md]
+  - id: exact-rag
+    class: exact
+    query: RAG
+    expected: [wiki/concepts/rag.md]
+
+  # --- paraphrase ------------------------------------------------------
+  - id: para-event-sourcing
+    class: paraphrase
+    query: gravar mudanças de estado como sequência de fatos imutáveis
+    expected: [wiki/concepts/event-sourcing.md]
+  - id: para-cqrs
+    class: paraphrase
+    query: separar o modelo de leitura do modelo de escrita
+    expected: [wiki/concepts/cqrs.md]
+  - id: para-context-compression
+    class: paraphrase
+    query: reduzir o tamanho do contexto enviado ao modelo para economizar tokens
+    expected:
+      - wiki/concepts/context-compression-llm.md
+      - wiki/entities/headroom.md
+  - id: para-distillation
+    class: paraphrase
+    query: treinar um modelo pequeno imitando as respostas de um modelo maior
+    expected: [wiki/concepts/distillation.md]
+  - id: para-crawl4ai
+    class: paraphrase
+    query: biblioteca python assíncrona para extrair conteúdo de sites com IA
+    expected:
+      - wiki/concepts/crawl4ai.md
+      - wiki/concepts/async-web-crawler.md
+  - id: para-event-replay
+    class: paraphrase
+    query: reconstruir o estado atual reaplicando o histórico de eventos
+    expected:
+      - wiki/concepts/event-replay.md
+      - wiki/concepts/event-sourcing.md
+  - id: para-coordenacao
+    class: paraphrase
+    query: fazer vários agentes trabalharem juntos de forma organizada
+    expected:
+      - wiki/concepts/coordenacao-de-agentes.md
+      - wiki/concepts/dev-team.md
+
+  # --- multiword -------------------------------------------------------
+  - id: multi-decider-aggregate
+    class: multiword
+    query: decider pattern task aggregate
+    expected:
+      - wiki/concepts/decider-pattern.md
+      - wiki/concepts/task-aggregate.md
+  - id: multi-pi-chains-armadilhas
+    class: multiword
+    query: armadilhas de sintaxe em pi chains
+    expected:
+      - wiki/concepts/pi-chains-armadilhas-sintaxe.md
+      - wiki/concepts/pi-chains.md
+  - id: multi-gguf-llamacpp
+    class: multiword
+    query: quantização gguf llama.cpp
+    expected:
+      - wiki/concepts/gguf.md
+      - wiki/concepts/llama-cpp.md
+  - id: multi-preco-3d
+    class: multiword
+    query: custos e precificação de impressão 3d
+    expected:
+      - wiki/concepts/precificacao_impressao_3d.md
+      - wiki/concepts/custos_impressao_3d.md
+  - id: multi-snapshot-es
+    class: multiword
+    query: snapshots em event sourcing
+    expected:
+      - wiki/concepts/event-sourcing-snapshots.md
+      - wiki/concepts/snapshot.md
+  - id: multi-cdp
+    class: multiword
+    query: fluxo de conexão chrome devtools protocol
+    expected:
+      - wiki/concepts/cdp-connection-flow.md
+      - wiki/concepts/CDP-mode.md
+
+  # --- vague -----------------------------------------------------------
+  - id: vague-agente
+    class: vague
+    query: como funciona um agente de ia
+    expected:
+      - wiki/synthesis/me-explique-o-funcionamento-de-um-agente-de-ia.md
+      - wiki/synthesis/o-que-e-agente.md
+      - wiki/synthesis/me-explique-o-funcionamento-de-um-agente.md
+  - id: vague-subagente
+    class: vague
+    query: o que é um subagente
+    expected:
+      - wiki/synthesis/quero-entender-melhor-o-que-e-um-subagente.md
+      - wiki/concepts/subagents.md
+  - id: vague-memoria
+    class: vague
+    query: memória compartilhada entre agentes
+    expected:
+      - wiki/concepts/cross-agent-memory.md
+      - wiki/concepts/memoria-canonica.md
+      - wiki/concepts/memoria-operacional.md
+  - id: vague-llm-local
+    class: vague
+    query: rodar um llm localmente
+    expected:
+      - wiki/concepts/ollama.md
+      - wiki/concepts/llama-cpp.md
+      - wiki/concepts/vllm.md
+  - id: vague-impostos
+    class: vague
+    query: impostos para vender produtos online no brasil
+    expected:
+      - wiki/concepts/regimes_tributarios_brasil.md
+      - wiki/concepts/canais_venda_marketplace.md
+  - id: vague-browser
+    class: vague
+    query: automatizar um navegador com agente
+    expected:
+      - wiki/concepts/agent-browser.md
+      - wiki/concepts/hibrido-browser-real-controlado.md
+      - wiki/concepts/chrome_live_agent_architecture.md
+
+  # --- negative --------------------------------------------------------
+  - id: neg-bolo
+    class: negative
+    query: receita de bolo de cenoura com cobertura de chocolate
+    expected: []
+  - id: neg-futebol
+    class: negative
+    query: campeonato brasileiro de futebol 2020
+    expected: []
+  - id: neg-fotossintese
+    class: negative
+    query: fotossíntese em plantas aquáticas
+    expected: []
+  - id: neg-roma
+    class: negative
+    query: história do império romano
+    expected: []
+
+# Perguntas para o baseline de `ask` (caminho agentico atual). 10 perguntas
+# respondíveis pelo brain, mesma distribuição de dificuldade do search.
+ask:
+  - id: ask-event-sourcing
+    question: O que é Event Sourcing e como o estado atual é reconstruído?
+  - id: ask-cqrs-vs-es
+    question: Qual a diferença entre CQRS e Event Sourcing e como eles se complementam?
+  - id: ask-headroom
+    question: Como o Headroom comprime o contexto de agentes LLM?
+  - id: ask-crawl4ai
+    question: O que é o Crawl4AI e para que ele serve?
+  - id: ask-kv-cache
+    question: Como funciona a quantização de KV cache e por que ela importa?
+  - id: ask-pi-chains
+    question: O que são pi chains e quais as principais armadilhas de sintaxe?
+  - id: ask-preco-3d
+    question: Como precificar uma peça de impressão 3D no Brasil?
+  - id: ask-subagente
+    question: O que é um subagente e quando devo usar um?
+  - id: ask-llm-local
+    question: Quais opções existem para rodar um LLM localmente e como se comparam?
+  - id: ask-decider
+    question: O que é o padrão Decider e como ele se relaciona com o Task Aggregate?
