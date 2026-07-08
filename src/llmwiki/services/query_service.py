@@ -229,8 +229,21 @@ def ask(
         if hit_paths or mode == "rag":
             # "rag" answers even with no hits (explicit "no coverage" reply);
             # "auto" with 0 hits skips straight to the agent path.
+            # In "auto" the RAG attempt may be discarded, so its tokens are
+            # buffered and only flushed to the live stream if the answer
+            # survives — otherwise the user would see the discarded answer
+            # followed by the agent's one.
+            rag_extra = dict(extra)
+            buffered: list[str] = []
+            if mode == "auto" and on_token is not None:
+                rag_extra["on_token"] = buffered.append
             result = rag_runner(
-                cfg, read_backend, question=agent_question, context=rag_context, save=save, **extra
+                cfg,
+                read_backend,
+                question=agent_question,
+                context=rag_context,
+                save=save,
+                **rag_extra,
             )
             # Citations validated per produced result (#172); in "auto", any
             # invalid citation discards the RAG answer and triggers the single
@@ -241,6 +254,9 @@ def ask(
                     "ask(): rag path had %d invalid citation(s); falling back to agent", invalid
                 )
                 result = None
+            elif buffered and on_token is not None:
+                for token in buffered:
+                    on_token(token)
 
     if result is None:
         result = runner(cfg, read_backend, question=agent_question, save=save, **extra)

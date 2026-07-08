@@ -247,3 +247,47 @@ def test_unknown_mode_falls_back_to_agent(brain):
 
     query_service.ask("q", paths, conn, cfg, runner=agent_runner, rag_runner=rag_runner)
     assert calls == ["agent"]
+
+
+def test_auto_buffers_rag_tokens_until_validated(brain):
+    """auto + streaming: discarded RAG tokens never reach the live sink."""
+    paths, conn, cfg = brain
+    cfg = cfg.model_copy(update={"ask_mode": "auto"})
+    streamed: list[str] = []
+
+    def agent_runner(cfg_, backend, *, question, save, on_token=None, **extra):
+        if on_token is not None:
+            on_token("AGENT-TOK")
+        return _rag_result()
+
+    def rag_runner(cfg_, backend, *, question, context, save, on_token=None, **extra):
+        if on_token is not None:
+            on_token("RAG-TOK")
+        return _rag_result(page="wiki/concepts/nao-existe.md")  # discarded
+
+    query_service.ask(
+        "o que é RAG?",
+        paths,
+        conn,
+        cfg,
+        runner=agent_runner,
+        rag_runner=rag_runner,
+        on_token=streamed.append,
+    )
+    assert streamed == ["AGENT-TOK"]
+
+
+def test_auto_flushes_rag_tokens_on_success(brain):
+    paths, conn, cfg = brain
+    cfg = cfg.model_copy(update={"ask_mode": "auto"})
+    streamed: list[str] = []
+
+    def rag_runner(cfg_, backend, *, question, context, save, on_token=None, **extra):
+        if on_token is not None:
+            on_token("RAG-TOK")
+        return _rag_result()  # valid -> survives
+
+    query_service.ask(
+        "o que é RAG?", paths, conn, cfg, rag_runner=rag_runner, on_token=streamed.append
+    )
+    assert streamed == ["RAG-TOK"]
