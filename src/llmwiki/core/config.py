@@ -29,6 +29,8 @@ _CONFIG_KEYS = (
     "agent_max_retries",
     "ingest_max_retries",
     "agent_fix_retries",
+    "max_output_tokens",
+    "max_output_tokens_by_op",
     "onboarded",
     "providers",
     "models",
@@ -64,6 +66,11 @@ _DEFAULTS: dict[str, object] = {
     "ingest_max_retries": None,
     # Self-correction passes for structural lint findings before the CR (#166).
     "agent_fix_retries": 1,
+    # Output-token cap (#351). None/0 = no cap (provider default, current
+    # behaviour). Per-op overrides ("ingest", "ask", "maintain", "outline")
+    # win over the global; "outline" falls back to "ingest" (#293 chain).
+    "max_output_tokens": None,
+    "max_output_tokens_by_op": {},
     "onboarded": False,
     "providers": {},
     # Optional per-operation model override (#279). Empty = single global model.
@@ -132,6 +139,12 @@ class WorkspaceConfig(BaseModel):
     # Max self-correction passes when staging has structural lint findings
     # before the change request is created (#166); 0 disables the loop.
     agent_fix_retries: int = 1
+    # Output-token cap per LLM call (#351). None or 0 = no cap (byte-identical
+    # to the previous behaviour). ``max_output_tokens_by_op`` overrides the
+    # global per operation ("ingest"/"ask"/"maintain"/"outline"); "outline"
+    # inherits the "ingest" override, same chain as ``models`` (#293).
+    max_output_tokens: int | None = None
+    max_output_tokens_by_op: dict[str, int] = {}
     # True once the user has completed the first-run onboarding flow.
     onboarded: bool = False
     # Per-provider settings keyed by provider name (openai|anthropic|google).
