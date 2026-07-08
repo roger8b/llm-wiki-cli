@@ -75,6 +75,10 @@ def _raw_source_exists(source: str, paths: BrainPaths) -> bool:
 
 # runner(cfg, backend, *, question, save) -> QueryResult
 Runner = Callable[..., QueryResult]
+# rag_runner(cfg, backend, *, question, context, save) -> QueryResult (#350)
+RagRunner = Callable[..., QueryResult]
+
+_ASK_MODES = ("agent", "rag", "auto")
 
 
 def _default_runner(
@@ -88,6 +92,59 @@ def _default_runner(
     from ..llm_agents.factory import run_query
 
     return run_query(cfg, backend, question=question, save=save, on_token=on_token)
+
+
+def _default_rag_runner(
+    cfg: WorkspaceConfig,
+    backend: ChangeRequestBackend | None,
+    *,
+    question: str,
+    context: str,
+    save: bool,
+    on_token: Callable[[str], None] | None = None,
+) -> QueryResult:
+    from ..llm_agents.factory import run_query_rag
+
+    return run_query_rag(
+        cfg, backend, question=question, context=context, save=save, on_token=on_token
+    )
+
+
+def _build_rag_context(
+    question: str, paths: BrainPaths, conn: sqlite3.Connection, cfg: WorkspaceConfig
+) -> tuple[list[str], str]:
+    """Retrieve top-k pages for ``question`` and render the CONTEXTO block (#350).
+
+    Retrieval happens IN CODE (no agent tool calls): one ``hybrid_search`` plus
+    direct file reads, capped at ``cfg.ask_rag_max_context_chars``. Returns the
+    page paths actually included and the rendered block ("" when no hits).
+    """
+    from ..search.factory import build_semantic_backend
+    from ..search.service import hybrid_search
+
+    embedder, store = build_semantic_backend(cfg, conn)
+    hits = hybrid_search(
+        conn, question, limit=max(1, cfg.ask_rag_top_k), embedder=embedder, store=store
+    )
+    cap = max(1000, cfg.ask_rag_max_context_chars)
+    blocks: list[str] = []
+    used: list[str] = []
+    total = 0
+    for hit in hits:
+        target = paths.root / hit.path
+        try:
+            body = target.read_text(encoding="utf-8")
+        except OSError:
+            continue  # index drift: page vanished from disk — skip, don't break
+        block = f"PÁGINA: {hit.path}\n{body}\n"
+        if used and total + len(block) > cap:
+            break
+        if len(block) > cap:
+            block = block[:cap]  # a single page bigger than the cap gets truncated
+        blocks.append(block)
+        used.append(hit.path)
+        total += len(block)
+    return used, "\n---\n".join(blocks)
 
 
 def build_history_context(
@@ -125,6 +182,7 @@ def ask(
     *,
     save: bool = False,
     runner: Runner | None = None,
+    rag_runner: RagRunner | None = None,
     cancel_check: Callable[[], bool] | None = None,
     history_turns: list[tuple[str, str]] | None = None,
     on_token: Callable[[str], None] | None = None,
@@ -136,8 +194,15 @@ def ask(
     thread without re-stating it. The agent still cites wiki pages only.
 
     ``on_token`` streams the answer tokens (#191) when the provider supports it.
+
+    ``cfg.ask_mode`` selects the path (#350): ``"agent"`` (default) runs the
+    legacy agent loop unchanged; ``"rag"`` retrieves top-k pages in code and
+    makes one structured LLM call without tools; ``"auto"`` tries RAG and falls
+    back to the agent path at most once (no hits or invalid citations). Unknown
+    values degrade to ``"agent"``.
     """
     runner = runner or _default_runner
+    rag_runner = rag_runner or _default_rag_runner
     # Backend always present: scopes read_file to brain root. ``ask`` is a
     # read-only operation, so the backend rejects writes and records any
     # attempt in ``write_attempts`` (audited below) instead of silently
@@ -156,17 +221,39 @@ def ask(
         )
     # Pass on_token only when set, so simple test runners need not accept it.
     extra = {"on_token": on_token} if on_token is not None else {}
-    result = runner(cfg, read_backend, question=agent_question, save=save, **extra)
+    mode = cfg.ask_mode if cfg.ask_mode in _ASK_MODES else "agent"
+
+    result: QueryResult | None = None
+    if mode in ("rag", "auto"):
+        hit_paths, rag_context = _build_rag_context(question, paths, conn, cfg)
+        if hit_paths or mode == "rag":
+            # "rag" answers even with no hits (explicit "no coverage" reply);
+            # "auto" with 0 hits skips straight to the agent path.
+            result = rag_runner(
+                cfg, read_backend, question=agent_question, context=rag_context, save=save, **extra
+            )
+            # Citations validated per produced result (#172); in "auto", any
+            # invalid citation discards the RAG answer and triggers the single
+            # agent fallback below.
+            invalid = _validate_citations(result, paths, conn)
+            if mode == "auto" and invalid:
+                logger.info(
+                    "ask(): rag path had %d invalid citation(s); falling back to agent", invalid
+                )
+                result = None
+
+    if result is None:
+        result = runner(cfg, read_backend, question=agent_question, save=save, **extra)
+        # Resolve every citation against the index/raw so hallucinated
+        # references are flagged (not removed — the user decides). #172
+        _validate_citations(result, paths, conn)
+
     if read_backend.write_attempts:
         logger.warning(
             "ask(): agent attempted %d write(s) during a read-only query: %s",
             len(read_backend.write_attempts),
             ", ".join(sorted(set(read_backend.write_attempts))),
         )
-
-    # Resolve every citation against the index/raw so hallucinated references
-    # are flagged (not removed — the user decides). #172
-    _validate_citations(result, paths, conn)
 
     cr: ChangeRequest | None = None
     if save and result.suggested_page is not None:

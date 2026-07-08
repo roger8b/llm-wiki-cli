@@ -42,6 +42,9 @@ _CONFIG_KEYS = (
     "ingest_scope_concepts_per_chunk",
     "ingest_exclude_builtin_tools",
     "embedding_model",
+    "ask_mode",
+    "ask_rag_top_k",
+    "ask_rag_max_context_chars",
     "ask_history_turns",
     "ask_history_max_chars",
     "lint_token_budget",
@@ -85,6 +88,12 @@ _DEFAULTS: dict[str, object] = {
     # Local semantic search (#169). None = disabled (pure FTS). Format
     # "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     "embedding_model": None,
+    # Ask path (#350): "agent" = legacy agent loop (default, identical
+    # behaviour); "rag" = retrieve top-k in code + ONE LLM call, no tools;
+    # "auto" = try rag, fall back to the agent path at most once.
+    "ask_mode": "agent",
+    "ask_rag_top_k": 6,
+    "ask_rag_max_context_chars": 24000,
     # Ask follow-up window (#190): how many prior turns of the conversation to
     # feed back as context, and the char cap on that block (long answers
     # truncated with "…").
@@ -162,6 +171,13 @@ class WorkspaceConfig(BaseModel):
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None
+    # Single-shot RAG ask (#350). "agent" (default) = legacy loop, byte
+    # identical; "rag" = hybrid_search top-k in code + one structured LLM call
+    # without tools; "auto" = rag first, one agent fallback on 0 hits or
+    # invalid citations. Unknown values degrade to "agent".
+    ask_mode: str = "agent"
+    ask_rag_top_k: int = 6
+    ask_rag_max_context_chars: int = 24000
     # Ask follow-up conversation window (#190).
     ask_history_turns: int = 4
     ask_history_max_chars: int = 8000
