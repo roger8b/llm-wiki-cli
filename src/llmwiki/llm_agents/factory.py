@@ -787,6 +787,39 @@ def run_query(
     return _invoke(agent, question + suffix, QueryResult, cfg, backend, on_token=on_token)
 
 
+def run_query_rag(
+    cfg: WorkspaceConfig,
+    backend: ChangeRequestBackend | None,
+    *,
+    question: str,
+    context: str,
+    save: bool,
+    on_token: Callable[[str], None] | None = None,
+) -> QueryResult:
+    """Single-shot RAG query (#350): NO tools, ONE structured call.
+
+    The retrieval already happened in code (``query_service._build_rag_context``);
+    the model only reads the ``--- CONTEXTO ---`` block and answers. ``backend``
+    (when present) is used solely for telemetry capture and cancellation — it is
+    NOT passed to the agent, so no file tools are exposed.
+    """
+    from deepagents import create_deep_agent
+
+    agent = create_deep_agent(
+        model=_build_model(cfg, "ask"),
+        tools=[],
+        system_prompt=_cached_prompt("query_rag.md", cfg),
+        middleware=_agent_middleware(backend),
+        response_format=_response_format(QueryResult),
+    )
+    suffix = " Gere também suggested_page para salvar a resposta." if save else ""
+    message = (
+        f"--- CONTEXTO (páginas da wiki) ---\n{context}\n--- FIM DO CONTEXTO ---\n\n"
+        f"{question}{suffix}"
+    )
+    return _invoke(agent, message, QueryResult, cfg, backend, on_token=on_token)
+
+
 def run_lint(
     cfg: WorkspaceConfig,
     *,

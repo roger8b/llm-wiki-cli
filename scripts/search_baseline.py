@@ -174,7 +174,9 @@ def run_search_eval(conn, cfg, cases: list[GoldenCase], *, limit: int = 10) -> d
 # --- ask baseline ------------------------------------------------------------
 
 
-def run_ask_eval(paths, conn, cfg, ask_cases: list[AskCase], *, runs: int = 3) -> dict:
+def run_ask_eval(
+    paths, conn, cfg, ask_cases: list[AskCase], *, runs: int = 3, mode: str = "agent"
+) -> dict:
     """Latency / tokens / tool calls / invalid citations for ``ask`` (agent path).
 
     ``runs`` full passes over the questions; run 1 is discarded as warmup when
@@ -182,6 +184,7 @@ def run_ask_eval(paths, conn, cfg, ask_cases: list[AskCase], *, runs: int = 3) -
     """
     from llmwiki.services import query_service
 
+    cfg = cfg.model_copy(update={"ask_mode": mode})
     all_runs: list[list[dict]] = []
     for _run_idx in range(runs):
         results: list[dict] = []
@@ -197,7 +200,21 @@ def run_ask_eval(paths, conn, cfg, ask_cases: list[AskCase], *, runs: int = 3) -
                     meta_sink.update(backend.execution_meta.to_dict())
                 return result
 
-            result, _cr = query_service.ask(case.question, paths, conn, cfg, runner=runner)
+            def rag_runner(
+                cfg_, backend, *, question, context, save, meta_sink=read_meta, **extra
+            ):
+                from llmwiki.llm_agents.factory import run_query_rag
+
+                result = run_query_rag(
+                    cfg_, backend, question=question, context=context, save=save, **extra
+                )
+                if backend is not None and backend.execution_meta is not None:
+                    meta_sink.update(backend.execution_meta.to_dict())
+                return result
+
+            result, _cr = query_service.ask(
+                case.question, paths, conn, cfg, runner=runner, rag_runner=rag_runner
+            )
             latency_ms = (time.perf_counter() - start) * 1000
             invalid = sum(1 for c in result.citations if c.invalid)
             results.append(
@@ -223,6 +240,7 @@ def run_ask_eval(paths, conn, cfg, ask_cases: list[AskCase], *, runs: int = 3) -
 
     return {
         "questions": len(ask_cases),
+        "mode": mode,
         "runs": runs,
         "runs_kept": len(kept),
         "latency_ms": agg("latency_ms"),
@@ -294,7 +312,7 @@ def render(*, search_report: dict, ask_report: dict | None, meta: dict) -> str:
         )
         lines += [
             "",
-            "## Ask (agent path)",
+            f"## Ask (mode: {ask_report.get('mode', 'agent')})",
             "",
             f"{ask_report['questions']} questions × {ask_report['runs']} runs "
             f"({ask_report['runs_kept']} kept, warmup discarded when runs ≥ 3).",
@@ -352,6 +370,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("docs/baselines"))
     parser.add_argument("--ask", action="store_true", help="also baseline query_service.ask (LLM)")
     parser.add_argument("--runs", type=int, default=3, help="ask runs (run 1 = warmup)")
+    parser.add_argument("--ask-mode", choices=["agent", "rag", "auto"], default="agent")
+    parser.add_argument("--tag", default="", help="suffix for the output filename")
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
 
@@ -369,12 +389,15 @@ def main() -> None:
             if args.ask:
                 if not ask_cases:
                     raise SystemExit("--ask: golden set has no ask cases")
-                ask_report = run_ask_eval(paths, conn, cfg, ask_cases, runs=args.runs)
+                ask_report = run_ask_eval(
+                    paths, conn, cfg, ask_cases, runs=args.runs, mode=args.ask_mode
+                )
             md = render(search_report=search_report, ask_report=ask_report, meta=meta)
         finally:
             conn.close()
     args.out.mkdir(parents=True, exist_ok=True)
-    out_file = args.out / f"search-{date.today().isoformat()}.md"
+    suffix = f"-{args.tag}" if args.tag else ""
+    out_file = args.out / f"search-{date.today().isoformat()}{suffix}.md"
     out_file.write_text(md, encoding="utf-8")
     print(md)
     print(f"\nwritten: {out_file}")
