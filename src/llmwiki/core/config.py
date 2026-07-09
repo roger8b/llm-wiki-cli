@@ -31,6 +31,8 @@ _CONFIG_KEYS = (
     "agent_fix_retries",
     "max_output_tokens",
     "max_output_tokens_by_op",
+    "agent_core",
+    "minimal_max_turns",
     "onboarded",
     "providers",
     "models",
@@ -71,6 +73,10 @@ _DEFAULTS: dict[str, object] = {
     # win over the global; "outline" falls back to "ingest" (#293 chain).
     "max_output_tokens": None,
     "max_output_tokens_by_op": {},
+    # Core-swap experiment (#352). "deepagents" = current behaviour;
+    # "minimal" = native tool-calling loop (ingestion runner only).
+    "agent_core": "deepagents",
+    "minimal_max_turns": 40,
     "onboarded": False,
     "providers": {},
     # Optional per-operation model override (#279). Empty = single global model.
@@ -145,6 +151,12 @@ class WorkspaceConfig(BaseModel):
     # inherits the "ingest" override, same chain as ``models`` (#293).
     max_output_tokens: int | None = None
     max_output_tokens_by_op: dict[str, int] = {}
+    # Agent core for the INGESTION runner (#352). "deepagents" (default) keeps
+    # the current framework path byte-identical; "minimal" runs the native
+    # tool-calling loop in llm_agents.minimal. Turn budget for the minimal
+    # loop only — hitting it degrades to the #291 fallback, never hangs.
+    agent_core: str = "deepagents"
+    minimal_max_turns: int = 40
     # True once the user has completed the first-run onboarding flow.
     onboarded: bool = False
     # Per-provider settings keyed by provider name (openai|anthropic|google).
