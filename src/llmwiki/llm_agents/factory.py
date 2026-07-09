@@ -693,6 +693,20 @@ def run_ingestion(
     part: tuple[int, int] | None = None,
     fix_findings: list[str] | None = None,
 ) -> IngestionResult:
+    if cfg.agent_core == "minimal":
+        # Core-swap experiment (#352): native loop behind the same Runner seam.
+        from . import minimal
+
+        return minimal.run_ingestion_minimal(
+            cfg,
+            backend,
+            source_path=source_path,
+            source_text=source_text,
+            source_meta=source_meta,
+            outline=outline,
+            part=part,
+            fix_findings=fix_findings,
+        )
     from deepagents import create_deep_agent
 
     from .middleware import EXCLUDED_TOOLS, INGEST_EXCLUDED_TOOLS
