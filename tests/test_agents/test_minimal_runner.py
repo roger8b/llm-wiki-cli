@@ -221,3 +221,35 @@ def test_agent_core_config_routes_run_ingestion(tmp_path, monkeypatch):
 def test_agent_core_default_is_deepagents(tmp_path):
     cfg = _cfg(tmp_path)
     assert cfg.agent_core == "deepagents"
+
+
+def test_sibling_write_after_submit_still_lands(tmp_path):
+    """submit_result first in the message must not swallow a sibling write."""
+    backend = ChangeRequestBackend(tmp_path)
+    model = FakeModel(
+        [
+            _ai(
+                tool_calls=[
+                    {
+                        "name": "submit_result",
+                        "args": {
+                            "summary": "ok",
+                            "new_pages": ["wiki/concepts/rag.md"],
+                            "affected_pages": [],
+                        },
+                        "id": "c1",
+                    },
+                    {
+                        "name": "write_file",
+                        "args": {"file_path": "wiki/concepts/rag.md", "content": PAGE},
+                        "id": "c2",
+                    },
+                ]
+            )
+        ]
+    )
+    result = run_ingestion_minimal(
+        _cfg(tmp_path), backend, source_path="raw/x.md", source_text="t", model=model
+    )
+    assert result.summary == "ok"
+    assert backend.staging == {"wiki/concepts/rag.md": PAGE}

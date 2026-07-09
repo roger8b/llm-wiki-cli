@@ -231,7 +231,9 @@ def run_ingestion_minimal(
                 messages.append(
                     ToolMessage(content="resultado registrado.", tool_call_id=call_id, name=name)
                 )
-                break
+                # Keep processing sibling calls in this same message: a write
+                # listed after submit_result must still land in staging.
+                continue
             fn = tools.get(name or "")
             if fn is None:
                 out = f"tool desconhecida: {name}"
