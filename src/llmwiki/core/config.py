@@ -46,6 +46,7 @@ _CONFIG_KEYS = (
     "ingest_scope_concepts_per_chunk",
     "ingest_exclude_builtin_tools",
     "embedding_model",
+    "search_graph_signal",
     "ask_mode",
     "ask_rag_top_k",
     "ask_rag_max_context_chars",
@@ -196,6 +197,10 @@ class WorkspaceConfig(BaseModel):
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None
+    # Third RRF signal (#353): re-rank matched candidates by incoming-link
+    # degree (backlinks). Prior, not a matcher — never introduces pages the
+    # query didn't hit. False (default) = byte-identical ranking.
+    search_graph_signal: bool = False
     # Single-shot RAG ask (#350). "agent" (default) = legacy loop, byte
     # identical; "rag" = hybrid_search top-k in code + one structured LLM call
     # without tools; "auto" = rag first, one agent fallback on 0 hits or

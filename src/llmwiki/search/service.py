@@ -48,6 +48,23 @@ def keyword_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> lis
 _RRF_K = 60
 
 
+def _graph_degrees(conn: sqlite3.Connection) -> dict[str, int]:
+    """Incoming-link count per slugified wikilink target (#353).
+
+    ``links.to_page`` stores the wikilink TITLE, so candidates are matched by
+    slug (title or path stem). One aggregated query — no per-hit lookups.
+    """
+    from ..core.markdown import slugify
+
+    rows = conn.execute("SELECT to_page, COUNT(*) AS n FROM links GROUP BY to_page").fetchall()
+    degrees: dict[str, int] = {}
+    for r in rows:
+        slug = slugify(r["to_page"])
+        if slug:
+            degrees[slug] = degrees.get(slug, 0) + int(r["n"])
+    return degrees
+
+
 def hybrid_search(
     conn: sqlite3.Connection,
     query: str,
@@ -55,6 +72,7 @@ def hybrid_search(
     limit: int = 20,
     embedder: EmbeddingProvider | None = None,
     store: VectorStore | None = None,
+    graph_signal: bool = False,
 ) -> list[SearchHit]:
     """Fuse keyword (FTS) and semantic (when configured) results via RRF.
 
@@ -90,6 +108,27 @@ def hybrid_search(
         fuse(hit.path, hit.title, rank, "keyword")
     for rank, (path, title) in enumerate(semantic):
         fuse(path, title, rank, "semantic")
+
+    if graph_signal and scores:
+        # Third list (#353): the candidates already matched, ordered by
+        # backlink degree. A prior, not a matcher — only boosts scores; it
+        # never introduces pages and never changes a hit's ``source`` label.
+        from pathlib import PurePosixPath
+
+        from ..core.markdown import slugify
+
+        degrees = _graph_degrees(conn)
+
+        def degree_of(path: str) -> int:
+            title_slug = slugify(meta[path][0]) if path in meta else ""
+            stem_slug = slugify(PurePosixPath(path).stem)
+            return max(degrees.get(title_slug, 0), degrees.get(stem_slug, 0))
+
+        ranked = sorted(
+            (p for p in scores if degree_of(p) > 0), key=lambda p: -degree_of(p)
+        )
+        for rank, path in enumerate(ranked):
+            scores[path] += 1.0 / (_RRF_K + rank)
 
     hits = [
         SearchHit(

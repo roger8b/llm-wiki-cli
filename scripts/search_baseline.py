@@ -101,7 +101,9 @@ def p95(values: list[float]) -> float:
 # --- search eval -------------------------------------------------------------
 
 
-def _rank(conn, cfg, query: str, mode: str, limit: int, embedder, store) -> list[str] | None:
+def _rank(
+    conn, cfg, query: str, mode: str, limit: int, embedder, store, *, graph: bool = False
+) -> list[str] | None:
     """Ranked page paths for ``query`` in ``mode``; None when the mode is off."""
     from llmwiki.search.service import hybrid_search, keyword_search
 
@@ -112,10 +114,17 @@ def _rank(conn, cfg, query: str, mode: str, limit: int, embedder, store) -> list
             return None
         vector = embedder.embed(query)
         return [p for p, _t, _s in store.query(vector, limit)]
-    return [h.path for h in hybrid_search(conn, query, limit=limit, embedder=embedder, store=store)]
+    return [
+        h.path
+        for h in hybrid_search(
+            conn, query, limit=limit, embedder=embedder, store=store, graph_signal=graph
+        )
+    ]
 
 
-def run_search_eval(conn, cfg, cases: list[GoldenCase], *, limit: int = 10) -> dict:
+def run_search_eval(
+    conn, cfg, cases: list[GoldenCase], *, limit: int = 10, graph: bool = False
+) -> dict:
     """recall@5/@10, MRR, negative hit-rate and latency per mode, per class."""
     from llmwiki.search.factory import build_semantic_backend
 
@@ -135,7 +144,7 @@ def run_search_eval(conn, cfg, cases: list[GoldenCase], *, limit: int = 10) -> d
         per_case: list[dict] = []
         for case in cases:
             start = time.perf_counter()
-            ranked = _rank(conn, cfg, case.query, mode, limit, embedder, store) or []
+            ranked = _rank(conn, cfg, case.query, mode, limit, embedder, store, graph=graph) or []
             latencies.append((time.perf_counter() - start) * 1000)
             if case.cls == "negative":
                 neg_total += 1
@@ -371,6 +380,7 @@ def main() -> None:
     parser.add_argument("--ask", action="store_true", help="also baseline query_service.ask (LLM)")
     parser.add_argument("--runs", type=int, default=3, help="ask runs (run 1 = warmup)")
     parser.add_argument("--ask-mode", choices=["agent", "rag", "auto"], default="agent")
+    parser.add_argument("--graph", action="store_true", help="enable search_graph_signal (#353)")
     parser.add_argument("--tag", default="", help="suffix for the output filename")
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
@@ -384,7 +394,7 @@ def main() -> None:
             pages = _seed_from_brain(paths, conn, cfg, args.seed_brain)
             meta = collect_meta(conn, cfg, pages_in_brain=pages)
             print(f"brain seeded: {pages} pages, {meta['page_embeddings']} embeddings")
-            search_report = run_search_eval(conn, cfg, cases, limit=args.limit)
+            search_report = run_search_eval(conn, cfg, cases, limit=args.limit, graph=args.graph)
             ask_report = None
             if args.ask:
                 if not ask_cases:
