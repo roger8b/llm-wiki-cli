@@ -39,8 +39,19 @@ baseline publicado `ingest-tool-buckets-2026-06-27.md` (MiniMax-M3, brain seed
    custo $ do job fica ~+14%. **O cap compra latência com input** — reforça a
    alavanca real do #333 (reduzir re-send por turno) e o experimento de core
    (#352).
-4. **Cobertura não regrediu** (10–12 páginas, sem colapso modo Exp #5): o
-   quality bar conciso com o mandato de decomposição intacto é seguro.
+4. **Cobertura sem colapso, mas no limite**: 12/12 páginas no long×vazio;
+   10–11 vs 12 no long×populado — abaixo do baseline estrito, o suficiente
+   para disparar a regra de descarte do prompt (ver decisão pós-review).
+   Nenhum run colapsou a fonte em 1 página (modo Exp #5 evitado).
+
+## Decisão pós-review (regra de descarte do spec aplicada)
+
+Páginas no long×populado ficaram em 10–11 vs 12 do baseline — o critério de
+descarte do #351 ("páginas < baseline → reverter prompt, manter só a config")
+dispara. **O quality bar conciso foi revertido no merge**; entra só o cap
+(opt-in). A latência medida é atribuível majoritariamente ao cap (que elimina
+as chamadas runaway de ~4096 tokens); re-testar o prompt isoladamente fica
+para follow-up se o cap sozinho não segurar o ganho.
 
 ## Decisão
 

@@ -61,10 +61,7 @@ fold it into the parent page as a section rather than a separate stub.
 5. Return the final structured result only after all files are written.
 
 ## Quality bar
-- Each page must be self-contained and useful on its own: **150–350 words of
-  body**, dense and factual. Do not pad with generic filler, restated context,
-  or boilerplate sections — every sentence must add information from the
-  source. Above ~350 words, cut repetition, not content.
+- Each page must be self-contained and useful on its own (≥ 150 words of body).
 - Link aggressively: every concept mentioned that deserves its own page should
   have a `[[Link]]`.
 - **Every new page must link to at least one existing page** when
