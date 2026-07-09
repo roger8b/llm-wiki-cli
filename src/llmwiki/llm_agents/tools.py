@@ -87,7 +87,14 @@ def _hybrid_hits(
 
     assert isinstance(conn, sqlite3.Connection)
     embedder, store = build_semantic_backend(cfg, conn)
-    return hybrid_search(conn, query, limit=limit, embedder=embedder, store=store)
+    return hybrid_search(
+        conn,
+        query,
+        limit=limit,
+        embedder=embedder,
+        store=store,
+        graph_signal=cfg.search_graph_signal,
+    )
 
 
 def make_search_pages(paths: BrainPaths, cfg: WorkspaceConfig) -> Callable[[str], str]:
