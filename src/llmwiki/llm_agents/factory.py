@@ -97,6 +97,23 @@ def resolve_model(cfg: WorkspaceConfig, operation: str | None = None) -> str:
     return cfg.model
 
 
+def resolve_max_output_tokens(cfg: WorkspaceConfig, operation: str | None = None) -> int | None:
+    """Effective output-token cap for ``operation`` (#351).
+
+    Per-op override wins (with the same fallback chain as ``resolve_model``:
+    "outline" inherits "ingest"); otherwise the global ``max_output_tokens``.
+    ``None`` or ``<= 0`` means "no cap" and never reaches the provider.
+    """
+    def _norm(value: int | None) -> int | None:
+        return value if value is not None and value > 0 else None
+
+    if operation:
+        for key in _MODEL_CHAINS.get(operation, (operation,)):
+            if key in cfg.max_output_tokens_by_op:
+                return _norm(cfg.max_output_tokens_by_op[key])
+    return _norm(cfg.max_output_tokens)
+
+
 def _build_model(cfg: WorkspaceConfig, operation: str | None = None) -> Any:
     """Build the correct model object for the DeepAgent from the config.
 
@@ -117,9 +134,10 @@ def _build_model(cfg: WorkspaceConfig, operation: str | None = None) -> Any:
     """
     model_str = resolve_model(cfg, operation)
     provider, _, name = model_str.partition(":")
+    max_tokens = resolve_max_output_tokens(cfg, operation)
 
     if provider != "ollama":
-        built = _build_remote(provider, name, cfg)
+        built = _build_remote(provider, name, cfg, max_tokens=max_tokens)
         return built if built is not None else model_str
 
     ollama_model = model_str[len("ollama:"):]  # e.g. "gemma4:31b-cloud"
@@ -148,10 +166,14 @@ def _build_model(cfg: WorkspaceConfig, operation: str | None = None) -> Any:
     }
     if cfg.temperature is not None:
         kwargs["temperature"] = cfg.temperature
+    if max_tokens is not None:
+        kwargs["num_predict"] = max_tokens  # Ollama's max-output-tokens knob
     return _NoStreamOllama(**kwargs)
 
 
-def _build_remote(provider: str, name: str, cfg: WorkspaceConfig) -> Any:
+def _build_remote(
+    provider: str, name: str, cfg: WorkspaceConfig, *, max_tokens: int | None = None
+) -> Any:
     """Build a hosted provider chat model with key (keychain) + base_url.
 
     Returns None to signal "let DeepAgents resolve the string" when the
@@ -176,6 +198,10 @@ def _build_remote(provider: str, name: str, cfg: WorkspaceConfig) -> Any:
     common: dict[str, Any] = {"model": name}
     if cfg.temperature is not None:
         common["temperature"] = cfg.temperature
+    if max_tokens is not None:
+        # ChatAnthropic/ChatOpenAI accept ``max_tokens``; Gemini uses
+        # ``max_output_tokens`` — both mapped below (#351).
+        common["max_tokens"] = max_tokens
 
     try:
         if provider == "anthropic":
@@ -200,6 +226,9 @@ def _build_remote(provider: str, name: str, cfg: WorkspaceConfig) -> Any:
             from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: PLC0415
 
             kw = dict(common)
+            if max_tokens is not None:
+                kw.pop("max_tokens", None)
+                kw["max_output_tokens"] = max_tokens
             if api_key:
                 kw["google_api_key"] = api_key
             return ChatGoogleGenerativeAI(**kw)
