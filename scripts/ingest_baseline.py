@@ -163,7 +163,7 @@ def run_one(
             for e in events:
                 kinds[e["kind"]] = kinds.get(e["kind"], 0) + 1
                 if e["kind"] == "tool_start":
-                    payload = e.get("payload")
+                    payload = dict(e).get("payload")  # sqlite3.Row has no .get
                     if isinstance(payload, str):
                         try:
                             payload = json.loads(payload)
