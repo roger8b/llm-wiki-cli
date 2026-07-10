@@ -113,7 +113,7 @@ def _rank(
         if embedder is None or store is None:
             return None
         vector = embedder.embed(query)
-        return [p for p, _t, _s in store.query(vector, limit)]
+        return [row[0] for row in store.query(vector, limit)]
     return [
         h.path
         for h in hybrid_search(
