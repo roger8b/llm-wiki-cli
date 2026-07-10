@@ -89,7 +89,13 @@ def hybrid_search(
     if embedder is not None and store is not None:
         try:
             vector = embedder.embed(query)
-            semantic = [(p, t) for p, t, _ in store.query(vector, limit)]
+            for row in store.query(vector, limit):
+                # 4-tuples carry the winning chunk's passage (#354); legacy
+                # 3-tuple stores keep working without one.
+                path, title = row[0], row[1]
+                semantic.append((path, title))
+                if len(row) > 3 and row[3]:
+                    snippets.setdefault(path, row[3])
         except Exception as exc:  # noqa: BLE001
             logger.warning("semantic search failed, using FTS only: %s", exc)
 

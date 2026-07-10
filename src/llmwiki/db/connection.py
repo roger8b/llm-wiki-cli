@@ -132,3 +132,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     ask_cols = {r["name"] for r in conn.execute("PRAGMA table_info(ask_history)").fetchall()}
     if "conversation_id" not in ask_cols:
         conn.execute("ALTER TABLE ask_history ADD COLUMN conversation_id TEXT")
+    # Chunk passage for semantic-hit snippets (#354).
+    emb_cols = {r["name"] for r in conn.execute("PRAGMA table_info(page_embeddings)").fetchall()}
+    if "chunk_text" not in emb_cols:
+        conn.execute("ALTER TABLE page_embeddings ADD COLUMN chunk_text TEXT")

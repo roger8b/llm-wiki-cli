@@ -19,6 +19,9 @@ from ..db.connection import load_vec_extension
 logger = logging.getLogger("llmwiki.search.vector_store")
 
 _VEC_TABLE = "vec_page_embeddings"
+# Stored excerpt cap for chunk passages (#354): enough to pick a page without
+# opening it, small enough to not bloat the tool output.
+_PASSAGE_CAP = 300
 
 
 class SqliteVecStore:
@@ -90,17 +93,30 @@ class SqliteVecStore:
         self.conn.commit()
 
     def replace_page(
-        self, path: str, vectors: list[list[float]], content_hash: str
+        self,
+        path: str,
+        vectors: list[list[float]],
+        content_hash: str,
+        chunks: list[str] | None = None,
     ) -> None:
-        """Replace all chunk vectors for ``path`` (delete + insert)."""
+        """Replace all chunk vectors for ``path`` (delete + insert).
+
+        ``chunks`` (optional, #354) carries the chunk texts; a short excerpt is
+        stored per row so semantic hits can show a passage. ``None`` keeps the
+        pre-#354 behaviour (passage-less rows).
+        """
         if not self.available or not vectors:
             return
         self._ensure_table(len(vectors[0]))
         self.delete_page(path)
         for idx, vector in enumerate(vectors):
+            excerpt = None
+            if chunks is not None and idx < len(chunks):
+                excerpt = " ".join(chunks[idx].split())[:_PASSAGE_CAP] or None
             cur = self.conn.execute(
-                "INSERT INTO page_embeddings (path, chunk_idx, content_hash) VALUES (?, ?, ?)",
-                (path, idx, content_hash),
+                "INSERT INTO page_embeddings (path, chunk_idx, content_hash, chunk_text)"
+                " VALUES (?, ?, ?, ?)",
+                (path, idx, content_hash, excerpt),
             )
             rowid = cur.lastrowid
             self.conn.execute(
@@ -110,11 +126,14 @@ class SqliteVecStore:
         self.conn.commit()
 
     # --- query (VectorStore protocol) -----------------------------------
-    def query(self, vector: list[float], limit: int) -> list[tuple[str, str, float]]:
-        """KNN search; aggregates chunks per page (best distance) → (path, title, score).
+    def query(
+        self, vector: list[float], limit: int
+    ) -> list[tuple[str, str, float, str | None]]:
+        """KNN search; per page best chunk → (path, title, score, passage).
 
-        ``score`` is the negated best distance (higher = closer). Returns [] when
-        the vector layer is unavailable or empty.
+        ``score`` is the negated best distance (higher = closer); ``passage`` is
+        the winning chunk's stored excerpt (#354), ``None`` for rows indexed
+        before the migration. Returns [] when the vector layer is unavailable.
         """
         if not self.available or self._vec_table_dim() is None:
             return []
@@ -129,7 +148,8 @@ class SqliteVecStore:
                     SELECT rowid, distance FROM {_VEC_TABLE}
                     WHERE embedding MATCH ? AND k = ?
                 )
-                SELECT pe.path AS path, knn.distance AS distance
+                SELECT pe.path AS path, knn.distance AS distance,
+                       pe.chunk_text AS chunk_text
                 FROM knn JOIN page_embeddings pe ON pe.rowid = knn.rowid
                 ORDER BY knn.distance
                 """,
@@ -139,14 +159,14 @@ class SqliteVecStore:
             logger.warning("semantic query failed, falling back to FTS: %s", exc)
             return []
 
-        best: dict[str, float] = {}
+        best: dict[str, tuple[float, str | None]] = {}
         for r in rows:
             d = float(r["distance"])
-            if r["path"] not in best or d < best[r["path"]]:
-                best[r["path"]] = d
-        ranked = sorted(best.items(), key=lambda kv: kv[1])[:limit]
+            if r["path"] not in best or d < best[r["path"]][0]:
+                best[r["path"]] = (d, r["chunk_text"])
+        ranked = sorted(best.items(), key=lambda kv: kv[1][0])[:limit]
         titles = self._titles({p for p, _ in ranked})
-        return [(p, titles.get(p, p), -d) for p, d in ranked]
+        return [(p, titles.get(p, p), -d, passage) for p, (d, passage) in ranked]
 
     def _titles(self, paths: set[str]) -> dict[str, str]:
         if not paths:
