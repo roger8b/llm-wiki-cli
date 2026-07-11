@@ -206,7 +206,7 @@ def _reindex_embeddings(
                 "embedding failed for %s; removed stale semantic index: %s", path, exc
             )
             continue
-        store.replace_page(path, vectors, content_hash)
+        store.replace_page(path, vectors, content_hash, chunks=chunks)
         stats.indexed += 1
     logger.info(
         "semantic embeddings: built=%d skipped=%d failed=%d deleted=%d",

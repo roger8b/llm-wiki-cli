@@ -75,7 +75,11 @@ class FakeStore:
         self.conn.commit()
 
     def replace_page(
-        self, path: str, vectors: list[list[float]], content_hash: str
+        self,
+        path: str,
+        vectors: list[list[float]],
+        content_hash: str,
+        chunks: list[str] | None = None,
     ) -> None:
         self.delete_page(path)
         for idx, _ in enumerate(vectors):

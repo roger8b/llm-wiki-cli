@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS page_embeddings (
   path         TEXT NOT NULL,
   chunk_idx    INTEGER NOT NULL,
   content_hash TEXT NOT NULL,
+  -- Short excerpt of the embedded chunk (#354), shown as the search snippet
+  -- for semantic hits. NULL on rows indexed before the migration.
+  chunk_text   TEXT,
   PRIMARY KEY (path, chunk_idx)
 );
 
