@@ -73,7 +73,11 @@ _SEARCH_LIMIT = 10
 
 
 def _hybrid_hits(
-    conn: object, cfg: WorkspaceConfig, query: str, limit: int
+    conn: object,
+    cfg: WorkspaceConfig,
+    query: str,
+    limit: int,
+    expander: object = None,
 ) -> list[SearchHit]:
     """Run hybrid (keyword + semantic) search, or pure keyword when semantic off.
 
@@ -94,10 +98,17 @@ def _hybrid_hits(
         embedder=embedder,
         store=store,
         graph_signal=cfg.search_graph_signal,
+        expander=expander,  # type: ignore[arg-type]
     )
 
 
 def make_search_pages(paths: BrainPaths, cfg: WorkspaceConfig) -> Callable[[str], str]:
+    from ..search.expansion import build_expander
+
+    # Expansion applies to search_pages only (#355) — NOT related_pages nor the
+    # ingestion prefetch, whose per-concept cost would multiply per variant.
+    expander = build_expander(cfg)
+
     def search_pages(query: str) -> str:
         """Busca páginas da wiki por SIGNIFICADO e por palavra-chave (busca
         híbrida): encontra a página certa mesmo sem o termo exato — busque pelo
@@ -105,7 +116,7 @@ def make_search_pages(paths: BrainPaths, cfg: WorkspaceConfig) -> Callable[[str]
         seguinte, um trecho « » para escolher a página sem abri-la."""
         conn = get_connection(paths.db_path)
         try:
-            hits = _hybrid_hits(conn, cfg, query, _SEARCH_LIMIT)
+            hits = _hybrid_hits(conn, cfg, query, _SEARCH_LIMIT, expander=expander)
         finally:
             conn.close()
         if not hits:

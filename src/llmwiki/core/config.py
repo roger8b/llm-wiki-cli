@@ -47,6 +47,7 @@ _CONFIG_KEYS = (
     "ingest_exclude_builtin_tools",
     "embedding_model",
     "search_graph_signal",
+    "search_query_expansion",
     "ask_mode",
     "ask_rag_top_k",
     "ask_rag_max_context_chars",
@@ -201,6 +202,11 @@ class WorkspaceConfig(BaseModel):
     # degree (backlinks). Prior, not a matcher — never introduces pages the
     # query didn't hit. False (default) = byte-identical ranking.
     search_graph_signal: bool = False
+    # Multi-query expansion (#355): fuse N LLM-generated reformulations into
+    # the hybrid RRF (search_pages/ask retrieval only — NOT the ingestion
+    # prefetch, whose per-concept cost would multiply). 0 (default) = off,
+    # byte-identical search. Generator failure degrades to the original query.
+    search_query_expansion: int = 0
     # Single-shot RAG ask (#350). "agent" (default) = legacy loop, byte
     # identical; "rag" = hybrid_search top-k in code + one structured LLM call
     # without tools; "auto" = rag first, one agent fallback on 0 hits or

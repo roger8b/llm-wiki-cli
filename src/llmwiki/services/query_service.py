@@ -119,12 +119,18 @@ def _build_rag_context(
     direct file reads, capped at ``cfg.ask_rag_max_context_chars``. Returns the
     page paths actually included and the rendered block ("" when no hits).
     """
+    from ..search.expansion import build_expander
     from ..search.factory import build_semantic_backend
     from ..search.service import hybrid_search
 
     embedder, store = build_semantic_backend(cfg, conn)
     hits = hybrid_search(
-        conn, question, limit=max(1, cfg.ask_rag_top_k), embedder=embedder, store=store
+        conn,
+        question,
+        limit=max(1, cfg.ask_rag_top_k),
+        embedder=embedder,
+        store=store,
+        expander=build_expander(cfg),
     )
     cap = max(1000, cfg.ask_rag_max_context_chars)
     blocks: list[str] = []
