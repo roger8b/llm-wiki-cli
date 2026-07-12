@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..db.repo import PageFtsRepo
 
@@ -33,7 +34,9 @@ class EmbeddingProvider(Protocol):
 
 @runtime_checkable
 class VectorStore(Protocol):
-    def query(self, vector: list[float], limit: int) -> list[tuple[str, str, float]]: ...
+    # Rows are (path, title, score) or (path, title, score, passage) (#354);
+    # consumers index positionally and treat len > 3 as carrying a passage.
+    def query(self, vector: list[float], limit: int) -> Sequence[tuple[Any, ...]]: ...
 
 
 def keyword_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[SearchHit]:
@@ -73,6 +76,7 @@ def hybrid_search(
     embedder: EmbeddingProvider | None = None,
     store: VectorStore | None = None,
     graph_signal: bool = False,
+    expander: Callable[[str], list[str]] | None = None,
 ) -> list[SearchHit]:
     """Fuse keyword (FTS) and semantic (when configured) results via RRF.
 
@@ -82,12 +86,28 @@ def hybrid_search(
     provider is offline) degrades to pure FTS — search never breaks because of
     the semantic layer. Without a configured layer, returns keyword results.
     """
+    queries = [query]
+    if expander is not None:
+        # Multi-query expansion (#355): every variant contributes a keyword and
+        # a semantic list to the same RRF. Generator failure = original only.
+        try:
+            queries = list(dict.fromkeys(expander(query))) or [query]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("query expansion failed, using original query: %s", exc)
+
     keyword = keyword_search(conn, query, limit)
     snippets = {hit.path: hit.snippet for hit in keyword if hit.snippet}
+    extra_keyword: list[list[SearchHit]] = [
+        keyword_search(conn, q, limit) for q in queries[1:]
+    ]
 
     semantic: list[tuple[str, str]] = []  # (path, title), already ranked
+    extra_semantic: list[list[tuple[str, str]]] = []
     if embedder is not None and store is not None:
         try:
+            for q in queries[1:]:
+                rows = store.query(embedder.embed(q), limit)
+                extra_semantic.append([(r[0], r[1]) for r in rows])
             vector = embedder.embed(query)
             for row in store.query(vector, limit):
                 # 4-tuples carry the winning chunk's passage (#354); legacy
@@ -114,6 +134,12 @@ def hybrid_search(
         fuse(hit.path, hit.title, rank, "keyword")
     for rank, (path, title) in enumerate(semantic):
         fuse(path, title, rank, "semantic")
+    for hits_k in extra_keyword:
+        for rank, hit in enumerate(hits_k):
+            fuse(hit.path, hit.title, rank, "keyword")
+    for sem in extra_semantic:
+        for rank, (path, title) in enumerate(sem):
+            fuse(path, title, rank, "semantic")
 
     if graph_signal and scores:
         # Third list (#353): the candidates already matched, ordered by
