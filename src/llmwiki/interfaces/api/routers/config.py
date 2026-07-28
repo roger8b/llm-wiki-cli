@@ -31,6 +31,11 @@ def _config_payload() -> dict[str, Any]:
         "ingest_scope_concepts_per_chunk": cfg.ingest_scope_concepts_per_chunk,
         "whisper_model": cfg.whisper_model,
         "whisper_language": cfg.whisper_language,
+        # Ask path (#350, epic #348). Default stays "agent" — `rag`/`auto` are
+        # opt-in: −64% tokens_in, but no citations and p50 unchanged (ADR 002).
+        "ask_mode": cfg.ask_mode,
+        "ask_rag_top_k": cfg.ask_rag_top_k,
+        "ask_rag_max_context_chars": cfg.ask_rag_max_context_chars,
     }
 
 

@@ -65,3 +65,30 @@ def test_embedding_model_null_disables(client) -> None:
     client.patch("/api/config", json={"embedding_model": "ollama:x"})
     r = client.patch("/api/config", json={"embedding_model": None})
     assert r.json()["embedding_model"] is None
+
+
+# --- #348 flags exposed for Settings (#368) ----------------------------------
+
+ASK_FIELDS = {"ask_mode", "ask_rag_top_k", "ask_rag_max_context_chars"}
+
+
+def test_get_config_exposes_ask_fields(client) -> None:
+    body = client.get("/api/config").json()
+    assert ASK_FIELDS <= body.keys()
+    # H2 (#350) shipped opt-in: the agent loop stays the default.
+    assert body["ask_mode"] == "agent"
+
+
+def test_patch_round_trips_ask_fields(client) -> None:
+    r = client.patch(
+        "/api/config",
+        json={"ask_mode": "rag", "ask_rag_top_k": 8, "ask_rag_max_context_chars": 12000},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ask_mode"] == "rag"
+    assert body["ask_rag_top_k"] == 8
+    assert body["ask_rag_max_context_chars"] == 12000
+    again = client.get("/api/config").json()
+    assert again["ask_mode"] == "rag"
+    assert again["ask_rag_top_k"] == 8

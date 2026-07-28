@@ -178,7 +178,14 @@ export interface WorkspaceConfig {
   chunk_overlap_chars?: number
   whisper_model?: string
   whisper_language?: string | null
+  // Ask path (#350, epic #348) — opt-in, default "agent".
+  ask_mode?: AskMode
+  ask_rag_top_k?: number
+  ask_rag_max_context_chars?: number
 }
+
+/** `agent` = tool-calling loop (default); `rag` = single-shot; `auto` = rag with agent fallback. */
+export type AskMode = "agent" | "rag" | "auto"
 
 /** Desktop-shell settings, acted on by the Tauri tray (#204). */
 export interface DesktopConfig {

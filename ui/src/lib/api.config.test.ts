@@ -33,3 +33,26 @@ describe("api.patchConfig (#237)", () => {
     })
   })
 })
+
+describe("api.patchConfig — ask path (#368)", () => {
+  it("PATCHes ask_mode and its RAG knobs", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        ({ ok: true, status: 200, json: async () => ({}) }) as unknown as Response,
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await api.patchConfig({
+      ask_mode: "rag",
+      ask_rag_top_k: 8,
+      ask_rag_max_context_chars: 12000,
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      ask_mode: "rag",
+      ask_rag_top_k: 8,
+      ask_rag_max_context_chars: 12000,
+    })
+  })
+})
