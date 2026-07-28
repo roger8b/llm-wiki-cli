@@ -46,7 +46,6 @@ _CONFIG_KEYS = (
     "ingest_scope_concepts_per_chunk",
     "ingest_exclude_builtin_tools",
     "embedding_model",
-    "search_graph_signal",
     "search_query_expansion",
     "ask_mode",
     "ask_rag_top_k",
@@ -198,10 +197,6 @@ class WorkspaceConfig(BaseModel):
     # Local semantic search (#169, optional [semantic] extra). None disables it
     # entirely (pure FTS). "<provider>:<model>", e.g. "ollama:nomic-embed-text".
     embedding_model: str | None = None
-    # Third RRF signal (#353): re-rank matched candidates by incoming-link
-    # degree (backlinks). Prior, not a matcher — never introduces pages the
-    # query didn't hit. False (default) = byte-identical ranking.
-    search_graph_signal: bool = False
     # Multi-query expansion (#355): fuse N LLM-generated reformulations into
     # the hybrid RRF (search_pages/ask retrieval only — NOT the ingestion
     # prefetch, whose per-concept cost would multiply). 0 (default) = off,

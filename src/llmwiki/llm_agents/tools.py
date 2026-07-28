@@ -97,7 +97,6 @@ def _hybrid_hits(
         limit=limit,
         embedder=embedder,
         store=store,
-        graph_signal=cfg.search_graph_signal,
         expander=expander,  # type: ignore[arg-type]
     )
 
