@@ -13,6 +13,7 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   AgentInfo,
+  AskMode,
   CliStatus,
   ModelTestResult,
   OllamaStatus,
@@ -65,6 +66,17 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "security", label: "Security" },
   { id: "tools", label: "Tools" },
 ]
+
+const ASK_MODES: { id: AskMode; label: string; desc: string }[] = [
+  { id: "agent", label: "agent (default)", desc: "Tool-calling loop. Most expensive, but the only path that cites pages." },
+  { id: "rag", label: "rag", desc: "Retrieve in code + one LLM call. −64% input tokens, no citations, p50 unchanged." },
+  { id: "auto", label: "auto", desc: "rag first; falls back to the agent loop when retrieval returns 0 hits." },
+]
+
+/** Unknown values degrade to "agent", mirroring query_service.py:230. */
+export function normalizeAskMode(value: string | undefined | null): AskMode {
+  return ASK_MODES.some((m) => m.id === value) ? (value as AskMode) : "agent"
+}
 
 const WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
 
@@ -150,6 +162,11 @@ export function SettingsView() {
   const [whisperModel, setWhisperModel] = useState("small")
   const [whisperLanguage, setWhisperLanguage] = useState("")
 
+  // ── ask path (#368, epic #348) ──
+  const [askMode, setAskMode] = useState<AskMode>("agent")
+  const [askRagTopK, setAskRagTopK] = useState(6)
+  const [askRagMaxChars, setAskRagMaxChars] = useState(24000)
+
   // ── reference data ──
   const [providers, setProviders] = useState<ProvidersMap | null>(null)
   const [ollama, setOllama] = useState<OllamaStatus | null>(null)
@@ -192,6 +209,9 @@ export function SettingsView() {
     chunkOverlap: number
     whisperModel: string
     whisperLanguage: string
+    askMode: AskMode
+    askRagTopK: number
+    askRagMaxChars: number
   }) {
     return JSON.stringify(s)
   }
@@ -212,6 +232,9 @@ export function SettingsView() {
       chunkOverlap,
       whisperModel,
       whisperLanguage,
+      askMode,
+      askRagTopK,
+      askRagMaxChars,
     })
   }
 
@@ -247,6 +270,11 @@ export function SettingsView() {
         const co = cfg.chunk_overlap_chars ?? 1000
         const wm = cfg.whisper_model ?? "small"
         const wl = cfg.whisper_language ?? ""
+        // #368 — an out-of-enum value written by hand falls back to "agent",
+        // mirroring query_service.py (which only branches on the known modes).
+        const am = normalizeAskMode(cfg.ask_mode)
+        const artk = cfg.ask_rag_top_k ?? 6
+        const armc = cfg.ask_rag_max_context_chars ?? 24000
         setEmbeddingModel(em)
         setAgentMaxRetries(amr)
         setAgentFixRetries(afr)
@@ -255,6 +283,9 @@ export function SettingsView() {
         setChunkOverlap(co)
         setWhisperModel(wm)
         setWhisperLanguage(wl)
+        setAskMode(am)
+        setAskRagTopK(artk)
+        setAskRagMaxChars(armc)
         setSnapshot(
           snap({
             provider: p,
@@ -272,6 +303,9 @@ export function SettingsView() {
             chunkOverlap: co,
             whisperModel: wm,
             whisperLanguage: wl,
+            askMode: am,
+            askRagTopK: artk,
+            askRagMaxChars: armc,
           }),
         )
       } finally {
@@ -333,6 +367,9 @@ export function SettingsView() {
         chunk_overlap_chars: chunkOverlap,
         whisper_model: whisperModel,
         whisper_language: whisperLanguage.trim() || null,
+        ask_mode: askMode,
+        ask_rag_top_k: askRagTopK,
+        ask_rag_max_context_chars: askRagMaxChars,
       })
       // refresh providers (base_url/model may have changed)
       setProviders(await api.getProviders().catch(() => providers))
@@ -678,6 +715,45 @@ export function SettingsView() {
                         className="w-[240px] font-mono text-[12px]"
                       />
                     </Row>
+                  </Section>
+                  <Section title="Ask" desc="How questions are answered from the wiki">
+                    <Row name="Ask mode" desc={ASK_MODES.find((m) => m.id === askMode)!.desc}>
+                      <select
+                        aria-label="Ask mode"
+                        value={askMode}
+                        onChange={(e) => setAskMode(normalizeAskMode(e.target.value))}
+                        className="w-[160px] rounded-md border bg-background px-3 py-2 font-mono text-[13px]"
+                      >
+                        {ASK_MODES.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Row>
+                    {askMode !== "agent" && (
+                      <>
+                        <Row name="RAG top-k" desc="Pages retrieved to build the context.">
+                          <Input
+                            type="number"
+                            min="1"
+                            value={askRagTopK}
+                            onChange={(e) => setAskRagTopK(Number(e.target.value))}
+                            className="w-24"
+                          />
+                        </Row>
+                        <Row name="RAG context (chars)" desc="Cap on the context assembled from those pages.">
+                          <Input
+                            type="number"
+                            min="1000"
+                            step="1000"
+                            value={askRagMaxChars}
+                            onChange={(e) => setAskRagMaxChars(Number(e.target.value))}
+                            className="w-28"
+                          />
+                        </Row>
+                      </>
+                    )}
                   </Section>
                 </>
               )}
