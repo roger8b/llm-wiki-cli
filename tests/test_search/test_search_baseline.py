@@ -1,34 +1,20 @@
 """Tests for the retrieval eval harness (#349, epic #348).
 
 Covers the golden-set parser, the recall@k / MRR math and an end-to-end smoke
-of ``scripts/search_baseline.py`` against a tiny fixture brain — no LLM, no
+of ``llmwiki.evals.retrieval`` against a tiny fixture brain — no LLM, no
 embeddings (semantic layer off ⇒ keyword == hybrid).
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-
-def _load_harness():
-    path = Path(__file__).resolve().parents[2] / "scripts" / "search_baseline.py"
-    spec = importlib.util.spec_from_file_location("search_baseline", path)
-    mod = importlib.util.module_from_spec(spec)
-    # dataclasses (py3.14) resolve the defining module via sys.modules.
-    sys.modules["search_baseline"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
+from llmwiki.evals import retrieval as hb
 
 # --- golden set parser ----------------------------------------------------
 
 
 def test_load_golden_parses_search_and_ask(tmp_path):
-    hb = _load_harness()
     golden = tmp_path / "golden.yaml"
     golden.write_text(
         """
@@ -56,7 +42,6 @@ ask:
 
 
 def test_load_golden_rejects_unknown_class(tmp_path):
-    hb = _load_harness()
     golden = tmp_path / "golden.yaml"
     golden.write_text(
         "search:\n  - id: x\n    class: fuzzy\n    query: q\n    expected: [a.md]\n",
@@ -67,7 +52,6 @@ def test_load_golden_rejects_unknown_class(tmp_path):
 
 
 def test_load_golden_rejects_inconsistent_expected(tmp_path):
-    hb = _load_harness()
     golden = tmp_path / "golden.yaml"
     # negative with expected pages, and non-negative without any — both invalid.
     golden.write_text(
@@ -88,7 +72,6 @@ def test_load_golden_rejects_inconsistent_expected(tmp_path):
 
 
 def test_recall_at_and_mrr_math():
-    hb = _load_harness()
     expected = ["a.md", "b.md"]
     ranked = ["x.md", "a.md", "y.md", "z.md", "w.md", "b.md"]
     assert hb.recall_at(expected, ranked, 5) == pytest.approx(0.5)
@@ -102,7 +85,6 @@ def test_recall_at_and_mrr_math():
 
 
 def test_percentiles_small_n():
-    hb = _load_harness()
     assert hb.p50([10.0, 20.0]) == pytest.approx(15.0)
     assert hb.p95([10.0, 20.0]) == pytest.approx(20.0)
 
@@ -149,7 +131,6 @@ def fixture_brain(tmp_path, monkeypatch):
 
 
 def test_search_eval_smoke(fixture_brain, tmp_path):
-    hb = _load_harness()
     paths, conn, cfg = fixture_brain
     golden = tmp_path / "golden.yaml"
     golden.write_text(
@@ -181,7 +162,6 @@ search:
 
 
 def test_render_report_mentions_embeddings_health(fixture_brain, tmp_path):
-    hb = _load_harness()
     paths, conn, cfg = fixture_brain
     golden = tmp_path / "golden.yaml"
     golden.write_text(
