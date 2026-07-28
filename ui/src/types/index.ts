@@ -182,7 +182,13 @@ export interface WorkspaceConfig {
   ask_mode?: AskMode
   ask_rag_top_k?: number
   ask_rag_max_context_chars?: number
+  // Ingestion core (#352, epic #348) — opt-in, default "deepagents".
+  agent_core?: AgentCore
+  minimal_max_turns?: number
 }
+
+/** `deepagents` = framework loop (default); `minimal` = native tool-calling loop. */
+export type AgentCore = "deepagents" | "minimal"
 
 /** `agent` = tool-calling loop (default); `rag` = single-shot; `auto` = rag with agent fallback. */
 export type AskMode = "agent" | "rag" | "auto"

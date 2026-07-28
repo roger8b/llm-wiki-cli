@@ -92,3 +92,23 @@ def test_patch_round_trips_ask_fields(client) -> None:
     again = client.get("/api/config").json()
     assert again["ask_mode"] == "rag"
     assert again["ask_rag_top_k"] == 8
+
+
+# --- agent core (#369) -------------------------------------------------------
+
+
+def test_get_config_exposes_agent_core(client) -> None:
+    body = client.get("/api/config").json()
+    assert {"agent_core", "minimal_max_turns"} <= body.keys()
+    # H6 (#352) shipped opt-in: DeepAgents stays the default core.
+    assert body["agent_core"] == "deepagents"
+    assert body["minimal_max_turns"] == 40
+
+
+def test_patch_round_trips_agent_core(client) -> None:
+    r = client.patch("/api/config", json={"agent_core": "minimal", "minimal_max_turns": 60})
+    assert r.status_code == 200
+    assert r.json()["agent_core"] == "minimal"
+    again = client.get("/api/config").json()
+    assert again["agent_core"] == "minimal"
+    assert again["minimal_max_turns"] == 60
