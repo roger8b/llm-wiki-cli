@@ -25,6 +25,7 @@ from .commands import (
     ask,
     autolink,
     brain_app,
+    config_app,
     curate,
     evals_app,
     index,
@@ -53,6 +54,7 @@ app = typer.Typer(
 app.add_typer(source_app, name="source")
 app.add_typer(page_app, name="page")
 app.add_typer(brain_app, name="brain")
+app.add_typer(config_app, name="config")
 app.add_typer(skills_app, name="skills")
 app.add_typer(evals_app, name="evals")
 app.add_typer(jobs_app, name="jobs")
