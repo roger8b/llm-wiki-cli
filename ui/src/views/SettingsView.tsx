@@ -13,6 +13,7 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   AgentInfo,
+  AgentCore,
   AskMode,
   CliStatus,
   ModelTestResult,
@@ -76,6 +77,24 @@ const ASK_MODES: { id: AskMode; label: string; desc: string }[] = [
 /** Unknown values degrade to "agent", mirroring query_service.py:230. */
 export function normalizeAskMode(value: string | undefined | null): AskMode {
   return ASK_MODES.some((m) => m.id === value) ? (value as AskMode) : "agent"
+}
+
+const AGENT_CORES: { id: AgentCore; label: string; desc: string }[] = [
+  {
+    id: "deepagents",
+    label: "deepagents (default)",
+    desc: "Framework loop with planning scaffolding. Steadier on short sources.",
+  },
+  {
+    id: "minimal",
+    label: "minimal",
+    desc: "Native tool-calling loop. −50% time on long sources and evals 90.9 vs 79.1 (framework overhead 47% → 4% of input tokens), but regresses on short ones (+83% input).",
+  },
+]
+
+/** Unknown values behave as "deepagents", mirroring factory.py (only "minimal" branches). */
+export function normalizeAgentCore(value: string | undefined | null): AgentCore {
+  return value === "minimal" ? "minimal" : "deepagents"
 }
 
 const WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
@@ -167,6 +186,10 @@ export function SettingsView() {
   const [askRagTopK, setAskRagTopK] = useState(6)
   const [askRagMaxChars, setAskRagMaxChars] = useState(24000)
 
+  // ── ingestion core (#369, epic #348) ──
+  const [agentCore, setAgentCore] = useState<AgentCore>("deepagents")
+  const [minimalMaxTurns, setMinimalMaxTurns] = useState(40)
+
   // ── reference data ──
   const [providers, setProviders] = useState<ProvidersMap | null>(null)
   const [ollama, setOllama] = useState<OllamaStatus | null>(null)
@@ -212,6 +235,8 @@ export function SettingsView() {
     askMode: AskMode
     askRagTopK: number
     askRagMaxChars: number
+    agentCore: AgentCore
+    minimalMaxTurns: number
   }) {
     return JSON.stringify(s)
   }
@@ -235,6 +260,8 @@ export function SettingsView() {
       askMode,
       askRagTopK,
       askRagMaxChars,
+      agentCore,
+      minimalMaxTurns,
     })
   }
 
@@ -275,6 +302,8 @@ export function SettingsView() {
         const am = normalizeAskMode(cfg.ask_mode)
         const artk = cfg.ask_rag_top_k ?? 6
         const armc = cfg.ask_rag_max_context_chars ?? 24000
+        const ac = normalizeAgentCore(cfg.agent_core)
+        const mmt = cfg.minimal_max_turns ?? 40
         setEmbeddingModel(em)
         setAgentMaxRetries(amr)
         setAgentFixRetries(afr)
@@ -286,6 +315,8 @@ export function SettingsView() {
         setAskMode(am)
         setAskRagTopK(artk)
         setAskRagMaxChars(armc)
+        setAgentCore(ac)
+        setMinimalMaxTurns(mmt)
         setSnapshot(
           snap({
             provider: p,
@@ -306,6 +337,8 @@ export function SettingsView() {
             askMode: am,
             askRagTopK: artk,
             askRagMaxChars: armc,
+            agentCore: ac,
+            minimalMaxTurns: mmt,
           }),
         )
       } finally {
@@ -370,6 +403,8 @@ export function SettingsView() {
         ask_mode: askMode,
         ask_rag_top_k: askRagTopK,
         ask_rag_max_context_chars: askRagMaxChars,
+        agent_core: agentCore,
+        minimal_max_turns: minimalMaxTurns,
       })
       // refresh providers (base_url/model may have changed)
       setProviders(await api.getProviders().catch(() => providers))
@@ -762,6 +797,33 @@ export function SettingsView() {
               {section === "ingestion" && (
                 <>
                   <div className="mb-5 text-[20px] font-semibold tracking-[-0.3px]">Ingestion</div>
+                  <Section title="Agent core" desc="Which loop drives the ingestion agent">
+                    <Row name="Core" desc={AGENT_CORES.find((c) => c.id === agentCore)!.desc}>
+                      <select
+                        aria-label="Agent core"
+                        value={agentCore}
+                        onChange={(e) => setAgentCore(normalizeAgentCore(e.target.value))}
+                        className="w-[180px] rounded-md border bg-background px-3 py-2 font-mono text-[13px]"
+                      >
+                        {AGENT_CORES.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Row>
+                    {agentCore === "minimal" && (
+                      <Row name="Max turns" desc="Turn budget for the minimal loop. Hitting it degrades to the fallback, never hangs.">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={minimalMaxTurns}
+                          onChange={(e) => setMinimalMaxTurns(Number(e.target.value))}
+                          className="w-24"
+                        />
+                      </Row>
+                    )}
+                  </Section>
                   <Section
                     title="Long-source chunking"
                     desc="Sources longer than the threshold are ingested in multiple passes"

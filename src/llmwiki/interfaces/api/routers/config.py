@@ -36,6 +36,10 @@ def _config_payload() -> dict[str, Any]:
         "ask_mode": cfg.ask_mode,
         "ask_rag_top_k": cfg.ask_rag_top_k,
         "ask_rag_max_context_chars": cfg.ask_rag_max_context_chars,
+        # Ingestion core (#352, epic #348). Default stays "deepagents" —
+        # "minimal" wins on long sources and loses on short ones (ADR 002).
+        "agent_core": cfg.agent_core,
+        "minimal_max_turns": cfg.minimal_max_turns,
     }
 
 
