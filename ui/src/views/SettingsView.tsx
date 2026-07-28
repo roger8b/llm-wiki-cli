@@ -436,6 +436,11 @@ export function SettingsView() {
       setChunkOverlap(s.chunkOverlap)
       setWhisperModel(s.whisperModel)
       setWhisperLanguage(s.whisperLanguage)
+      setAskMode(s.askMode)
+      setAskRagTopK(s.askRagTopK)
+      setAskRagMaxChars(s.askRagMaxChars)
+      setAgentCore(s.agentCore)
+      setMinimalMaxTurns(s.minimalMaxTurns)
       setTest(null)
     } catch {
       /* snapshot malformed — nothing to restore */
