@@ -1,6 +1,7 @@
 """CLI commands — split by domain."""
 
 from .brain import brain_app
+from .config import config_app
 from .evals import evals_app
 from .ingest import ingest
 from .mcp import mcp
@@ -13,6 +14,7 @@ from .wiki import ask, autolink, curate, index, lint, log, maintain, search
 
 __all__ = [
     "brain_app",
+    "config_app",
     "evals_app",
     "source_app",
     "page_app",
