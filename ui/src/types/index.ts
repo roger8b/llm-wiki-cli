@@ -185,6 +185,9 @@ export interface WorkspaceConfig {
   // Ingestion core (#352, epic #348) — opt-in, default "deepagents".
   agent_core?: AgentCore
   minimal_max_turns?: number
+  // Output cap (#351, epic #348) — opt-in, no cap by default.
+  max_output_tokens?: number | null
+  max_output_tokens_by_op?: Record<string, number>
 }
 
 /** `deepagents` = framework loop (default); `minimal` = native tool-calling loop. */

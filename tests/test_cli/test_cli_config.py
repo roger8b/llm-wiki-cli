@@ -135,3 +135,15 @@ def test_cli_set_is_visible_to_the_api(tmp_path: Path, monkeypatch, isolated_wik
     from llmwiki.core.paths import BrainPaths
 
     assert load_config(BrainPaths(root)).fts_limit == 42
+
+
+def test_set_non_positive_cap_rejected(tmp_path: Path, monkeypatch, isolated_wiki_home) -> None:
+    """The write-path guard (#370) reaches the CLI too, not just the API."""
+    _brain(tmp_path, monkeypatch)
+    res = runner.invoke(app, ["config", "set", "max_output_tokens", "0"])
+    assert res.exit_code != 0
+    assert "positive" in res.output
+    got = json.loads(
+        runner.invoke(app, ["config", "get", "max_output_tokens", "--json"]).stdout
+    )
+    assert got == {"max_output_tokens": None}

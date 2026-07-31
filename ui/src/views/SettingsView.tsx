@@ -97,6 +97,37 @@ export function normalizeAgentCore(value: string | undefined | null): AgentCore 
   return value === "minimal" ? "minimal" : "deepagents"
 }
 
+/** Operations that accept a per-op cap. "outline" inherits "ingest" (factory.py). */
+const CAP_OPS = ["ingest", "ask", "maintain"] as const
+
+/**
+ * Splits cap inputs into the patch map and the fields that must block the save
+ * (#370).
+ *
+ * An **empty** field means "no cap", so its key is dropped — that is how a cap
+ * is removed, since the backend rejects a non-positive cap on write. A
+ * **non-empty invalid** field (0, negative, non-numeric) is an error, not a
+ * clearing request: dropping it would wipe the stored cap while reporting
+ * "Settings saved".
+ */
+export function parseCaps(caps: Record<string, string>): {
+  values: Record<string, number>
+  errors: string[]
+} {
+  const values: Record<string, number> = {}
+  const errors: string[] = []
+  for (const [op, raw] of Object.entries(caps)) {
+    if (raw.trim() === "") continue // cleared = no cap for this op
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) {
+      errors.push(`${op}: "${raw}" is not a positive number of tokens`)
+      continue
+    }
+    values[op] = n
+  }
+  return { values, errors }
+}
+
 const WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
 
 /** Card section matching the prototype: header (title + desc) over stacked rows. */
@@ -190,6 +221,10 @@ export function SettingsView() {
   const [agentCore, setAgentCore] = useState<AgentCore>("deepagents")
   const [minimalMaxTurns, setMinimalMaxTurns] = useState(40)
 
+  // ── output cap (#370, epic #348). Kept as strings: "" = no cap. ──
+  const [maxOutputTokens, setMaxOutputTokens] = useState("")
+  const [capsByOp, setCapsByOp] = useState<Record<string, string>>({})
+
   // ── reference data ──
   const [providers, setProviders] = useState<ProvidersMap | null>(null)
   const [ollama, setOllama] = useState<OllamaStatus | null>(null)
@@ -237,6 +272,8 @@ export function SettingsView() {
     askRagMaxChars: number
     agentCore: AgentCore
     minimalMaxTurns: number
+    maxOutputTokens: string
+    capsByOp: Record<string, string>
   }) {
     return JSON.stringify(s)
   }
@@ -262,6 +299,8 @@ export function SettingsView() {
       askRagMaxChars,
       agentCore,
       minimalMaxTurns,
+      maxOutputTokens,
+      capsByOp,
     })
   }
 
@@ -304,6 +343,10 @@ export function SettingsView() {
         const armc = cfg.ask_rag_max_context_chars ?? 24000
         const ac = normalizeAgentCore(cfg.agent_core)
         const mmt = cfg.minimal_max_turns ?? 40
+        const mot = cfg.max_output_tokens ? String(cfg.max_output_tokens) : ""
+        const cbo = Object.fromEntries(
+          Object.entries(cfg.max_output_tokens_by_op ?? {}).map(([k, v]) => [k, String(v)]),
+        )
         setEmbeddingModel(em)
         setAgentMaxRetries(amr)
         setAgentFixRetries(afr)
@@ -317,6 +360,8 @@ export function SettingsView() {
         setAskRagMaxChars(armc)
         setAgentCore(ac)
         setMinimalMaxTurns(mmt)
+        setMaxOutputTokens(mot)
+        setCapsByOp(cbo)
         setSnapshot(
           snap({
             provider: p,
@@ -339,6 +384,8 @@ export function SettingsView() {
             askRagMaxChars: armc,
             agentCore: ac,
             minimalMaxTurns: mmt,
+            maxOutputTokens: mot,
+            capsByOp: cbo,
           }),
         )
       } finally {
@@ -377,6 +424,14 @@ export function SettingsView() {
   const dirty = !loading && currentSnap() !== snapshot
 
   async function save() {
+    const globalCap = parseCaps({ "Global cap": maxOutputTokens })
+    const opCaps = parseCaps(capsByOp)
+    const capErrors = [...globalCap.errors, ...opCaps.errors]
+    if (capErrors.length > 0) {
+      // Saving would silently clear the stored caps instead of setting them.
+      toast.error(`Invalid output cap — ${capErrors.join("; ")}`)
+      return
+    }
     setSaving(true)
     try {
       if (!isLocal) {
@@ -405,6 +460,8 @@ export function SettingsView() {
         ask_rag_max_context_chars: askRagMaxChars,
         agent_core: agentCore,
         minimal_max_turns: minimalMaxTurns,
+        max_output_tokens: globalCap.values["Global cap"] ?? null,
+        max_output_tokens_by_op: opCaps.values,
       })
       // refresh providers (base_url/model may have changed)
       setProviders(await api.getProviders().catch(() => providers))
@@ -441,6 +498,8 @@ export function SettingsView() {
       setAskRagMaxChars(s.askRagMaxChars)
       setAgentCore(s.agentCore)
       setMinimalMaxTurns(s.minimalMaxTurns)
+      setMaxOutputTokens(s.maxOutputTokens)
+      setCapsByOp(s.capsByOp)
       setTest(null)
     } catch {
       /* snapshot malformed — nothing to restore */
@@ -828,6 +887,48 @@ export function SettingsView() {
                         />
                       </Row>
                     )}
+                  </Section>
+                  <Section
+                    title="Output cap"
+                    desc="Max tokens the model may generate per call. Empty = no cap (default)"
+                  >
+                    <Row
+                      name="Global cap"
+                      desc="Applies to every operation without its own cap. A cap trades input for latency: ingest at 2048 cut total time 25–46% but raised input tokens ~20% (ADR 002)."
+                    >
+                      <Input
+                        type="number"
+                        min="1"
+                        aria-label="Global output cap"
+                        placeholder="no cap"
+                        value={maxOutputTokens}
+                        onChange={(e) => setMaxOutputTokens(e.target.value)}
+                        className="w-28"
+                      />
+                    </Row>
+                    {CAP_OPS.map((op) => (
+                      <Row
+                        key={op}
+                        name={`Cap for ${op}`}
+                        desc={
+                          op === "ingest"
+                            ? "Overrides the global cap for ingestion. `outline` inherits this one."
+                            : `Overrides the global cap for ${op}.`
+                        }
+                      >
+                        <Input
+                          type="number"
+                          min="1"
+                          aria-label={`Output cap for ${op}`}
+                          placeholder="inherit"
+                          value={capsByOp[op] ?? ""}
+                          onChange={(e) =>
+                            setCapsByOp((prev) => ({ ...prev, [op]: e.target.value }))
+                          }
+                          className="w-28"
+                        />
+                      </Row>
+                    ))}
                   </Section>
                   <Section
                     title="Long-source chunking"

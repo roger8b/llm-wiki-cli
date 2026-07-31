@@ -86,5 +86,9 @@ def config_set(
         typer.echo(f"Invalid value for '{key}': {first['msg']}", err=True)
         raise typer.Exit(code=EXIT_USAGE) from None
 
-    update_config({key: parsed})
+    try:
+        update_config({key: parsed})
+    except ValueError as exc:  # write-path guards, e.g. non-positive cap (#370)
+        typer.echo(f"Invalid value for '{key}': {exc}", err=True)
+        raise typer.Exit(code=EXIT_USAGE) from None
     typer.echo(f"{key} = {json.dumps(load_config(paths).model_dump(mode='json')[key])}")
