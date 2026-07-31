@@ -170,3 +170,11 @@ def test_legacy_zero_cap_in_the_file_still_loads(brain: BrainPaths, isolated_wik
     cfg_file = isolated_wiki_home / "config.yaml"
     cfg_file.write_text(yaml.safe_dump({"max_output_tokens": 0}), encoding="utf-8")
     assert load_config(brain).max_output_tokens == 0
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, "0", "-3", True])
+def test_patch_rejects_coercible_non_positive_cap(client, value) -> None:
+    """Pydantic coerces these to int, so the guard must run on validated values."""
+    r = client.patch("/api/config", json={"max_output_tokens": value})
+    assert r.status_code == 400
+    assert client.get("/api/config").json()["max_output_tokens"] is None

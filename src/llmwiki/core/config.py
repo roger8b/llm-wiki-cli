@@ -282,23 +282,38 @@ def write_default_config(paths: BrainPaths) -> None:  # noqa: ARG001
     )
 
 
-def _reject_non_positive_caps(patch: dict[str, object]) -> None:
+def _reject_non_positive_caps(patch: dict[str, object], validated: WorkspaceConfig) -> None:
     """Reject a non-positive output cap on write (#370).
 
-    ``resolve_max_output_tokens`` still reads ``0`` as "no cap" so configs
-    written before this check keep loading; what changes is that no interface
-    lets you write one. Removing a cap means clearing the key.
+    Checks the *validated* values, not the raw patch: pydantic coerces ``0.0``,
+    ``"0"`` and ``True`` to ``int``, so a raw-type guard would let them through.
+    Only keys present in ``patch`` are checked — a ``0`` written before this
+    guard existed keeps loading, and unrelated patches to the same file keep
+    working. Removing a cap means clearing the key, never writing ``0``.
     """
-    def _check(where: str, value: object) -> None:
-        if isinstance(value, int) and not isinstance(value, bool) and value <= 0:
-            raise ValueError(f"{where} must be a positive number of tokens (got {value}); "
-                             "clear the field to remove the cap")
+    def _check(where: str, value: int) -> None:
+        if value <= 0:
+            raise ValueError(
+                f"{where} must be a positive number of tokens (got {value}); "
+                "clear the field to remove the cap"
+            )
 
-    if patch.get("max_output_tokens") is not None:
-        _check("max_output_tokens", patch["max_output_tokens"])
-    by_op = patch.get("max_output_tokens_by_op")
-    if isinstance(by_op, dict):
-        for op, value in by_op.items():
+    def _reject_bool(where: str, raw: object) -> None:
+        # True would coerce to a cap of 1 and pass the positivity check.
+        if isinstance(raw, bool):
+            raise ValueError(f"{where} must be a number of tokens, not a boolean")
+
+    if "max_output_tokens" in patch:
+        _reject_bool("max_output_tokens", patch["max_output_tokens"])
+        if validated.max_output_tokens is not None:
+            _check("max_output_tokens", validated.max_output_tokens)
+    if "max_output_tokens_by_op" in patch:
+        raw_by_op = patch["max_output_tokens_by_op"]
+        if isinstance(raw_by_op, dict):
+            for op, raw in raw_by_op.items():
+                _reject_bool(f"max_output_tokens_by_op[{op}]", raw)
+        # the map is replaced wholesale, so every entry here came from the patch
+        for op, value in validated.max_output_tokens_by_op.items():
             _check(f"max_output_tokens_by_op[{op}]", value)
 
 
@@ -340,8 +355,8 @@ def update_config(patch: dict[str, object]) -> None:
     # Validate before writing: a rejected value must never reach the file, or
     # every later ``load_config`` would raise on it (#370). brain_root is not a
     # config key — any existing path satisfies the model here.
-    WorkspaceConfig.model_validate({**data, "brain_root": _paths_module.WIKI_HOME})
-    _reject_non_positive_caps(patch)
+    validated = WorkspaceConfig.model_validate({**data, "brain_root": _paths_module.WIKI_HOME})
+    _reject_non_positive_caps(patch, validated)
     cfg_path.write_text(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",

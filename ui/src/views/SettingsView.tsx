@@ -101,16 +101,31 @@ export function normalizeAgentCore(value: string | undefined | null): AgentCore 
 const CAP_OPS = ["ingest", "ask", "maintain"] as const
 
 /**
- * Empty input = no cap for that op, so the key is dropped instead of being
- * written as 0 — the backend rejects a non-positive cap on write (#370).
+ * Splits cap inputs into the patch map and the fields that must block the save
+ * (#370).
+ *
+ * An **empty** field means "no cap", so its key is dropped — that is how a cap
+ * is removed, since the backend rejects a non-positive cap on write. A
+ * **non-empty invalid** field (0, negative, non-numeric) is an error, not a
+ * clearing request: dropping it would wipe the stored cap while reporting
+ * "Settings saved".
  */
-export function capsToPatch(caps: Record<string, string>): Record<string, number> {
-  const out: Record<string, number> = {}
+export function parseCaps(caps: Record<string, string>): {
+  values: Record<string, number>
+  errors: string[]
+} {
+  const values: Record<string, number> = {}
+  const errors: string[] = []
   for (const [op, raw] of Object.entries(caps)) {
+    if (raw.trim() === "") continue // cleared = no cap for this op
     const n = Number(raw)
-    if (raw.trim() !== "" && Number.isFinite(n) && n > 0) out[op] = n
+    if (!Number.isFinite(n) || n <= 0) {
+      errors.push(`${op}: "${raw}" is not a positive number of tokens`)
+      continue
+    }
+    values[op] = n
   }
-  return out
+  return { values, errors }
 }
 
 const WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
@@ -409,6 +424,14 @@ export function SettingsView() {
   const dirty = !loading && currentSnap() !== snapshot
 
   async function save() {
+    const globalCap = parseCaps({ "Global cap": maxOutputTokens })
+    const opCaps = parseCaps(capsByOp)
+    const capErrors = [...globalCap.errors, ...opCaps.errors]
+    if (capErrors.length > 0) {
+      // Saving would silently clear the stored caps instead of setting them.
+      toast.error(`Invalid output cap — ${capErrors.join("; ")}`)
+      return
+    }
     setSaving(true)
     try {
       if (!isLocal) {
@@ -437,8 +460,8 @@ export function SettingsView() {
         ask_rag_max_context_chars: askRagMaxChars,
         agent_core: agentCore,
         minimal_max_turns: minimalMaxTurns,
-        max_output_tokens: capsToPatch({ g: maxOutputTokens }).g ?? null,
-        max_output_tokens_by_op: capsToPatch(capsByOp),
+        max_output_tokens: globalCap.values["Global cap"] ?? null,
+        max_output_tokens_by_op: opCaps.values,
       })
       // refresh providers (base_url/model may have changed)
       setProviders(await api.getProviders().catch(() => providers))
