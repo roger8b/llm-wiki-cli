@@ -282,6 +282,26 @@ def write_default_config(paths: BrainPaths) -> None:  # noqa: ARG001
     )
 
 
+def _reject_non_positive_caps(patch: dict[str, object]) -> None:
+    """Reject a non-positive output cap on write (#370).
+
+    ``resolve_max_output_tokens`` still reads ``0`` as "no cap" so configs
+    written before this check keep loading; what changes is that no interface
+    lets you write one. Removing a cap means clearing the key.
+    """
+    def _check(where: str, value: object) -> None:
+        if isinstance(value, int) and not isinstance(value, bool) and value <= 0:
+            raise ValueError(f"{where} must be a positive number of tokens (got {value}); "
+                             "clear the field to remove the cap")
+
+    if patch.get("max_output_tokens") is not None:
+        _check("max_output_tokens", patch["max_output_tokens"])
+    by_op = patch.get("max_output_tokens_by_op")
+    if isinstance(by_op, dict):
+        for op, value in by_op.items():
+            _check(f"max_output_tokens_by_op[{op}]", value)
+
+
 def update_config(patch: dict[str, object]) -> None:
     """Merge ``patch`` into ~/.wiki/config.yaml, preserving other keys.
 
@@ -317,6 +337,11 @@ def update_config(patch: dict[str, object]) -> None:
             data["providers"] = current
         else:
             data[key] = patch[key]  # allow None (e.g. temperature) explicitly
+    # Validate before writing: a rejected value must never reach the file, or
+    # every later ``load_config`` would raise on it (#370). brain_root is not a
+    # config key — any existing path satisfies the model here.
+    WorkspaceConfig.model_validate({**data, "brain_root": _paths_module.WIKI_HOME})
+    _reject_non_positive_caps(patch)
     cfg_path.write_text(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",

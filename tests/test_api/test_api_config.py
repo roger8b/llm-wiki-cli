@@ -112,3 +112,61 @@ def test_patch_round_trips_agent_core(client) -> None:
     again = client.get("/api/config").json()
     assert again["agent_core"] == "minimal"
     assert again["minimal_max_turns"] == 60
+
+
+# --- output cap (#370) -------------------------------------------------------
+
+
+def test_get_config_exposes_output_cap(client) -> None:
+    body = client.get("/api/config").json()
+    assert {"max_output_tokens", "max_output_tokens_by_op"} <= body.keys()
+    # H5 (#351) shipped opt-in: no cap by default.
+    assert body["max_output_tokens"] is None
+    assert body["max_output_tokens_by_op"] == {}
+
+
+def test_patch_round_trips_output_cap(client) -> None:
+    r = client.patch(
+        "/api/config",
+        json={"max_output_tokens": 4096, "max_output_tokens_by_op": {"ingest": 2048}},
+    )
+    assert r.status_code == 200
+    again = client.get("/api/config").json()
+    assert again["max_output_tokens"] == 4096
+    assert again["max_output_tokens_by_op"] == {"ingest": 2048}
+
+
+def test_patch_clearing_removes_the_per_op_key(client) -> None:
+    client.patch("/api/config", json={"max_output_tokens_by_op": {"ingest": 2048}})
+    r = client.patch("/api/config", json={"max_output_tokens_by_op": {}})
+    assert r.status_code == 200
+    assert client.get("/api/config").json()["max_output_tokens_by_op"] == {}
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"max_output_tokens": 0},
+        {"max_output_tokens": -1},
+        {"max_output_tokens_by_op": {"ingest": 0}},
+        {"max_output_tokens_by_op": {"ingest": -5}},
+    ],
+)
+def test_patch_rejects_non_positive_cap(client, patch) -> None:
+    r = client.patch("/api/config", json=patch)
+    assert r.status_code == 400
+    # nothing persisted
+    body = client.get("/api/config").json()
+    assert body["max_output_tokens"] is None
+    assert body["max_output_tokens_by_op"] == {}
+
+
+def test_legacy_zero_cap_in_the_file_still_loads(brain: BrainPaths, isolated_wiki_home) -> None:
+    """Configs written before #370 kept ``0`` meaning "no cap" — they must load."""
+    import yaml
+
+    from llmwiki.core.config import load_config
+
+    cfg_file = isolated_wiki_home / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump({"max_output_tokens": 0}), encoding="utf-8")
+    assert load_config(brain).max_output_tokens == 0

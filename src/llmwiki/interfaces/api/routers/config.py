@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 
 from ..deps import get_config, get_paths
 
@@ -40,6 +40,10 @@ def _config_payload() -> dict[str, Any]:
         # "minimal" wins on long sources and loses on short ones (ADR 002).
         "agent_core": cfg.agent_core,
         "minimal_max_turns": cfg.minimal_max_turns,
+        # Output cap (#351, epic #348). Default is no cap; the per-op map wins
+        # over the global one, with "outline" inheriting "ingest" (ADR 002).
+        "max_output_tokens": cfg.max_output_tokens,
+        "max_output_tokens_by_op": cfg.max_output_tokens_by_op,
     }
 
 
@@ -52,9 +56,18 @@ def get_config_endpoint() -> dict[str, Any]:
 @router.patch("")
 def patch_config_endpoint(patch: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
     """Update configuration (partial update)."""
+    from pydantic import ValidationError
+
     from ....core.config import update_config
 
-    update_config(patch)
+    try:
+        update_config(patch)
+    except ValidationError as exc:
+        # A rejected value must not reach the file, or the next GET would blow
+        # up loading it (#370).
+        raise HTTPException(status_code=400, detail=exc.errors(include_url=False)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     return _config_payload()
 
 
