@@ -178,3 +178,19 @@ def test_patch_rejects_coercible_non_positive_cap(client, value) -> None:
     r = client.patch("/api/config", json={"max_output_tokens": value})
     assert r.status_code == 400
     assert client.get("/api/config").json()["max_output_tokens"] is None
+
+
+# --- query expansion (#371) --------------------------------------------------
+
+
+def test_get_config_exposes_query_expansion(client) -> None:
+    body = client.get("/api/config").json()
+    assert "search_query_expansion" in body
+    # H7 (#355) shipped opt-in: 0 = byte-identical search.
+    assert body["search_query_expansion"] == 0
+
+
+def test_patch_round_trips_query_expansion(client) -> None:
+    r = client.patch("/api/config", json={"search_query_expansion": 3})
+    assert r.status_code == 200
+    assert client.get("/api/config").json()["search_query_expansion"] == 3
