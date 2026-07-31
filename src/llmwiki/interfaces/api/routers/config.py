@@ -44,6 +44,9 @@ def _config_payload() -> dict[str, Any]:
         # over the global one, with "outline" inheriting "ingest" (ADR 002).
         "max_output_tokens": cfg.max_output_tokens,
         "max_output_tokens_by_op": cfg.max_output_tokens_by_op,
+        # Multi-query expansion (#355, epic #348). Default 0 = byte-identical
+        # search; N variants buy recall on vague queries with latency (ADR 002).
+        "search_query_expansion": cfg.search_query_expansion,
     }
 
 

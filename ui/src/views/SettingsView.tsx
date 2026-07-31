@@ -97,6 +97,25 @@ export function normalizeAgentCore(value: string | undefined | null): AgentCore 
   return value === "minimal" ? "minimal" : "deepagents"
 }
 
+const EXPANSION_LEVELS: { value: number; label: string; desc: string }[] = [
+  { value: 0, label: "0 — off (default)", desc: "Search runs on the query as typed. 146ms p50." },
+  {
+    value: 2,
+    label: "2 variants",
+    desc: "Two LLM reformulations fused into the ranking. Vague queries 0.611 → 0.667 recall@5.",
+  },
+  {
+    value: 3,
+    label: "3 variants",
+    desc: "Best measured recall: vague queries 0.611 → 0.778, aggregate 0.872 → 0.910. Costs latency — 583ms p50 with a warm cache, ~1.6s on the first run of a query.",
+  },
+]
+
+/** Off for anything not on the measured levels — the backend treats <= 0 as off. */
+export function normalizeExpansion(value: number | undefined | null): number {
+  return EXPANSION_LEVELS.some((l) => l.value === value) ? (value as number) : 0
+}
+
 /** Operations that accept a per-op cap. "outline" inherits "ingest" (factory.py). */
 const CAP_OPS = ["ingest", "ask", "maintain"] as const
 
@@ -225,6 +244,9 @@ export function SettingsView() {
   const [maxOutputTokens, setMaxOutputTokens] = useState("")
   const [capsByOp, setCapsByOp] = useState<Record<string, string>>({})
 
+  // ── query expansion (#371, epic #348) ──
+  const [queryExpansion, setQueryExpansion] = useState(0)
+
   // ── reference data ──
   const [providers, setProviders] = useState<ProvidersMap | null>(null)
   const [ollama, setOllama] = useState<OllamaStatus | null>(null)
@@ -274,6 +296,7 @@ export function SettingsView() {
     minimalMaxTurns: number
     maxOutputTokens: string
     capsByOp: Record<string, string>
+    queryExpansion: number
   }) {
     return JSON.stringify(s)
   }
@@ -301,6 +324,7 @@ export function SettingsView() {
       minimalMaxTurns,
       maxOutputTokens,
       capsByOp,
+      queryExpansion,
     })
   }
 
@@ -344,6 +368,7 @@ export function SettingsView() {
         const ac = normalizeAgentCore(cfg.agent_core)
         const mmt = cfg.minimal_max_turns ?? 40
         const mot = cfg.max_output_tokens ? String(cfg.max_output_tokens) : ""
+        const qe = normalizeExpansion(cfg.search_query_expansion)
         const cbo = Object.fromEntries(
           Object.entries(cfg.max_output_tokens_by_op ?? {}).map(([k, v]) => [k, String(v)]),
         )
@@ -362,6 +387,7 @@ export function SettingsView() {
         setMinimalMaxTurns(mmt)
         setMaxOutputTokens(mot)
         setCapsByOp(cbo)
+        setQueryExpansion(qe)
         setSnapshot(
           snap({
             provider: p,
@@ -386,6 +412,7 @@ export function SettingsView() {
             minimalMaxTurns: mmt,
             maxOutputTokens: mot,
             capsByOp: cbo,
+            queryExpansion: qe,
           }),
         )
       } finally {
@@ -462,6 +489,7 @@ export function SettingsView() {
         minimal_max_turns: minimalMaxTurns,
         max_output_tokens: globalCap.values["Global cap"] ?? null,
         max_output_tokens_by_op: opCaps.values,
+        search_query_expansion: queryExpansion,
       })
       // refresh providers (base_url/model may have changed)
       setProviders(await api.getProviders().catch(() => providers))
@@ -500,6 +528,7 @@ export function SettingsView() {
       setMinimalMaxTurns(s.minimalMaxTurns)
       setMaxOutputTokens(s.maxOutputTokens)
       setCapsByOp(s.capsByOp)
+      setQueryExpansion(s.queryExpansion)
       setTest(null)
     } catch {
       /* snapshot malformed — nothing to restore */
@@ -813,6 +842,23 @@ export function SettingsView() {
                         placeholder="ollama:nomic-embed-text"
                         className="w-[240px] font-mono text-[12px]"
                       />
+                    </Row>
+                    <Row
+                      name="Query expansion"
+                      desc={EXPANSION_LEVELS.find((l) => l.value === queryExpansion)!.desc}
+                    >
+                      <select
+                        aria-label="Query expansion"
+                        value={queryExpansion}
+                        onChange={(e) => setQueryExpansion(normalizeExpansion(Number(e.target.value)))}
+                        className="w-[180px] rounded-md border bg-background px-3 py-2 font-mono text-[13px]"
+                      >
+                        {EXPANSION_LEVELS.map((l) => (
+                          <option key={l.value} value={l.value}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
                     </Row>
                   </Section>
                   <Section title="Ask" desc="How questions are answered from the wiki">

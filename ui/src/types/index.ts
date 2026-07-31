@@ -188,6 +188,8 @@ export interface WorkspaceConfig {
   // Output cap (#351, epic #348) — opt-in, no cap by default.
   max_output_tokens?: number | null
   max_output_tokens_by_op?: Record<string, number>
+  // Multi-query expansion (#355, epic #348) — opt-in, 0 = off.
+  search_query_expansion?: number
 }
 
 /** `deepagents` = framework loop (default); `minimal` = native tool-calling loop. */
